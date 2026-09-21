@@ -435,9 +435,6 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 	_mtp = std::make_unique<MTP::Instance>(
 		MTP::Instance::Mode::Normal,
 		std::move(fields));
-	if (_isMtsLink) {
-		_mtp->setSuppressed(true);
-	}
 
 	const auto writingKeys = _mtp->lifetime().make_state<bool>(false);
 	_mtp->writeKeysRequests(
@@ -661,9 +658,6 @@ void Account::resetAuthorizationKeys() {
 
 void Account::setMtsLinkMode(bool enabled) {
 	_isMtsLink = enabled;
-	if (_mtp) {
-		_mtp->setSuppressed(enabled);
-	}
 }
 
 bool Account::isMtsLink() const {
