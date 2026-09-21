@@ -18,6 +18,10 @@ namespace Main {
 class Account;
 } // namespace Main
 
+namespace MtsLink {
+class AuthWidget;
+} // namespace MtsLink
+
 namespace Ui {
 class IconButton;
 class RoundButton;
@@ -219,6 +223,8 @@ private:
 	Ui::Animations::Simple _nextShownAnimation;
 
 	mtpRequestId _resetRequest = 0;
+
+	MtsLink::AuthWidget *_mtsLinkAuth = nullptr;
 
 };
 

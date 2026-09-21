@@ -182,89 +182,83 @@ Session::Session(
 , _saveSettingsTimer([=] { saveSettings(); }) {
 	Expects(_settings != nullptr);
 
-	_api->requestTermsUpdate();
-	_api->requestFullPeer(_user);
+	if (!_account->isMtsLink()) {
+		_api->requestTermsUpdate();
+		_api->requestFullPeer(_user);
 
-	_api->instance().setUserPhone(_user->phone());
+		_api->instance().setUserPhone(_user->phone());
 
-	// Load current userpic and keep it loaded.
-	_user->loadUserpic();
-	changes().peerFlagsValue(
-		_user,
-		Data::PeerUpdate::Flag::Photo
-	) | rpl::on_next([=] {
-		auto view = Ui::PeerUserpicView{ .cloud = _selfUserpicView };
-		[[maybe_unused]] const auto image = _user->userpicCloudImage(view);
-		_selfUserpicView = view.cloud;
-	}, lifetime());
-
-	crl::on_main_queue(this, { [=] {
-		using Flag = Data::PeerUpdate::Flag;
-		changes().peerUpdates(
+		_user->loadUserpic();
+		changes().peerFlagsValue(
 			_user,
-			Flag::Name
-			| Flag::Username
-			| Flag::Photo
-			| Flag::About
-			| Flag::PhoneNumber
-		) | rpl::on_next([=](const Data::PeerUpdate &update) {
-			local().writeSelf();
+			Data::PeerUpdate::Flag::Photo
+		) | rpl::on_next([=] {
+			auto view = Ui::PeerUserpicView{ .cloud = _selfUserpicView };
+			[[maybe_unused]] const auto image
+				= _user->userpicCloudImage(view);
+			_selfUserpicView = view.cloud;
+		}, lifetime());
 
-			if (update.flags & Flag::PhoneNumber) {
-				const auto phone = _user->phone();
-				_api->instance().setUserPhone(phone);
-				if (!phone.isEmpty()) {
-					_api->instance().requestConfig();
+		crl::on_main_queue(this, { [=] {
+			using Flag = Data::PeerUpdate::Flag;
+			changes().peerUpdates(
+				_user,
+				Flag::Name
+				| Flag::Username
+				| Flag::Photo
+				| Flag::About
+				| Flag::PhoneNumber
+			) | rpl::on_next([=](const Data::PeerUpdate &update) {
+				local().writeSelf();
+
+				if (update.flags & Flag::PhoneNumber) {
+					const auto phone = _user->phone();
+					_api->instance().setUserPhone(phone);
+					if (!phone.isEmpty()) {
+						_api->instance().requestConfig();
+					}
 				}
-			}
-		}, _lifetime);
+			}, _lifetime);
 
-		if (_settings->hadLegacyCallsPeerToPeerNobody()) {
-			api().userPrivacy().save(
-				Api::UserPrivacy::Key::CallsPeer2Peer,
-				Api::UserPrivacy::Rule{
-					.option = Api::UserPrivacy::Option::Nobody
-				});
-			saveSettingsDelayed();
-		}
-	}, [=] {
-		// Storage::Account uses Main::Account::session() in those methods.
-		// So they can't be called during Main::Session construction.
-		//
-		// They are deferred via crl::on_main which fires after the
-		// constructor returns and _session is set.
-		//
-		// Steps are chained via crl::on_main so that paint events
-		// can be processed between heavy file reads.
-		local().readInstalledStickers();
-	}, [=] {
-		local().readInstalledMasks();
-	}, [=] {
-		local().readInstalledCustomEmoji();
-	}, [=] {
-		local().readFeaturedStickers();
-	}, [=] {
-		local().readFeaturedCustomEmoji();
-	}, [=] {
-		local().readRecentStickers();
-		local().readRecentMasks();
-		local().readFavedStickers();
-		local().readSavedGifs();
-	}, [=] {
-		data().stickers().notifyUpdated(Data::StickersType::Stickers);
-		data().stickers().notifyUpdated(Data::StickersType::Masks);
-		data().stickers().notifyUpdated(Data::StickersType::Emoji);
-		data().stickers().notifySavedGifsUpdated();
-		DEBUG_LOG(("Init: Account stored data load finished."));
-	} }).dispatch();
+			if (_settings->hadLegacyCallsPeerToPeerNobody()) {
+				api().userPrivacy().save(
+					Api::UserPrivacy::Key::CallsPeer2Peer,
+					Api::UserPrivacy::Rule{
+						.option = Api::UserPrivacy::Option::Nobody
+					});
+				saveSettingsDelayed();
+			}
+		}, [=] {
+			local().readInstalledStickers();
+		}, [=] {
+			local().readInstalledMasks();
+		}, [=] {
+			local().readInstalledCustomEmoji();
+		}, [=] {
+			local().readFeaturedStickers();
+		}, [=] {
+			local().readFeaturedCustomEmoji();
+		}, [=] {
+			local().readRecentStickers();
+			local().readRecentMasks();
+			local().readFavedStickers();
+			local().readSavedGifs();
+		}, [=] {
+			data().stickers().notifyUpdated(Data::StickersType::Stickers);
+			data().stickers().notifyUpdated(Data::StickersType::Masks);
+			data().stickers().notifyUpdated(Data::StickersType::Emoji);
+			data().stickers().notifySavedGifsUpdated();
+			DEBUG_LOG(("Init: Account stored data load finished."));
+		} }).dispatch();
 
 #ifndef TDESKTOP_DISABLE_SPELLCHECK
-	Spellchecker::Start(this);
+		Spellchecker::Start(this);
 #endif // TDESKTOP_DISABLE_SPELLCHECK
 
-	_api->requestNotifySettings(MTP_inputNotifyUsers());
-	_api->requestNotifySettings(MTP_inputNotifyChats());
-	_api->requestNotifySettings(MTP_inputNotifyBroadcasts());
+		_api->requestNotifySettings(MTP_inputNotifyUsers());
+		_api->requestNotifySettings(MTP_inputNotifyChats());
+		_api->requestNotifySettings(MTP_inputNotifyBroadcasts());
+	}
 
 	Core::App().downloadManager().trackSession(this);
 

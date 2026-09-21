@@ -1450,6 +1450,31 @@ PRIVATE
     layout/layout_document_generic_preview.h
     layout/layout_item_base.cpp
     layout/layout_item_base.h
+    mtslink/api/api_auth.cpp
+    mtslink/api/api_auth.h
+    mtslink/api/api_channels.cpp
+    mtslink/api/api_channels.h
+    mtslink/api/api_files.cpp
+    mtslink/api/api_files.h
+    mtslink/api/api_messages.cpp
+    mtslink/api/api_messages.h
+    mtslink/api/api_sending.cpp
+    mtslink/api/api_sending.h
+    mtslink/api/api_typing.cpp
+    mtslink/api/api_typing.h
+    mtslink/api/api_users.cpp
+    mtslink/api/api_users.h
+    mtslink/auth_widget.cpp
+    mtslink/auth_widget.h
+    mtslink/connection.cpp
+    mtslink/connection.h
+    mtslink/data_adapters.cpp
+    mtslink/data_adapters.h
+    mtslink/rpc.cpp
+    mtslink/rpc.h
+    mtslink/session.cpp
+    mtslink/session.h
+    mtslink/types.h
     main/main_account.cpp
     main/main_account.h
     main/main_app_config.cpp
@@ -2393,7 +2418,7 @@ else()
         set(bundle_identifier "com.tdesktop.Telegram")
     endif()
     set(bundle_entitlements "Telegram.entitlements")
-    set(output_name "Telegram")
+    set(output_name "TeleLink")
 endif()
 
 if (CMAKE_GENERATOR STREQUAL Xcode)
@@ -2432,14 +2457,14 @@ target_compile_definitions(Telegram
 PRIVATE
     TDESKTOP_API_ID=${TDESKTOP_API_ID}
     TDESKTOP_API_HASH=${TDESKTOP_API_HASH}
-    G_LOG_DOMAIN="Telegram"
+    G_LOG_DOMAIN="TeleLink"
 )
 
 get_property(is_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 if (APPLE
     OR is_multi_config
     OR NOT CMAKE_EXECUTABLE_SUFFIX STREQUAL ""
-    OR NOT "${output_name}" STREQUAL "Telegram")
+    OR NOT "${output_name}" STREQUAL "TeleLink")
     set(output_folder ${CMAKE_BINARY_DIR})
 else()
     set(output_folder ${CMAKE_BINARY_DIR}/bin)

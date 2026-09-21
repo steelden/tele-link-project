@@ -27,6 +27,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_domain.h"
 #include "main/main_session_settings.h"
+#include "mtslink/session.h"
+#include "mtslink/data_adapters.h"
 
 namespace Main {
 namespace {
@@ -433,6 +435,9 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 	_mtp = std::make_unique<MTP::Instance>(
 		MTP::Instance::Mode::Normal,
 		std::move(fields));
+	if (_isMtsLink) {
+		_mtp->setSuppressed(true);
+	}
 
 	const auto writingKeys = _mtp->lifetime().make_state<bool>(false);
 	_mtp->writeKeysRequests(
@@ -466,6 +471,9 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 		checkForUpdates(message) || checkForNewSession(message);
 	});
 	_mtp->setGlobalFailHandler([=](const MTP::Error &, const MTP::Response &) {
+		if (_isMtsLink) {
+			return;
+		}
 		if (const auto session = maybeSession()) {
 			crl::on_main(session, [=] { logOut(); });
 		}
@@ -488,6 +496,14 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 		destroyMtpKeys(base::take(_mtpKeysToDestroy));
 	}
 
+	const auto mtsLinkData = local().readMtsLinkData();
+	if (!mtsLinkData.token.isEmpty()) {
+		setMtsLinkMode(true);
+		if (!_sessionUserId && mtsLinkData.userId) {
+			_sessionUserId = UserId(mtsLinkData.userId);
+		}
+	}
+
 	if (_sessionUserId) {
 		createSession(
 			_sessionUserId,
@@ -502,6 +518,10 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 	if (const auto session = maybeSession()) {
 		// Skip all pending self updates so that we won't local().writeSelf.
 		session->changes().sendNotifications();
+	}
+
+	if (!mtsLinkData.token.isEmpty() && maybeSession()) {
+		startMtsLinkSession(mtsLinkData.token);
 	}
 
 	_mtpValue = _mtp.get();
@@ -637,6 +657,39 @@ void Account::resetAuthorizationKeys() {
 		startMtp(std::move(config));
 	}
 	local().writeMtpData();
+}
+
+void Account::setMtsLinkMode(bool enabled) {
+	_isMtsLink = enabled;
+	if (_mtp) {
+		_mtp->setSuppressed(enabled);
+	}
+}
+
+bool Account::isMtsLink() const {
+	return _isMtsLink;
+}
+
+void Account::startMtsLinkSession(const QString &token) {
+	LOG(("MtsLink: creating MtsLink::Session..."));
+	_mtsLinkSession = std::make_unique<MtsLink::Session>();
+	LOG(("MtsLink: calling session->start()..."));
+	_mtsLinkSession->start(token);
+	LOG(("MtsLink: session started, connecting to Main::Session..."));
+
+	const auto userId = sessionExists() ? session().userId().bare : 0;
+	local().writeMtsLinkToken(token, userId);
+
+	if (const auto s = maybeSession()) {
+		MtsLink::connectToSession(s, _mtsLinkSession.get());
+		LOG(("MtsLink: connectToSession done"));
+	} else {
+		LOG(("MtsLink: no Main::Session available!"));
+	}
+}
+
+MtsLink::Session *Account::mtsLinkSession() const {
+	return _mtsLinkSession.get();
 }
 
 } // namespace Main

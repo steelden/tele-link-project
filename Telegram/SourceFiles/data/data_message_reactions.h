@@ -142,7 +142,10 @@ public:
 
 	void preloadAnimationsFor(const ReactionId &emoji);
 
-	void send(not_null<HistoryItem*> item, bool addToRecent);
+	void send(
+		not_null<HistoryItem*> item,
+		bool addToRecent,
+		const ReactionId &removedReaction = {});
 	[[nodiscard]] bool sending(not_null<HistoryItem*> item) const;
 
 	void poll(not_null<HistoryItem*> item, crl::time now);

@@ -24,6 +24,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "lottie/lottie_icon.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
+#include "mtslink/data_adapters.h"
 #include "settings/sections/settings_main.h"
 #include "settings/sections/settings_premium.h"
 #include "settings/settings_builder.h"
@@ -719,55 +721,73 @@ not_null<Ui::VerticalLayout*> SetupFoldersList(
 				}
 			}
 		}
-		crl::on_main(session, [
-			session,
-			next,
-			updated,
-			order = std::move(order),
-			updates = std::move(updates),
-			addRequests = std::move(addRequests),
-			removeRequests = std::move(removeRequests),
-			removeChatlistRequests = std::move(removeChatlistRequests)
-		] {
-			const auto api = &session->api();
-			const auto filters = &session->data().chatsFilters();
-			const auto ids = std::make_shared<
-				base::flat_set<mtpRequestId>
-			>();
-			const auto checkFinished = [=] {
-				if (ids->empty() && next) {
+		if (session->account().mtsLinkSession()) {
+			crl::on_main(session, [
+				session,
+				next,
+				updated,
+				updates = std::move(updates)
+			] {
+				const auto filters = &session->data().chatsFilters();
+				for (const auto &update : updates) {
+					filters->apply(update);
+				}
+				if (next) {
 					Assert(updated.id() != 0);
 					next(updated);
 				}
-			};
-			for (const auto &update : updates) {
-				filters->apply(update);
-			}
-			auto previousId = mtpRequestId(0);
-			const auto sendRequests = [&](const auto &requests) {
-				for (auto &request : requests) {
-					previousId = api->request(
-						std::move(request)
-					).done([=](const auto &result, mtpRequestId id) {
-						if constexpr (std::is_same_v<
-								std::decay_t<decltype(result)>,
-								MTPUpdates>) {
-							session->api().applyUpdates(result);
-						}
-						ids->remove(id);
-						checkFinished();
-					}).afterRequest(previousId).send();
-					ids->emplace(previousId);
+			});
+		} else {
+			crl::on_main(session, [
+				session,
+				next,
+				updated,
+				order = std::move(order),
+				updates = std::move(updates),
+				addRequests = std::move(addRequests),
+				removeRequests = std::move(removeRequests),
+				removeChatlistRequests = std::move(removeChatlistRequests)
+			] {
+				const auto api = &session->api();
+				const auto filters = &session->data().chatsFilters();
+				const auto ids = std::make_shared<
+					base::flat_set<mtpRequestId>
+				>();
+				const auto checkFinished = [=] {
+					if (ids->empty() && next) {
+						Assert(updated.id() != 0);
+						next(updated);
+					}
+				};
+				for (const auto &update : updates) {
+					filters->apply(update);
 				}
-			};
-			sendRequests(removeRequests);
-			sendRequests(removeChatlistRequests);
-			sendRequests(addRequests);
-			if (!order.empty() && !addRequests.empty()) {
-				filters->saveOrder(order, previousId);
-			}
-			checkFinished();
-		});
+				auto previousId = mtpRequestId(0);
+				const auto sendRequests = [&](const auto &requests) {
+					for (auto &request : requests) {
+						previousId = api->request(
+							std::move(request)
+						).done([=](const auto &result, mtpRequestId id) {
+							if constexpr (std::is_same_v<
+									std::decay_t<decltype(result)>,
+									MTPUpdates>) {
+								session->api().applyUpdates(result);
+							}
+							ids->remove(id);
+							checkFinished();
+						}).afterRequest(previousId).send();
+						ids->emplace(previousId);
+					}
+				};
+				sendRequests(removeRequests);
+				sendRequests(removeChatlistRequests);
+				sendRequests(addRequests);
+				if (!order.empty() && !addRequests.empty()) {
+					filters->saveOrder(order, previousId);
+				}
+				checkFinished();
+			});
+		}
 	};
 
 	return wrap;
@@ -1234,7 +1254,9 @@ rpl::producer<QString> Folders::title() {
 }
 
 void Folders::setupContent() {
-	controller()->session().data().chatsFilters().requestSuggested();
+	if (!controller()->session().account().mtsLinkSession()) {
+		controller()->session().data().chatsFilters().requestSuggested();
+	}
 
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
 	const auto state = _state;

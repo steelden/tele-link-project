@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "apiwrap.h"
 
+#include "main/main_account.h"
+#include "mtslink/data_adapters.h"
+#include "mtslink/session.h"
 #include "api/api_authorizations.h"
 #include "api/api_attached_stickers.h"
 #include "api/api_blocked_peers.h"
@@ -912,6 +915,9 @@ void ApiWrap::requestContacts() {
 }
 
 void ApiWrap::requestDialogs(Data::Folder *folder) {
+	if (_session->account().mtsLinkSession()) {
+		return;
+	}
 	if (folder && !_foldersLoadState.contains(folder)) {
 		_foldersLoadState.emplace(folder, DialogsLoadState());
 	}
@@ -3654,6 +3660,18 @@ void ApiWrap::requestSharedMedia(
 		SharedMediaType type,
 		MsgId messageId,
 		SliceType slice) {
+	if (MtsLink::isMtsLinkPeer(peer->id)) {
+		if (type == SharedMediaType::Pinned) {
+			const auto mts = _session->account().mtsLinkSession();
+			if (mts) {
+				const auto chatId = MtsLink::peerIdToChatId(peer->id);
+				if (!chatId.isEmpty()) {
+					mts->messages()->loadPinned(chatId);
+				}
+			}
+		}
+		return;
+	}
 	const auto key = SharedMediaRequest{
 		peer,
 		topicRootId,
@@ -4691,6 +4709,63 @@ void ApiWrap::sendMessage(
 	const auto history = message.action.history;
 	const auto peer = history->peer;
 	const auto &textWithTags = message.textWithTags;
+
+	if (MtsLink::isMtsLinkPeer(peer->id)) {
+		const auto mts = _session->account().mtsLinkSession();
+		if (!mts) {
+			return;
+		}
+		const auto chatId = MtsLink::peerIdToChatId(peer->id);
+		if (chatId.isEmpty()) {
+			return;
+		}
+		auto content = MtsLink::convertMentionsForSending(
+			textWithTags, _session);
+		content.text = content.text.trimmed();
+		if (content.text.isEmpty()) {
+			return;
+		}
+		auto replyMtsId = QString();
+		if (message.action.replyTo.messageId) {
+			replyMtsId = MtsLink::msgIdToMtsLinkId(
+				message.action.replyTo.messageId.peer,
+				message.action.replyTo.messageId.msg);
+		}
+		auto parentMtsId = QString();
+		if (message.action.replyTo.topicRootId) {
+			parentMtsId = MtsLink::msgIdToMtsLinkId(
+				peer->id,
+				message.action.replyTo.topicRootId);
+		}
+		const auto tempId = QUuid::createUuid().toString(
+			QUuid::WithoutBraces);
+		{
+			MtsLink::Api::MessageData msg;
+			msg.id = tempId;
+			msg.chatId = chatId;
+			msg.authorId = mts->userId();
+			msg.text = content.text;
+			msg.createdAt = QDateTime::currentMSecsSinceEpoch();
+			if (!replyMtsId.isEmpty()) {
+				msg.repliedMessageId = replyMtsId;
+			}
+			MtsLink::addMessage(_session, msg);
+		}
+		const auto tempMsgId = MsgId(
+			MtsLink::uuidToBareId(tempId) & 0x7FFFFFFFLL);
+		MtsLink::setPendingTempMessage(peer->id, tempMsgId);
+
+		mts->sending()->sendMessage(
+			chatId,
+			content.text,
+			content.blocks,
+			content.mentionsMeta,
+			replyMtsId,
+			QStringList(),
+			parentMtsId);
+		sendAction(message.action);
+		return;
+	}
 
 	auto action = message.action;
 	action.generateLocal = true;

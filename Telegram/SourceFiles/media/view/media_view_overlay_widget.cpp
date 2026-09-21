@@ -124,6 +124,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/mac/touchbar/mac_touchbar_media_view.h"
 #endif // Q_OS_MAC
 
+#ifdef Q_OS_WIN
+#include <dwmapi.h>
+#endif // Q_OS_WIN
+
 #include <QtWidgets/QApplication>
 #include <QtCore/QBuffer>
 #include <QtGui/QGuiApplication>
@@ -692,6 +696,7 @@ OverlayWidget::OverlayWidget()
 	_layerBg->setStyleOverrides(&st::groupCallBox, &st::groupCallLayerBox);
 	_layerBg->setHideByBackgroundClick(true);
 
+
 	_recognition.setSources(&_recognitionResult, &_staticContent);
 
 	CrashReports::SetAnnotation("OpenGL Renderer", "[not-initialized]");
@@ -1068,6 +1073,7 @@ void OverlayWidget::setupWindow() {
 
 	_window->setAttribute(Qt::WA_NoSystemBackground, true);
 	_window->setAttribute(Qt::WA_TranslucentBackground, true);
+	_window->setAttribute(Qt::WA_NativeWindow);
 
 	_window->setMinimumSize(
 		{ st::mediaviewMinWidth, st::mediaviewMinHeight });
@@ -4697,6 +4703,7 @@ void OverlayWidget::displayPhoto(
 		_h = size.height();
 	}
 	contentSizeChanged();
+	validatePhotoCurrentImage();
 	refreshFromLabel();
 	displayFinished(activation);
 }
@@ -4965,6 +4972,11 @@ void OverlayWidget::showAndActivate() {
 		_wasWindowedMode = false;
 	}
 	updateGeometry();
+#ifdef Q_OS_WIN
+	const auto hwnd = (HWND)_window->winId();
+	BOOL cloakOn = TRUE;
+	DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, &cloakOn, sizeof(cloakOn));
+#endif // Q_OS_WIN
 	if (_windowed || Platform::IsMac()) {
 		_window->showNormal();
 		_wasWindowedMode = true;
@@ -4973,9 +4985,29 @@ void OverlayWidget::showAndActivate() {
 	} else {
 		_window->showMaximized();
 	}
+	_widget->repaint();
 	_helper->afterShow(_fullscreen);
-	_widget->update();
 	activate();
+#ifdef Q_OS_WIN
+	const auto qwindow = _window->windowHandle();
+	const auto filter = std::make_shared<QObject*>(nullptr);
+	*filter = base::install_event_filter(qwindow, [=](not_null<QEvent*> e) {
+		if (e->type() == QEvent::Expose && qwindow->isExposed()) {
+			InvokeQueued(qwindow, [=] {
+				InvokeQueued(qwindow, [=] {
+					BOOL cloakOff = FALSE;
+					DwmSetWindowAttribute(
+						hwnd,
+						DWMWA_CLOAK,
+						&cloakOff,
+						sizeof(cloakOff));
+				});
+			});
+			delete base::take(*filter);
+		}
+		return base::EventFilterResult::Continue;
+	});
+#endif // Q_OS_WIN
 }
 
 bool OverlayWidget::canInitStreaming() const {

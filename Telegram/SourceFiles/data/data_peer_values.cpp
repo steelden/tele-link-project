@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_app_config.h"
 #include "ui/image/image_prepare.h"
 #include "base/unixtime.h"
+#include "mtslink/data_adapters.h"
 
 namespace Data {
 namespace {
@@ -319,6 +320,9 @@ inline auto DefaultRestrictionValue(
 
 // This is duplicated in PeerData::canPinMessages().
 rpl::producer<bool> CanPinMessagesValue(not_null<PeerData*> peer) {
+	if (MtsLink::isMtsLinkPeer(peer->id)) {
+		return rpl::single(true);
+	}
 	using namespace rpl::mappers;
 	if (const auto user = peer->asUser()) {
 		return PeerFlagsValue(

@@ -14,8 +14,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/widgets/checkbox.h"
+#include "mtslink/data_adapters.h"
+#include "mtslink/session.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
 
@@ -100,6 +103,20 @@ void PinMessageBox(
 
 	auto pinMessage = [=] {
 		if (state->requestId) {
+			return;
+		}
+
+		if (MtsLink::isMtsLinkPeer(peer->id)) {
+			const auto mts = peer->session().account().mtsLinkSession();
+			if (mts) {
+				const auto chatId = MtsLink::peerIdToChatId(peer->id);
+				const auto mtsId = MtsLink::msgIdToMtsLinkId(
+					peer->id, MsgId(msgId));
+				if (!chatId.isEmpty() && !mtsId.isEmpty()) {
+					mts->sending()->pinMessage(chatId, mtsId);
+				}
+			}
+			box->closeBox();
 			return;
 		}
 

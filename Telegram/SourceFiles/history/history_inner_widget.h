@@ -154,6 +154,7 @@ public:
 	void messagesReceived(
 		not_null<PeerData*> peer,
 		const QVector<MTPMessage> &messages);
+	void preparePrependAnchor();
 	void messagesReceivedDown(
 		not_null<PeerData*> peer,
 		const QVector<MTPMessage> &messages);

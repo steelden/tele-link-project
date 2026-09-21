@@ -15,6 +15,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_peer_menu.h"
 #include "window/window_filters_favorite.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
+#include "mtslink/data_adapters.h"
 #include "base/event_filter.h"
 #include "base/options.h"
 #include "core/application.h"
@@ -730,6 +732,10 @@ base::unique_qptr<Ui::SideBarButton> FiltersMenu::prepareButton(
 }
 
 void FiltersMenu::openFiltersSettings() {
+	if (_session->session().account().mtsLinkSession()) {
+		_session->showSettings(Settings::FoldersId());
+		return;
+	}
 	const auto filters = &_session->session().data().chatsFilters();
 	if (filters->suggestedLoaded()) {
 		_session->showSettings(Settings::FoldersId());

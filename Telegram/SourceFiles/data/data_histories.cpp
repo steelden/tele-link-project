@@ -33,6 +33,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_element.h"
 #include "core/application.h"
 #include "apiwrap.h"
+#include "main/main_account.h"
+#include "mtslink/data_adapters.h"
+#include "mtslink/session.h"
 
 namespace Data {
 namespace {
@@ -416,6 +419,20 @@ void Histories::sendDialogRequests() {
 	if (_dialogRequestsPending.empty()) {
 		return;
 	}
+	for (auto it = _dialogRequestsPending.begin();
+			it != _dialogRequestsPending.end();) {
+		if (MtsLink::isMtsLinkPeer(it->first->peer->id)) {
+			for (auto &cb : it->second) {
+				if (cb) cb();
+			}
+			it = _dialogRequestsPending.erase(it);
+		} else {
+			++it;
+		}
+	}
+	if (_dialogRequestsPending.empty()) {
+		return;
+	}
 	const auto histories = ranges::views::all(
 		_dialogRequestsPending
 	) | ranges::views::transform([](const auto &pair) {
@@ -518,6 +535,9 @@ void Histories::changeDialogUnreadMark(
 		bool unread) {
 	history->setUnreadMark(unread);
 
+	if (MtsLink::isMtsLinkPeer(history->peer->id)) {
+		return;
+	}
 	using Flag = MTPmessages_MarkDialogUnread::Flag;
 	session().api().request(MTPmessages_MarkDialogUnread(
 		MTP_flags(unread ? Flag::f_unread : Flag(0)),
@@ -547,6 +567,9 @@ void Histories::changeSublistUnreadMark(
 void Histories::requestFakeChatListMessage(
 		not_null<History*> history) {
 	if (_fakeChatListRequests.contains(history)) {
+		return;
+	}
+	if (MtsLink::isMtsLinkPeer(history->peer->id)) {
 		return;
 	}
 
@@ -647,6 +670,10 @@ void Histories::reportPendingDeliveries() {
 	auto &pending = _pendingDeliveryReport;
 	for (auto i = begin(pending); i != end(pending);) {
 		auto &[peer, ids] = *i;
+		if (MtsLink::isMtsLinkPeer(peer->id)) {
+			i = pending.erase(i);
+			continue;
+		}
 		auto list = QVector<MTPint>();
 		if (_deliveryReportSent.contains(peer)) {
 			++i;
@@ -718,8 +745,22 @@ void Histories::sendReadRequest(not_null<History*> history, State &state) {
 	const auto tillId = state.sentReadTill = base::take(state.willReadTill);
 	state.willReadWhen = 0;
 	state.sentReadDone = false;
-	DEBUG_LOG(("Reading: sending request now with till %1."
-		).arg(tillId.bare));
+
+	if (MtsLink::isMtsLinkPeer(history->peer->id)) {
+		const auto mts = session().account().mtsLinkSession();
+		if (mts) {
+			const auto chatId = MtsLink::peerIdToChatId(history->peer->id);
+			const auto mtsId = MtsLink::msgIdToMtsLinkId(
+				history->peer->id, tillId);
+			if (!chatId.isEmpty() && !mtsId.isEmpty()) {
+				mts->sending()->readMessage(chatId, mtsId);
+			}
+		}
+		state.sentReadDone = true;
+		state.sentReadTill = 0;
+		return;
+	}
+
 	sendRequest(history, RequestType::ReadInbox, [=](Fn<void()> finish) {
 		DEBUG_LOG(("Reading: sending request invoked with till %1."
 			).arg(tillId.bare));
@@ -792,6 +833,22 @@ void Histories::deleteMessages(
 		not_null<History*> history,
 		const QVector<MTPint> &ids,
 		bool revoke) {
+	if (MtsLink::isMtsLinkPeer(history->peer->id)) {
+		const auto mts = session().account().mtsLinkSession();
+		if (!mts) {
+			return;
+		}
+		const auto chatId = MtsLink::peerIdToChatId(history->peer->id);
+		for (const auto &mtpId : ids) {
+			const auto msgId = MsgId(mtpId.v);
+			const auto mtsId = MtsLink::msgIdToMtsLinkId(
+				history->peer->id, msgId);
+			if (!mtsId.isEmpty()) {
+				mts->sending()->deleteMessage(chatId, mtsId);
+			}
+		}
+		return;
+	}
 	sendRequest(history, RequestType::Delete, [=](Fn<void()> finish) {
 		const auto done = [=](const MTPmessages_AffectedMessages &result) {
 			session().api().applyAffectedMessages(history->peer, result);
@@ -818,6 +875,12 @@ void Histories::deleteAllMessages(
 		MsgId deleteTillId,
 		bool justClear,
 		bool revoke) {
+	if (MtsLink::isMtsLinkPeer(history->peer->id)) {
+		if (justClear) {
+			history->clear(History::ClearType::ClearHistory);
+		}
+		return;
+	}
 	sendRequest(history, RequestType::Delete, [=](Fn<void()> finish) {
 		const auto peer = history->peer;
 		const auto chat = peer->asChat();
@@ -913,6 +976,9 @@ void Histories::deleteMessagesByDates(
 	TimeId minDate,
 	TimeId maxDate,
 	bool revoke) {
+	if (MtsLink::isMtsLinkPeer(history->peer->id)) {
+		return;
+	}
 	sendRequest(history, RequestType::Delete, [=](Fn<void()> finish) {
 		const auto peer = history->peer;
 		using Flag = MTPmessages_DeleteHistory::Flag;

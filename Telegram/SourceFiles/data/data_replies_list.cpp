@@ -22,6 +22,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "lang/lang_keys.h"
 #include "apiwrap.h"
+#include "main/main_account.h"
+#include "mtslink/data_adapters.h"
+#include "mtslink/session.h"
 
 namespace Data {
 namespace {
@@ -531,6 +534,60 @@ void RepliesList::loadAround(MsgId id) {
 	if (_loadingAround && *_loadingAround == id) {
 		return;
 	}
+
+	const auto peerId = _history->peer->id;
+	if (MtsLink::isMtsLinkPeer(peerId)) {
+		_loadingAround = id;
+		const auto chatId = MtsLink::peerIdToChatId(peerId);
+		const auto parentId = MtsLink::msgIdToMtsLinkId(peerId, _rootId);
+		const auto session = &_history->session();
+		auto *mts = session->account().mtsLinkSession();
+		if (!mts) return;
+		auto *msgs = mts->messages();
+		const auto conn = std::make_shared<QMetaObject::Connection>();
+		*conn = QObject::connect(msgs,
+			&MtsLink::Api::Messages::threadMessagesLoaded,
+			[this, conn, id, session, peerId, parentId](
+				const QString &loadedChatId,
+				const QString &loadedParentId,
+				const QList<MtsLink::Api::MessageData> &messages,
+				const QList<MtsLink::Api::MemberProfile> &profiles) {
+			if (loadedParentId != parentId) return;
+			QObject::disconnect(*conn);
+			_loadingAround = std::nullopt;
+
+			for (const auto &p : profiles) {
+				MtsLink::applyUserData(session, p);
+			}
+
+			if (!id) {
+				_skippedAfter = 0;
+			} else {
+				_skippedAfter = std::nullopt;
+			}
+			_skippedBefore = std::nullopt;
+			_list.clear();
+
+			if (messages.isEmpty()) {
+				_fullCount = _skippedBefore = _skippedAfter = 0;
+			} else {
+				for (const auto &msg : messages) {
+					MtsLink::addMessage(session, msg);
+					const auto bareId = MtsLink::uuidToBareId(msg.id);
+					const auto msgId = MsgId(bareId & 0x7FFFFFFFLL);
+					_list.push_back(msgId);
+				}
+				ranges::sort(_list, std::greater<>());
+				_skippedBefore = 0;
+				_skippedAfter = 0;
+				_fullCount = int(_list.size());
+			}
+			_listChanges.fire({});
+		});
+		msgs->loadThread(chatId, parentId);
+		return;
+	}
+
 	histories().cancelRequest(base::take(_beforeId));
 	histories().cancelRequest(base::take(_afterId));
 
@@ -584,6 +641,10 @@ void RepliesList::loadAround(MsgId id) {
 void RepliesList::loadBefore() {
 	Expects(!_list.empty());
 
+	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+		return;
+	}
+
 	if (_loadingAround) {
 		histories().cancelRequest(base::take(_beforeId));
 	} else if (_beforeId) {
@@ -629,6 +690,10 @@ void RepliesList::loadBefore() {
 
 void RepliesList::loadAfter() {
 	Expects(!_list.empty());
+
+	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+		return;
+	}
 
 	if (_afterId) {
 		return;
@@ -922,6 +987,9 @@ std::optional<int> RepliesList::computeUnreadCountLocally(
 }
 
 void RepliesList::requestUnreadCount() {
+	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+		return;
+	}
 	if (_reloadUnreadCountRequestId) {
 		return;
 	}
@@ -999,6 +1067,9 @@ void RepliesList::readTill(
 }
 
 void RepliesList::sendReadTillRequest() {
+	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+		return;
+	}
 	if (_readRequestTimer.isActive()) {
 		_readRequestTimer.cancel();
 	}

@@ -96,6 +96,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_app_config.h"
 #include "settings/sections/settings_premium.h"
 #include "storage/storage_user_photos.h"
+#include "main/main_account.h"
+#include "mtslink/data_adapters.h"
+#include "mtslink/session.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_chat.h"
 #include "styles/style_window.h"
@@ -1674,6 +1677,13 @@ void MainWidget::showHistory(
 		ClearBotStartToken(_history->peer());
 	}
 	_history->showHistory(peerId, showAtMsgId, params);
+	if (peerId && MtsLink::isMtsLinkPeer(peerId)) {
+		const auto chatId = MtsLink::peerIdToChatId(peerId);
+		if (const auto mts = _controller->session().account().mtsLinkSession()) {
+			LOG(("MtsLink: loading messages for chat %1").arg(chatId));
+			mts->messages()->load(chatId);
+		}
+	}
 	if (alreadyThatPeer && params.reapplyLocalDraft) {
 		_history->applyDraft(HistoryWidget::FieldHistoryAction::NewEntry);
 	}

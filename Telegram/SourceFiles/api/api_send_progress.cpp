@@ -8,12 +8,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_send_progress.h"
 
 #include "main/main_session.h"
+#include "main/main_account.h"
 #include "history/history.h"
 #include "data/data_peer.h"
 #include "data/data_user.h"
 #include "base/unixtime.h"
 #include "data/data_peer_values.h"
 #include "apiwrap.h"
+#include "mtslink/data_adapters.h"
+#include "mtslink/session.h"
 
 namespace Api {
 namespace {
@@ -109,6 +112,19 @@ bool SendProgressManager::updated(const Key &key, bool doing) {
 }
 
 void SendProgressManager::send(const Key &key, int progress) {
+	if (MtsLink::isMtsLinkPeer(key.history->peer->id)) {
+		if (key.type == SendProgressType::Typing) {
+			const auto mts = _session->account().mtsLinkSession();
+			if (mts) {
+				const auto chatId = MtsLink::peerIdToChatId(
+					key.history->peer->id);
+				if (!chatId.isEmpty()) {
+					mts->typing()->sendTyping(chatId);
+				}
+			}
+		}
+		return;
+	}
 	if (skipRequest(key)) {
 		return;
 	}

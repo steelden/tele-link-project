@@ -853,6 +853,16 @@ void HistoryInner::messagesReceived(
 	checkAnnounceFirstMessages();
 }
 
+void HistoryInner::preparePrependAnchor() {
+	const auto anchor = _history->scrollTopItem
+		? _history->scrollTopItem
+		: (_migrated ? _migrated->scrollTopItem : nullptr);
+	if (anchor && !_prependAnchorId) {
+		_prependAnchorId = anchor->data()->fullId();
+		_prependAnchorDateHeight = anchor->displayedDateHeight();
+	}
+}
+
 void HistoryInner::messagesReceivedDown(
 		not_null<PeerData*> peer,
 		const QVector<MTPMessage> &messages) {

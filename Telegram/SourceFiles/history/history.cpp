@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history.h"
 
+#include "mtslink/data_adapters.h"
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_item_preview.h"
 #include "history/view/history_view_translate_tracker.h"
@@ -873,7 +874,7 @@ void History::checkForLoadedAtTop(not_null<HistoryItem*> added) {
 			addEdgesToSharedMedia();
 		}
 	} else if (peer->isChannel()) {
-		if (added->id == 1) {
+		if (added->id == 1 && !MtsLink::isMtsLinkPeer(peer->id)) {
 			_loadedAtTop = true;
 			checkLocalMessages();
 			addEdgesToSharedMedia();
@@ -930,6 +931,15 @@ not_null<HistoryItem*> History::addNewLocalMessage(
 	Expects(item->isLocal());
 
 	return addNewItem(item, true);
+}
+
+not_null<HistoryItem*> History::addNewExternalMessage(
+		HistoryItemCommonFields &&fields,
+		const TextWithEntities &text,
+		const MTPMessageMedia &media) {
+	return addNewItem(
+		makeMessage(std::move(fields), text, media),
+		true);
 }
 
 not_null<HistoryItem*> History::addSponsoredMessage(
@@ -1841,6 +1851,7 @@ void History::addEdgesToSharedMedia() {
 
 void History::addOlderSlice(const QVector<MTPMessage> &slice) {
 	if (slice.isEmpty()) {
+		LOG(("MtsLink DEBUG: addOlderSlice empty for peer=%1").arg(peer->id.value));
 		_loadedAtTop = true;
 		checkLocalMessages();
 		return;
@@ -1849,7 +1860,7 @@ void History::addOlderSlice(const QVector<MTPMessage> &slice) {
 	if (const auto added = createItems(slice); !added.empty()) {
 		addCreatedOlderSlice(added);
 	} else {
-		// If no items were added it means we've loaded everything old.
+		LOG(("MtsLink DEBUG: addOlderSlice no items added for peer=%1").arg(peer->id.value));
 		_loadedAtTop = true;
 		addEdgesToSharedMedia();
 	}
@@ -2980,6 +2991,7 @@ void History::markLoadedAtTop() {
 	if (_loadedAtTop) {
 		return;
 	}
+	LOG(("MtsLink DEBUG: markLoadedAtTop for peer=%1").arg(peer->id.value));
 	_loadedAtTop = true;
 	checkLocalMessages();
 	addEdgesToSharedMedia();
@@ -4518,6 +4530,18 @@ void History::cacheTopPromoted(bool promoted) {
 
 bool History::isTopPromoted() const {
 	return (_flags & Flag::IsTopPromoted);
+}
+
+void History::setIsFavorites(bool favorites) {
+	if (favorites) {
+		_flags |= Flag::IsFavorites;
+	} else {
+		_flags &= ~Flag::IsFavorites;
+	}
+}
+
+bool History::isFavorites() const {
+	return (_flags & Flag::IsFavorites);
 }
 
 void History::translateOfferFrom(LanguageId id) {

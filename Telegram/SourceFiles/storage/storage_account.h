@@ -87,6 +87,13 @@ public:
 	void writeMtpData();
 	void writeMtpConfig();
 
+	struct MtsLinkData {
+		QString token;
+		quint64 userId = 0;
+	};
+	void writeMtsLinkToken(const QString &token, quint64 userId);
+	[[nodiscard]] MtsLinkData readMtsLinkData() const;
+
 	void registerDraftSource(
 		not_null<History*> history,
 		Data::DraftKey key,

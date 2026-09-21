@@ -22,7 +22,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "ui/chat/more_chats_bar.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
 #include "main/main_app_config.h"
+#include "mtslink/data_adapters.h"
+#include "lang/lang_keys.h"
 #include "apiwrap.h"
 
 namespace Data {
@@ -350,7 +353,9 @@ bool ChatFilter::contains(
 		} else if (peer->isChat()) {
 			return Flag::Groups;
 		} else if (const auto channel = peer->asChannel()) {
-			if (channel->isBroadcast()) {
+			if (channel->isBroadcast()
+				|| MtsLink::chatTypeForPeer(peer->id)
+					== MtsLink::ChatType::Channel) {
 				return Flag::Channels;
 			} else {
 				return Flag::Groups;
@@ -441,6 +446,49 @@ void ChatFilters::reload() {
 
 void ChatFilters::load(bool force) {
 	if (_loadRequestId && !force) {
+		return;
+	}
+	if (_owner->session().account().mtsLinkSession()) {
+		if (_loaded && !force) {
+			return;
+		}
+		using Flag = ChatFilter::Flag;
+		const auto allTypes = Flag::Contacts
+			| Flag::NonContacts
+			| Flag::Groups
+			| Flag::Channels;
+
+		set(ChatFilter(
+			FilterId(1),
+			{ { tr::lng_filters_name_unread(tr::now) } },
+			QString(),
+			std::nullopt,
+			allTypes | Flag::NoRead,
+			{}, {}, {}));
+		set(ChatFilter(
+			FilterId(2),
+			{ { tr::lng_filters_name_people(tr::now) } },
+			QString(),
+			std::nullopt,
+			Flag::Contacts | Flag::NonContacts,
+			{}, {}, {}));
+		set(ChatFilter(
+			FilterId(3),
+			{ { tr::lng_filters_type_groups(tr::now) } },
+			QString(),
+			std::nullopt,
+			Flag::Groups,
+			{}, {}, {}));
+		set(ChatFilter(
+			FilterId(4),
+			{ { tr::lng_filters_type_channels(tr::now) } },
+			QString(),
+			std::nullopt,
+			Flag::Channels,
+			{}, {}, {}));
+
+		_loaded = true;
+		_listChanged.fire({});
 		return;
 	}
 	auto &api = _owner->session().api();

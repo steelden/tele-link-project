@@ -54,6 +54,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_account.h"
 #include "storage/storage_facade.h"
 #include "storage/storage_shared_media.h"
+#include "mtslink/data_adapters.h"
 
 namespace {
 
@@ -681,6 +682,9 @@ void PeerData::setHasSensitiveContent(bool has) {
 
 // This is duplicated in CanPinMessagesValue().
 bool PeerData::canPinMessages() const {
+	if (MtsLink::isMtsLinkPeer(id)) {
+		return true;
+	}
 	if (const auto user = asUser()) {
 		return !user->amRestricted(ChatRestriction::PinMessages);
 	} else if (const auto chat = asChat()) {
@@ -774,6 +778,9 @@ bool PeerData::canTransferGifts() const {
 }
 
 bool PeerData::canEditMessagesIndefinitely() const {
+	if (MtsLink::isMtsLinkPeer(id)) {
+		return true;
+	}
 	if (const auto user = asUser()) {
 		return user->isSelf();
 	} else if (isChat()) {
