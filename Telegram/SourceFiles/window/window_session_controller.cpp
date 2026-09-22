@@ -1265,6 +1265,7 @@ void SessionNavigation::showRepliesForMessage(
 		if (auto cached = MtsLink::cachedRepliesList(history->peer->id, rootId)) {
 			memento->setReplies(std::move(cached));
 		}
+		MtsLink::fetchThreadLastRead(_session, history->peer->id, rootId);
 		showSection(std::move(memento), params);
 		return;
 	}

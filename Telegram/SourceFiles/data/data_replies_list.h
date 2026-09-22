@@ -58,6 +58,8 @@ public:
 	[[nodiscard]] bool isServerSideUnread(
 		not_null<const HistoryItem*> item) const;
 
+	void setMtsLinkInboxReadDate(TimeId date);
+
 	void requestUnreadCount();
 
 	void readTill(not_null<HistoryItem*> item);
@@ -122,6 +124,7 @@ private:
 	rpl::variable<std::optional<int>> _unreadCount;
 	MsgId _inboxReadTillId = 0;
 	MsgId _outboxReadTillId = 0;
+	TimeId _mtsLinkInboxReadDate = 0;
 	HistoryItem *_divider = nullptr;
 	bool _dividerWithComments = false;
 	int _beforeId = 0;

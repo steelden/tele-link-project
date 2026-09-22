@@ -55,6 +55,14 @@ QHash<QString, QString> EmojiToIdMap;
 QHash<QString, QString> IdToEmojiMap;
 PeerId FavoritesPeerIdValue = PeerId(0);
 
+struct PendingChatEvent {
+	QString dst;
+	QJsonObject param;
+};
+QHash<QString, QList<PendingChatEvent>> PendingChatEvents;
+QSet<QString> ChatInfoRequested;
+QSet<QString> UserProfileRequested;
+
 const auto kStorageThumbBase =
 	u"https://prod-storage-chat.mts-link.ru/thumb/"_q;
 const auto kAvatarCdnBase =
@@ -331,6 +339,10 @@ TextWithEntities parseMentionedText(
 
 } // namespace
 
+void handleNotificationEvent(
+	not_null<Main::Session*> session,
+	const QJsonObject &param);
+
 void connectToSession(
 		not_null<Main::Session*> mainSession,
 		not_null<Session*> mtsSession) {
@@ -345,6 +357,26 @@ void connectToSession(
 		&Api::Channels::dialogsLoaded,
 		[mainSession](const QList<Api::ChannelData> &list) {
 			applyChatList(mainSession, list);
+		});
+	QObject::connect(
+		mtsSession->channels(),
+		&Api::Channels::chatInfoLoaded,
+		[mainSession](const Api::ChannelData &ch) {
+			LOG(("MtsLink: chatInfoLoaded '%1' type=%2 id=%3")
+				.arg(ch.name)
+				.arg(int(ch.type))
+				.arg(ch.id));
+			if (ch.type == ChatType::Dialog
+				|| ch.type == ChatType::Favorites) {
+				applyDialogData(mainSession, ch);
+			} else {
+				applyChannelData(mainSession, ch);
+			}
+			const auto pending = PendingChatEvents.take(ch.id);
+			ChatInfoRequested.remove(ch.id);
+			for (const auto &ev : pending) {
+				handleChatEvent(mainSession, ev.dst, ev.param);
+			}
 		});
 	QObject::connect(
 		mtsSession->messages(),
@@ -489,6 +521,8 @@ void connectToSession(
 						}
 					}
 				}
+			} else if (name == "NotificationEvent") {
+				handleNotificationEvent(mainSession, param);
 			}
 		});
 
@@ -805,6 +839,13 @@ HistoryItem *addMessage(
 		flags |= MessageFlag::Outgoing;
 	}
 
+	const auto user = session->data().user(peerToUser(fromPeerId));
+	if (user->name().isEmpty() && mts && !src.authorId.isEmpty()
+		&& !UserProfileRequested.contains(src.authorId)) {
+		UserProfileRequested.insert(src.authorId);
+		mts->users()->loadMember(src.authorId, mts->organizationId());
+	}
+
 	auto fields = HistoryItemCommonFields{
 		.id = msgId,
 		.flags = flags,
@@ -1009,6 +1050,44 @@ bool addOlderMessages(
 	return true;
 }
 
+void handleNotificationEvent(
+		not_null<Main::Session*> session,
+		const QJsonObject &param) {
+	const auto type = param.value("type").toString();
+	const auto value = param.value("value").toObject();
+
+	if (type == "MessageReadEvent") {
+		const auto lastReads = value.value("lastReads").toArray();
+		for (const auto &r : lastReads) {
+			const auto obj = r.toObject();
+			const auto chatId = obj.value("chatId").toString();
+			const auto lastReadMsgId = obj.value("lastReadMessageId").toString();
+			const auto threadId = obj.value("threadId").toString();
+			if (chatId.isEmpty() || lastReadMsgId.isEmpty()) {
+				continue;
+			}
+			const auto peerId = chatIdToPeerId(chatId);
+			if (!hasChatId(peerId)) {
+				continue;
+			}
+			const auto readBareId = uuidToBareId(lastReadMsgId);
+			const auto readMsgId = MsgId(readBareId & 0x7FFFFFFFLL);
+			if (!threadId.isEmpty()) {
+				const auto threadBareId = uuidToBareId(threadId);
+				const auto rootMsgId = MsgId(threadBareId & 0x7FFFFFFFLL);
+				if (auto cached = cachedRepliesList(peerId, rootMsgId)) {
+					cached->setInboxReadTill(readMsgId, std::nullopt);
+				}
+			} else {
+				const auto history = session->data().historyLoaded(peerId);
+				if (history) {
+					history->setInboxReadTill(readMsgId);
+				}
+			}
+		}
+	}
+}
+
 void handleChatEvent(
 		not_null<Main::Session*> session,
 		const QString &dst,
@@ -1018,6 +1097,20 @@ void handleChatEvent(
 	const auto chatId = extractChatIdFromDst(dst);
 
 	if (chatId.isEmpty()) {
+		return;
+	}
+
+	const auto chatKnown = ChatToPeerMap.contains(chatId);
+	if (!chatKnown && type == "NewMessageV2Event") {
+		PendingChatEvents[chatId].append({ dst, param });
+		if (!ChatInfoRequested.contains(chatId)) {
+			ChatInfoRequested.insert(chatId);
+			const auto mts = session->account().mtsLinkSession();
+			if (mts) {
+				LOG(("MtsLink: unknown chatId %1, requesting info").arg(chatId));
+				mts->channels()->loadChatInfo(chatId);
+			}
+		}
 		return;
 	}
 
@@ -1326,6 +1419,48 @@ std::shared_ptr<Data::RepliesList> cachedRepliesList(PeerId peerId, MsgId rootId
 		return *it;
 	}
 	return nullptr;
+}
+
+void fetchThreadLastRead(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		MsgId rootId) {
+	const auto mts = session->account().mtsLinkSession();
+	if (!mts) {
+		return;
+	}
+	const auto chatId = peerIdToChatId(peerId);
+	const auto rootMtsId = msgIdToMtsLinkId(peerId, rootId);
+	if (chatId.isEmpty() || rootMtsId.isEmpty()) {
+		return;
+	}
+	QJsonObject param;
+	param["organizationId"] = mts->organizationId();
+	param["chatId"] = chatId;
+	param["messageId"] = rootMtsId;
+	mts->rpc()->call(
+		"Chat.GetLastReadChildMessage",
+		param,
+		[session, peerId, rootId](const QJsonObject &result) {
+			const auto obj = result.value("value").toObject();
+			const auto lastReadId = obj.value("id").toString();
+			LOG(("READ-DBG: GetLastReadChildMessage result=%1")
+				.arg(QString::fromUtf8(
+					QJsonDocument(obj).toJson(QJsonDocument::Compact).left(300))));
+			if (lastReadId.isEmpty()) {
+				return;
+			}
+			const auto bareId = uuidToBareId(lastReadId);
+			const auto msgId = MsgId(bareId & 0x7FFFFFFFLL);
+			if (auto cached = cachedRepliesList(peerId, rootId)) {
+				cached->setInboxReadTill(msgId, std::nullopt);
+				const auto createdAt = obj.value("createdAt").toDouble();
+				if (createdAt > 0) {
+					cached->setMtsLinkInboxReadDate(
+						TimeId(qint64(createdAt) / 1000));
+				}
+			}
+		});
 }
 
 void setOldestLoadedMessageId(PeerId peerId, const QString &mtsLinkId) {

@@ -688,6 +688,7 @@ private:
 
 	std::optional<MsgId> _inboxReadBefore;
 	std::optional<MsgId> _outboxReadBefore;
+	TimeId _mtsLinkInboxReadDate = 0;
 	std::optional<int> _unreadCount;
 	int _unreadPollVotesCount = 0;
 	rpl::event_stream<int> _unreadPollVotesCountChanges;
