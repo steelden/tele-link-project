@@ -540,7 +540,7 @@ mtpRequestId EditTextMessage(
 		Fn<void(const QString &error, mtpRequestId requestId)> fail,
 		bool spoilered,
 		VideoCoverEdit videoCover) {
-	if (MtsLink::isMtsLinkPeer(item->history()->peer->id)) {
+	if (MtsLink::hasChatId(item->history()->peer->id)) {
 		const auto mts = item->history()->session().account().mtsLinkSession();
 		if (mts) {
 			const auto chatId = MtsLink::peerIdToChatId(

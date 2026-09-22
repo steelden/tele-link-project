@@ -524,7 +524,7 @@ void FieldAutocomplete::updateFiltered(bool resetScroll) {
 			: _user
 				? _user->id
 				: PeerId(0);
-		if (mtsLinkPeerId && MtsLink::isMtsLinkPeer(mtsLinkPeerId)) {
+		if (mtsLinkPeerId && MtsLink::hasChatId(mtsLinkPeerId)) {
 			maxListSize += int(MtsLink::chatMtsLinkUsers(
 				&_session->data().session(), mtsLinkPeerId).size());
 		} else if (_chat) {
@@ -615,7 +615,7 @@ void FieldAutocomplete::updateFiltered(bool resetScroll) {
 			return user->isInaccessible()
 				|| (!listAllSuggestions && filterNotPassedByName(user));
 		};
-		if (mtsLinkPeerId && MtsLink::isMtsLinkPeer(mtsLinkPeerId)) {
+		if (mtsLinkPeerId && MtsLink::hasChatId(mtsLinkPeerId)) {
 			const auto users = MtsLink::chatMtsLinkUsers(
 				&_session->data().session(), mtsLinkPeerId);
 			mrows.reserve(mrows.size() + users.size());

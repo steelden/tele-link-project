@@ -748,6 +748,10 @@ void Instance::applyValue(const QByteArray &key, const QByteArray &value) {
 	});
 }
 
+void Instance::overrideValue(const QByteArray &key, const QByteArray &value) {
+	applyValue(key, value);
+}
+
 void Instance::updatePluralRules() {
 	if (_pluralId.isEmpty()) {
 		_pluralId = isCustom()

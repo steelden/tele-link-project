@@ -106,7 +106,7 @@ void PinMessageBox(
 			return;
 		}
 
-		if (MtsLink::isMtsLinkPeer(peer->id)) {
+		if (MtsLink::hasChatId(peer->id)) {
 			const auto mts = peer->session().account().mtsLinkSession();
 			if (mts) {
 				const auto chatId = MtsLink::peerIdToChatId(peer->id);

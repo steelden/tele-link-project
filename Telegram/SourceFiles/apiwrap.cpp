@@ -1222,8 +1222,15 @@ void ApiWrap::requestFullPeer(not_null<PeerData*> peer) {
 			migrateFail(peer, error.type());
 		};
 		if (const auto user = peer->asUser()) {
-			if (_session->supportMode()) {
-				_session->supportHelper().refreshInfo(user);
+			const auto mts = _session->account().mtsLinkSession();
+			if (mts) {
+				const auto bareId = peerToUser(peer->id).bare;
+				const auto uuid = MtsLink::userBareIdToUuid(bareId);
+				if (!uuid.isEmpty()) {
+					mts->users()->loadMember(uuid, mts->organizationId());
+				}
+				_fullPeerRequests.remove(peer);
+				return mtpRequestId(0);
 			}
 			return request(MTPusers_GetFullUser(
 				user->inputUser()
@@ -3660,7 +3667,7 @@ void ApiWrap::requestSharedMedia(
 		SharedMediaType type,
 		MsgId messageId,
 		SliceType slice) {
-	if (MtsLink::isMtsLinkPeer(peer->id)) {
+	if (MtsLink::hasChatId(peer->id)) {
 		if (type == SharedMediaType::Pinned) {
 			const auto mts = _session->account().mtsLinkSession();
 			if (mts) {
@@ -4710,7 +4717,7 @@ void ApiWrap::sendMessage(
 	const auto peer = history->peer;
 	const auto &textWithTags = message.textWithTags;
 
-	if (MtsLink::isMtsLinkPeer(peer->id)) {
+	if (MtsLink::hasChatId(peer->id)) {
 		const auto mts = _session->account().mtsLinkSession();
 		if (!mts) {
 			return;

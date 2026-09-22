@@ -1303,7 +1303,7 @@ void AddConfirmedLocalPlaceholder(const ConfirmedLocalFile &local) {
 void SendConfirmedFile(
 		not_null<Main::Session*> session,
 		const std::shared_ptr<FilePrepareResult> &file) {
-	if (MtsLink::isMtsLinkPeer(file->to.peer)) {
+	if (MtsLink::hasChatId(file->to.peer)) {
 		const auto mts = session->account().mtsLinkSession();
 		if (!mts) {
 			return;

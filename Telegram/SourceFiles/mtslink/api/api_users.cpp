@@ -12,29 +12,33 @@ Users::Users(Rpc *rpc, QObject *parent)
 , _rpc(rpc) {
 }
 
-void Users::loadMember(const UserId &userId) {
+void Users::loadMember(const UserId &userId, const QString &organizationId) {
 	_rpc->call(
 		"Organization.GetMemberV2",
-		QJsonObject{{"userId", userId}},
+		QJsonObject{{"userId", userId}, {"organizationId", organizationId}},
 		[this](const QJsonObject &result) {
 			const auto value = result.value("value").toObject();
+			const auto prof = value.value("profile").toObject();
 			const auto roleStr = value.value("role").toString();
 			const auto presenceStr = value.value("presence").toString();
 			MemberProfile profile{
 				.userId = value.value("userId").toString(),
 				.organizationId =
 					value.value("organizationId").toString(),
-				.email = value.value("email").toString(),
-				.firstName = value.value("firstName").toString(),
-				.lastName = value.value("lastName").toString(),
-				.displayName = value.value("displayName").toString(),
+				.email = prof.value("email").toString(),
+				.phone = prof.value("phone").toString(),
+				.position = prof.value("position").toString(),
+				.department = prof.value("department").toString(),
+				.firstName = prof.value("firstName").toString(),
+				.lastName = prof.value("lastName").toString(),
+				.displayName = prof.value("displayName").toString(),
 				.presence = (presenceStr == "Online")
 					? MemberPresence::Online
 					: (presenceStr == "Away")
 						? MemberPresence::Away
 						: MemberPresence::Offline,
 				.avatarFileId =
-					value.value("avatarFileId").toString(),
+					prof.value("avatarFileId").toString(),
 				.role = (roleStr == "Owner")
 					? MemberRole::Owner
 					: (roleStr == "Admin")
@@ -67,6 +71,9 @@ void Users::loadOrganizationMembers(int offset, int limit) {
 					.organizationId =
 						obj.value("organizationId").toString(),
 					.email = obj.value("email").toString(),
+					.phone = obj.value("phone").toString(),
+					.position = obj.value("position").toString(),
+					.department = obj.value("department").toString(),
 					.firstName = obj.value("firstName").toString(),
 					.lastName = obj.value("lastName").toString(),
 					.displayName =

@@ -4835,7 +4835,7 @@ void HistoryWidget::firstLoadMessages() {
 		return;
 	}
 
-	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+	if (MtsLink::hasChatId(_history->peer->id)) {
 		const auto chatId = MtsLink::peerIdToChatId(_history->peer->id);
 		if (!chatId.isEmpty()) {
 			if (const auto mts = _history->session().account().mtsLinkSession()) {
@@ -4917,7 +4917,7 @@ void HistoryWidget::loadMessages() {
 	if (!_history || _preloadRequest) {
 		return;
 	}
-	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+	if (MtsLink::hasChatId(_history->peer->id)) {
 		if (_history->loadedAtTop()) {
 			return;
 		}
@@ -5052,7 +5052,7 @@ void HistoryWidget::loadMessagesDown() {
 	if (!_history || _preloadDownRequest) {
 		return;
 	}
-	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+	if (MtsLink::hasChatId(_history->peer->id)) {
 		return;
 	}
 
@@ -5131,7 +5131,7 @@ void HistoryWidget::delayedShowAt(
 	clearAllLoadRequests();
 	_delayedShowAtMsgId = showAtMsgId;
 
-	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+	if (MtsLink::hasChatId(_history->peer->id)) {
 		_history->getReadyFor(_delayedShowAtMsgId);
 		_delayedShowAtRequest = 0;
 		if (const auto item = getItemFromHistoryOrMigrated(_delayedShowAtMsgId)) {

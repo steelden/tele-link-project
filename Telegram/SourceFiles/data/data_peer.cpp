@@ -682,7 +682,7 @@ void PeerData::setHasSensitiveContent(bool has) {
 
 // This is duplicated in CanPinMessagesValue().
 bool PeerData::canPinMessages() const {
-	if (MtsLink::isMtsLinkPeer(id)) {
+	if (MtsLink::hasChatId(id)) {
 		return true;
 	}
 	if (const auto user = asUser()) {
@@ -778,7 +778,7 @@ bool PeerData::canTransferGifts() const {
 }
 
 bool PeerData::canEditMessagesIndefinitely() const {
-	if (MtsLink::isMtsLinkPeer(id)) {
+	if (MtsLink::hasChatId(id)) {
 		return true;
 	}
 	if (const auto user = asUser()) {

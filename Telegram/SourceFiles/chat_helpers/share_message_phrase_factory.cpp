@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "mtslink/data_adapters.h"
 #include "ui/text/text_utilities.h"
 #include "window/window_session_controller.h"
 
@@ -74,7 +75,12 @@ Ui::Toast::ClickHandlerFilter ForwardedToSavedMessagesFilter(
 		not_null<Main::Session*> session) {
 	return [=](const ClickHandlerPtr &, Qt::MouseButton) {
 		if (const auto window = ResolveWindowDefault()(session)) {
-			window->showPeerHistory(window->session().user());
+			const auto favPeerId = MtsLink::favoritesPeerId();
+			if (favPeerId) {
+				window->showPeerHistory(favPeerId);
+			} else {
+				window->showPeerHistory(window->session().user());
+			}
 		}
 		return false;
 	};

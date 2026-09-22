@@ -104,7 +104,7 @@ void MessagesSearch::searchMore() {
 
 void MessagesSearch::searchRequest() {
 	const auto nextToken = RequestToToken(_request);
-	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+	if (MtsLink::hasChatId(_history->peer->id)) {
 		const auto mts = _history->session().account().mtsLinkSession();
 		if (!mts) {
 			return;
