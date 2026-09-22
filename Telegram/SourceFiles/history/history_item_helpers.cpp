@@ -43,6 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "apiwrap.h"
+#include "mtslink/data_adapters.h"
 #include "base/unixtime.h"
 #include "core/application.h"
 #include "core/click_handler_types.h" // ClickHandlerContext.
@@ -555,6 +556,9 @@ void RequestDependentMessageItem(
 		PeerId peerId,
 		MsgId msgId) {
 	if (!IsServerMsgId(msgId)) {
+		return;
+	}
+	if (MtsLink::hasChatId(item->history()->peer->id)) {
 		return;
 	}
 	const auto fullId = item->fullId();

@@ -46,6 +46,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/menu/menu_multiline_action.h"
 #include "ui/widgets/menu/menu_separator.h"
 #include "ui/image/image.h"
+#include "mtslink/data_adapters.h"
 #include "ui/toast/toast.h"
 #include "ui/text/format_song_document_name.h"
 #include "ui/text/format_values.h"
@@ -911,7 +912,8 @@ bool AddViewRepliesAction(
 		: 0;
 	const auto repliesCount = item->repliesCount();
 	const auto withReplies = (repliesCount > 0);
-	if (!withReplies || !item->history()->peer->isMegagroup()) {
+	const auto isMtsLink = MtsLink::hasChatId(item->history()->peer->id);
+	if (!withReplies || (!item->history()->peer->isMegagroup() && !isMtsLink)) {
 		if (!topicRootId) {
 			return false;
 		}
@@ -937,6 +939,31 @@ bool AddViewRepliesAction(
 			history,
 			rootId,
 			highlightId);
+	}), &st::menuIconViewReplies);
+	return true;
+}
+
+bool AddReplyInThreadAction(
+		not_null<Ui::PopupMenu*> menu,
+		const ContextMenuRequest &request,
+		not_null<ListWidget*> list) {
+	const auto item = request.item;
+	if (!item
+		|| !item->isRegular()
+		|| list->elementContext() != Context::History) {
+		return false;
+	}
+	if (!MtsLink::hasChatId(item->history()->peer->id)) {
+		return false;
+	}
+	if (item->repliesCount() > 0) {
+		return false;
+	}
+	const auto controller = list->controller();
+	const auto history = item->history();
+	const auto rootId = item->id;
+	menu->addAction(tr::lng_replies_view_thread(tr::now), crl::guard(controller, [=] {
+		controller->showRepliesForMessage(history, rootId, 0);
 	}), &st::menuIconViewReplies);
 	return true;
 }
@@ -1392,6 +1419,7 @@ void AddTopMessageActions(
 	}
 	AddGoToMessageAction(menu, request, list);
 	AddViewRepliesAction(menu, request, list);
+	AddReplyInThreadAction(menu, request, list);
 	AddEditMessageAction(menu, request, list);
 	AddFactcheckAction(menu, request, list);
 	AddPinMessageAction(menu, request, list);

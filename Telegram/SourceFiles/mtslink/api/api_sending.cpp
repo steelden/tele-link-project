@@ -21,9 +21,12 @@ void Sending::sendMessage(
 		const QJsonArray &mentionsMeta,
 		const MessageId &replyToMessageId,
 		const QStringList &fileIds,
-		const MessageId &parentId) {
+		const MessageId &parentId,
+		const QString &clientId) {
 	QJsonObject param;
-	param["clientId"] = QUuid::createUuid().toString(QUuid::WithoutBraces);
+	param["clientId"] = clientId.isEmpty()
+		? QUuid::createUuid().toString(QUuid::WithoutBraces)
+		: clientId;
 	param["chatId"] = chatId;
 	param["text"] = text;
 	param["isMarkdown"] = true;

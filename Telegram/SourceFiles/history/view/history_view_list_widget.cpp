@@ -560,6 +560,7 @@ ListWidget::ListWidget(
 	_delegate->listContext(),
 	_delegate->listTranslateHistory()))
 , _scrollDateCheck([this] { scrollDateCheck(); })
+, _deferredMouseActionUpdate([this] { mouseActionUpdate(); })
 , _applyUpdatedScrollState([this] { applyUpdatedScrollState(); })
 , _selectEnabled(_delegate->listAllowsMultiSelect())
 , _highlighter(
@@ -647,7 +648,7 @@ ListWidget::ListWidget(
 		if (view->delegate() == this) {
 			markReadMetricsStale();
 			if (view->isUnderCursor()) {
-				mouseActionUpdate();
+				_deferredMouseActionUpdate.call();
 			}
 		}
 	}, lifetime());
@@ -765,6 +766,12 @@ not_null<ListDelegate*> ListWidget::delegate() const {
 }
 
 void ListWidget::refreshViewer() {
+	static int rvCount = 0;
+	LOG(("MtsLink SCROLL-DBG: refreshViewer #%1 aroundPos=(%2:%3 date=%4)")
+		.arg(++rvCount)
+		.arg(_aroundPosition.fullId.peer.value)
+		.arg(_aroundPosition.fullId.msg.bare)
+		.arg(_aroundPosition.date));
 	_viewerLifetime.destroy();
 	_refreshingViewer = true;
 	_delegate->listSource(
@@ -773,6 +780,10 @@ void ListWidget::refreshViewer() {
 		_idsLimit
 	) | rpl::on_next([=](Data::MessagesSlice &&slice) {
 		_refreshingViewer = false;
+		LOG(("MtsLink SCROLL-DBG: slice received, ids=%1 nearestToAround=%2:%3")
+			.arg(slice.ids.size())
+			.arg(slice.nearestToAround.peer.value)
+			.arg(slice.nearestToAround.msg.bare));
 		std::swap(_slice, slice);
 		refreshRows(slice);
 	}, _viewerLifetime);
@@ -1223,6 +1234,10 @@ void ListWidget::highlightMessage(
 void ListWidget::showAroundPosition(
 		Data::MessagePosition position,
 		Fn<bool()> overrideInitialScroll) {
+	LOG(("MtsLink SCROLL-DBG: showAroundPosition pos=(%1:%2 date=%3)")
+		.arg(position.fullId.peer.value)
+		.arg(position.fullId.msg.bare)
+		.arg(position.date));
 	_aroundPosition = position;
 	_aroundIndex = -1;
 	_overrideInitialScroll = std::move(overrideInitialScroll);
@@ -1258,7 +1273,14 @@ void ListWidget::showAtPosition(
 		Fn<void(bool found)> done) {
 	const auto showAtUnread = (position == Data::UnreadMessagePosition);
 
+	LOG(("MtsLink SCROLL-DBG: showAtPosition pos=(%1:%2 date=%3) unread=%4")
+		.arg(position.fullId.peer.value)
+		.arg(position.fullId.msg.bare)
+		.arg(position.date)
+		.arg(showAtUnread));
+
 	if (showAtUnread && jumpToBottomInsteadOfUnread()) {
+		LOG(("MtsLink SCROLL-DBG: showAtPosition -> jumpToBottom instead of unread"));
 		showAtPosition(Data::MaxMessagePosition, params, std::move(done));
 		return;
 	}
@@ -1270,6 +1292,7 @@ void ListWidget::showAtPosition(
 	}
 
 	if (showAtUnread) {
+		LOG(("MtsLink SCROLL-DBG: showAtPosition -> showAroundPosition (unread)"));
 		showAroundPosition(position, [=] {
 			clearUnreadBar();
 			checkUnreadBarCreation();
@@ -1278,6 +1301,9 @@ void ListWidget::showAtPosition(
 	} else if (!showAtPositionNow(position, params, done)) {
 		const auto targetAbove = isBelowPosition(position);
 		const auto targetBelow = isAbovePosition(position);
+		LOG(("MtsLink SCROLL-DBG: showAtPosition -> showAroundPosition (not now, above=%1 below=%2)")
+			.arg(targetAbove)
+			.arg(targetBelow));
 		showAroundPosition(position, [=] {
 			if ((targetAbove || targetBelow)
 				&& (params.animated != anim::type::instant)) {
@@ -1290,6 +1316,8 @@ void ListWidget::showAtPosition(
 			}
 			return showAtPositionNow(position, params, done);
 		});
+	} else {
+		LOG(("MtsLink SCROLL-DBG: showAtPosition -> showAtPositionNow succeeded immediately"));
 	}
 }
 
@@ -1387,15 +1415,18 @@ void ListWidget::saveScrollState() {
 
 void ListWidget::restoreScrollState() {
 	if (_items.empty()) {
+		LOG(("MtsLink SCROLL-DBG: restoreScrollState - items empty, skip"));
 		return;
 	} else if (_overrideInitialScroll
 		&& base::take(_overrideInitialScroll)()) {
+		LOG(("MtsLink SCROLL-DBG: restoreScrollState - overrideInitialScroll consumed"));
 		_scrollTopState = ScrollTopState();
 		_scrollInited = true;
 		return;
 	}
 	if (!_scrollTopState.item) {
 		if (!_bar.element || _bar.hidden || !_bar.focus || _scrollInited) {
+			LOG(("MtsLink SCROLL-DBG: restoreScrollState - no state, scrollInited=%1").arg(_scrollInited));
 			return;
 		}
 		_scrollInited = true;
@@ -1408,6 +1439,10 @@ void ListWidget::restoreScrollState() {
 	if (index >= 0) {
 		const auto view = _items[index];
 		auto newVisibleTop = itemTop(view) + _scrollTopState.shift;
+		LOG(("MtsLink SCROLL-DBG: restoreScrollState - scrollTo %1 (item=%2:%3)")
+			.arg(newVisibleTop)
+			.arg(_scrollTopState.item.fullId.peer.value)
+			.arg(_scrollTopState.item.fullId.msg.bare));
 		if (_visibleTop != newVisibleTop) {
 			_delegate->listScrollTo(newVisibleTop);
 		}
@@ -1480,6 +1515,13 @@ void ListWidget::updateAroundPositionFromNearest(int nearestIndex) {
 	}
 	const auto newPosition = _items[_aroundIndex]->data()->position();
 	if (_aroundPosition != newPosition) {
+		LOG(("MtsLink SCROLL-DBG: updateAroundPosition CHANGED old=(%1:%2 d=%3) new=(%4:%5 d=%6)")
+			.arg(_aroundPosition.fullId.peer.value)
+			.arg(_aroundPosition.fullId.msg.bare)
+			.arg(_aroundPosition.date)
+			.arg(newPosition.fullId.peer.value)
+			.arg(newPosition.fullId.msg.bare)
+			.arg(newPosition.date));
 		_initialAroundPosition = _aroundPosition;
 		_aroundPosition = newPosition;
 		crl::on_main(this, [=] { refreshViewer(); });

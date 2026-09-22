@@ -137,6 +137,10 @@ MessageData Messages::parseMessage(const QJsonObject &obj) const {
 		.isDeleted = obj.value("isDeleted").toBool(),
 		.repliedMessageId =
 			obj.value("repliedMessage").toObject().value("id").toString(),
+		.parentId = [&] {
+			auto id = obj.value("parentMessage").toObject().value("id").toString();
+			return id.isEmpty() ? obj.value("parentId").toString() : id;
+		}(),
 		.threadChildrenCount = thread.value("childrenCount").toInt(),
 		.threadUnreadCount = thread.value("unreadChildrenCount").toInt(),
 	};

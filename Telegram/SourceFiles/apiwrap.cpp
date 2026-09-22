@@ -4744,6 +4744,12 @@ void ApiWrap::sendMessage(
 				peer->id,
 				message.action.replyTo.topicRootId);
 		}
+		if (!parentMtsId.isEmpty()
+			&& replyMtsId == parentMtsId) {
+			replyMtsId.clear();
+		}
+		const auto isThreadSend = !parentMtsId.isEmpty();
+		auto sendClientId = QString();
 		const auto tempId = QUuid::createUuid().toString(
 			QUuid::WithoutBraces);
 		{
@@ -4756,11 +4762,19 @@ void ApiWrap::sendMessage(
 			if (!replyMtsId.isEmpty()) {
 				msg.repliedMessageId = replyMtsId;
 			}
-			MtsLink::addMessage(_session, msg);
+			if (!parentMtsId.isEmpty()) {
+				msg.parentId = parentMtsId;
+			}
+			MtsLink::addMessage(_session, msg, isThreadSend);
 		}
 		const auto tempMsgId = MsgId(
 			MtsLink::uuidToBareId(tempId) & 0x7FFFFFFFLL);
 		MtsLink::setPendingTempMessage(peer->id, tempMsgId);
+		if (isThreadSend) {
+			sendClientId = QUuid::createUuid().toString(
+				QUuid::WithoutBraces);
+			MtsLink::addPendingThreadSend(sendClientId);
+		}
 
 		mts->sending()->sendMessage(
 			chatId,
@@ -4769,7 +4783,8 @@ void ApiWrap::sendMessage(
 			content.mentionsMeta,
 			replyMtsId,
 			QStringList(),
-			parentMtsId);
+			parentMtsId,
+			sendClientId);
 		sendAction(message.action);
 		return;
 	}

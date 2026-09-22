@@ -60,6 +60,7 @@ struct MessageData {
 	qint64 updatedAt = 0;
 	bool isDeleted = false;
 	MessageId repliedMessageId;
+	MessageId parentId;
 	int threadChildrenCount = 0;
 	int threadUnreadCount = 0;
 };

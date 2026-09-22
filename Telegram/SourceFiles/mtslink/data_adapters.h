@@ -23,6 +23,10 @@ class UserData;
 class History;
 class HistoryItem;
 
+namespace Data {
+class RepliesList;
+} // namespace Data
+
 namespace MtsLink {
 
 class Session;
@@ -53,7 +57,8 @@ void applyUserData(
 
 HistoryItem *addMessage(
 	not_null<Main::Session*> session,
-	const Api::MessageData &src);
+	const Api::MessageData &src,
+	bool threadOnly = false);
 
 [[nodiscard]] bool addOlderMessages(
 	not_null<Main::Session*> session,
@@ -84,7 +89,23 @@ void updateMessage(
 [[nodiscard]] QString msgIdToMtsLinkId(PeerId peerId, MsgId msgId);
 void registerMessageId(PeerId peerId, MsgId msgId, const QString &mtsLinkId);
 
+void registerThreadRoot(PeerId peerId, MsgId msgId, MsgId rootId);
+[[nodiscard]] MsgId threadRootFor(PeerId peerId, MsgId msgId);
+
+struct ThreadScrollState {
+	FullMsgId itemId;
+	TimeId date = 0;
+	int shift = 0;
+};
+void saveThreadScroll(PeerId peerId, MsgId rootId, const ThreadScrollState &state);
+[[nodiscard]] std::optional<ThreadScrollState> threadScroll(PeerId peerId, MsgId rootId);
+
+void cacheRepliesList(PeerId peerId, MsgId rootId, std::shared_ptr<Data::RepliesList> replies);
+[[nodiscard]] std::shared_ptr<Data::RepliesList> cachedRepliesList(PeerId peerId, MsgId rootId);
+
 void setPendingTempMessage(PeerId peerId, MsgId msgId);
+void addPendingThreadSend(const QString &clientId);
+[[nodiscard]] bool takePendingThreadSend(const QString &clientId);
 void clearPendingTempMessage(
 	not_null<Main::Session*> session,
 	PeerId peerId);

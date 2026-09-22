@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "core/application.h"
 #include "core/file_utilities.h"
+#include "mtslink/data_adapters.h"
 #include "core/click_handler_types.h"
 #include "core/phone_click_handler.h"
 #include "data/data_chat_participant_status.h"
@@ -2990,8 +2991,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		const auto topicRootId = item->history()->isForum()
 			? item->topicRootId()
 			: 0;
+		const auto isMtsLink = MtsLink::hasChatId(item->history()->peer->id);
 		if (topicRootId
-			|| (withReplies && item->history()->peer->isMegagroup())) {
+			|| (withReplies && (item->history()->peer->isMegagroup() || isMtsLink))) {
 			const auto highlightId = topicRootId ? item->id : 0;
 			const auto rootId = topicRootId
 				? topicRootId
@@ -3011,6 +3013,14 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					_history,
 					rootId,
 					highlightId);
+			}, &st::menuIconViewReplies);
+		} else if (isMtsLink && !withReplies) {
+			const auto rootId = item->id;
+			_menu->addAction(tr::lng_replies_view_thread(tr::now), [=] {
+				controller->showRepliesForMessage(
+					_history,
+					rootId,
+					MsgId(0));
 			}, &st::menuIconViewReplies);
 		}
 		const auto t = base::unixtime::now();

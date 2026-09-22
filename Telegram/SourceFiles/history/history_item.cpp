@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "menu/menu_ttl_validator.h"
 #include "apiwrap.h"
+#include "mtslink/data_adapters.h"
 #include "media/audio/media_audio.h"
 #include "core/application.h"
 #include "window/window_controller.h"
@@ -4134,7 +4135,8 @@ void HistoryItem::clearReplies() {
 }
 
 bool HistoryItem::updateRepliesText(not_null<HistoryMessageViews*> views) {
-	if (!views->commentsMegagroupId) {
+	if (!views->commentsMegagroupId
+		&& !MtsLink::hasChatId(_history->peer->id)) {
 		return false;
 	}
 	views->replies.text = (views->replies.count > 0)
@@ -4325,8 +4327,11 @@ int HistoryItem::repliesCount() const {
 
 bool HistoryItem::repliesAreComments() const {
 	if (const auto views = Get<HistoryMessageViews>()) {
-		return (views->commentsMegagroupId != 0)
-			&& checkDiscussionLink(views->commentsMegagroupId);
+		if (views->commentsMegagroupId != 0) {
+			return checkDiscussionLink(views->commentsMegagroupId);
+		}
+		return (views->replies.count > 0)
+			&& MtsLink::hasChatId(_history->peer->id);
 	}
 	return false;
 }
