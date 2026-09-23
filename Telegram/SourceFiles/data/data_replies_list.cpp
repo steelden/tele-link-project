@@ -375,39 +375,38 @@ bool RepliesList::buildFromData(not_null<Viewer*> viewer) {
 		injectRootMessageAndReverse(viewer);
 		return true;
 	}
+	const auto isMtsLink = MtsLink::hasChatId(_history->peer->id);
 	const auto around = [&] {
 		if (viewer->around != ShowAtUnreadMsgId) {
 			return viewer->around;
+		} else if (isMtsLink) {
+			return _list.empty() ? MsgId(0) : _list.front();
 		} else if (lookupRoot()) {
 			return computeInboxReadTillFull();
 		} else if (_owningTopic) {
-			// Somehow we don't want always to jump to computed inboxReadTill
-			// (this was in the code before, but I don't remember why).
-			// Maybe in case we "View Thread" from a group we don't really
-			// want to jump to unread inside thread, cause it isn't defined.
-			//
-			// But in case of topics we definitely want to support jumping
-			// to the first unread, even if it is General topic without the
-			// actual root message or it is a broken topic without root.
 			return computeInboxReadTillFull();
 		}
 		return viewer->around;
 	}();
 	if (_list.empty()
 		|| (!around && _skippedAfter != 0)
-		|| (around > _list.front() && _skippedAfter != 0)
-		|| (around > 0 && around < _list.back() && _skippedBefore != 0)) {
+		|| (!isMtsLink && around > _list.front() && _skippedAfter != 0)
+		|| (!isMtsLink && around > 0 && around < _list.back() && _skippedBefore != 0)) {
 		loadAround(around);
 		return false;
 	}
-	const auto isMtsLink = MtsLink::hasChatId(_history->peer->id);
 	const auto i = [&] {
 		if (!around) {
-			return end(_list);
+			return isMtsLink ? begin(_list) : end(_list);
 		}
 		if (isMtsLink) {
 			const auto it = ranges::find(_list, around);
-			return (it != end(_list)) ? it : end(_list);
+			if (it != end(_list)) {
+				return it;
+			}
+			const auto atTop = (around == _rootId)
+				|| (_divider && around == _divider->id);
+			return atTop ? end(_list) : begin(_list);
 		}
 		return ranges::lower_bound(_list, around, std::greater<>());
 	}();
@@ -428,7 +427,7 @@ bool RepliesList::buildFromData(not_null<Viewer*> viewer) {
 	const auto peerId = _history->peer->id;
 	slice->ids.clear();
 	auto nearestToAround = std::optional<MsgId>();
-	if (isMtsLink && around && i != end(_list)) {
+	if (isMtsLink && around && i != end(_list) && *i == around) {
 		nearestToAround = around;
 	}
 	slice->ids.reserve(useAfter + useBefore);
@@ -503,7 +502,13 @@ bool RepliesList::applyUpdate(const MessageUpdate &update) {
 			return false;
 		}
 		_list.erase(i);
-		if (_skippedBefore && _skippedAfter) {
+		if (MtsLink::hasChatId(_history->peer->id)) {
+			if (const auto known = _fullCount.current()) {
+				if (*known > 0) {
+					_fullCount = (*known - 1);
+				}
+			}
+		} else if (_skippedBefore && _skippedAfter) {
 			_fullCount = *_skippedBefore + _list.size() + *_skippedAfter;
 		} else if (const auto known = _fullCount.current()) {
 			if (*known > 0) {
@@ -524,11 +529,18 @@ bool RepliesList::applyUpdate(const MessageUpdate &update) {
 		return false;
 	}
 	if (MtsLink::hasChatId(_history->peer->id)) {
+		if (_loadingHistorical) {
+			return false;
+		}
 		_list.insert(begin(_list), id);
 	} else {
 		_list.insert(i, id);
 	}
-	if (_skippedBefore && _skippedAfter) {
+	if (MtsLink::hasChatId(_history->peer->id)) {
+		if (const auto known = _fullCount.current()) {
+			_fullCount = *known + 1;
+		}
+	} else if (_skippedBefore && _skippedAfter) {
 		_fullCount = *_skippedBefore + _list.size() + *_skippedAfter;
 	} else if (const auto known = _fullCount.current()) {
 		_fullCount = *known + 1;
@@ -594,6 +606,10 @@ void RepliesList::loadAround(MsgId id) {
 			QObject::disconnect(*conn);
 			_loadingAround = std::nullopt;
 
+			if (!_mtsLinkInboxReadDate) {
+				_mtsLinkInboxReadDate = _history->mtsLinkInboxReadDate();
+			}
+
 			for (const auto &p : profiles) {
 				MtsLink::applyUserData(session, p);
 			}
@@ -609,6 +625,7 @@ void RepliesList::loadAround(MsgId id) {
 			if (messages.isEmpty()) {
 				_fullCount = _skippedBefore = _skippedAfter = 0;
 			} else {
+				_loadingHistorical = true;
 				for (int i = messages.size() - 1; i >= 0; --i) {
 					const auto item = MtsLink::addMessage(
 						session, messages[i], true);
@@ -616,7 +633,20 @@ void RepliesList::loadAround(MsgId id) {
 						_list.push_back(item->id);
 					}
 				}
-				const auto &owner = _history->owner();
+				_loadingHistorical = false;
+				auto &owner = _history->owner();
+				for (const auto &msgId : _list) {
+					if (const auto item = owner.message(peerId, msgId)) {
+						if (item->replyToTop() != _rootId) {
+							item->ensureReplyComponent();
+							item->setReplyFields(
+								item->replyToTop() ? item->replyToTop() : _rootId,
+								_rootId,
+								false);
+						}
+						item->updateDependencyItem();
+					}
+				}
 				ranges::sort(_list, [&](MsgId a, MsgId b) {
 					const auto ia = owner.message(peerId, a);
 					const auto ib = owner.message(peerId, b);
@@ -626,10 +656,34 @@ void RepliesList::loadAround(MsgId id) {
 					}
 					return a > b;
 				});
-				_skippedBefore = 0;
+				_skippedBefore = (messages.size() >= 50) ? 1 : 0;
 				_skippedAfter = 0;
-				_fullCount = int(_list.size());
+				if (const auto root = _history->owner().message(peerId, _rootId)) {
+					const auto apiCount = root->repliesCount();
+					LOG(("THREAD-DBG: initial load listSize=%1 apiCount=%2 skippedBefore=%3 rootId=%4")
+						.arg(_list.size())
+						.arg(apiCount)
+						.arg(_skippedBefore.value_or(-1))
+						.arg(_rootId.bare));
+					if (apiCount > 0) {
+						_fullCount = apiCount;
+					} else if (_skippedBefore == 0) {
+						_fullCount = int(_list.size());
+					}
+				} else {
+					LOG(("THREAD-DBG: initial load listSize=%1 rootNotFound skippedBefore=%2")
+						.arg(_list.size())
+						.arg(_skippedBefore.value_or(-1)));
+					if (_skippedBefore == 0) {
+						_fullCount = int(_list.size());
+					}
+				}
 			}
+			LOG(("THREAD-DBG: initial load _fullCount=%1 _mtsLinkInboxReadDate=%2 _inboxReadTillId=%3")
+				.arg(_fullCount.current().value_or(-1))
+				.arg(_mtsLinkInboxReadDate)
+				.arg(_inboxReadTillId.bare));
+			checkReadTillEnd();
 			_listChanges.fire({});
 		});
 		msgs->loadThread(chatId, parentId);
@@ -690,6 +744,100 @@ void RepliesList::loadBefore() {
 	Expects(!_list.empty());
 
 	if (MtsLink::hasChatId(_history->peer->id)) {
+		if (_loadingAround) {
+			return;
+		}
+		const auto peerId = _history->peer->id;
+		const auto lastMsgId = _list.back();
+		const auto fromId = MtsLink::msgIdToMtsLinkId(peerId, lastMsgId);
+		if (fromId.isEmpty()) {
+			_skippedBefore = 0;
+			_listChanges.fire({});
+			return;
+		}
+		const auto chatId = MtsLink::peerIdToChatId(peerId);
+		const auto parentId = MtsLink::msgIdToMtsLinkId(peerId, _rootId);
+		const auto session = &_history->session();
+		auto *mts = session->account().mtsLinkSession();
+		if (!mts) return;
+		auto *msgs = mts->messages();
+		_loadingAround = lastMsgId;
+		const auto conn = std::make_shared<QMetaObject::Connection>();
+		*conn = QObject::connect(msgs,
+			&MtsLink::Api::Messages::threadMessagesLoaded,
+			[this, conn, session, peerId, parentId, lastMsgId](
+				const QString &loadedChatId,
+				const QString &loadedParentId,
+				const QList<MtsLink::Api::MessageData> &messages,
+				const QList<MtsLink::Api::MemberProfile> &profiles) {
+			if (loadedParentId != parentId) return;
+			QObject::disconnect(*conn);
+			_loadingAround = std::nullopt;
+
+			if (_list.empty() || _list.back() != lastMsgId) {
+				_listChanges.fire({});
+				return;
+			}
+
+			for (const auto &p : profiles) {
+				MtsLink::applyUserData(session, p);
+			}
+
+			if (messages.isEmpty()) {
+				_skippedBefore = 0;
+			} else {
+				_loadingHistorical = true;
+				for (int i = messages.size() - 1; i >= 0; --i) {
+					const auto item = MtsLink::addMessage(
+						session, messages[i], true);
+					if (item
+						&& !ranges::contains(_list, item->id)) {
+						_list.push_back(item->id);
+					}
+				}
+				auto &owner = _history->owner();
+				for (const auto &msgId : _list) {
+					if (const auto item = owner.message(peerId, msgId)) {
+						if (item->replyToTop() != _rootId) {
+							item->ensureReplyComponent();
+							item->setReplyFields(
+								item->replyToTop() ? item->replyToTop() : _rootId,
+								_rootId,
+								false);
+						}
+						item->updateDependencyItem();
+					}
+				}
+				ranges::sort(_list, [&](MsgId a, MsgId b) {
+					const auto ia = owner.message(peerId, a);
+					const auto ib = owner.message(peerId, b);
+					if (!ia || !ib) return a > b;
+					if (ia->date() != ib->date()) {
+						return ia->date() > ib->date();
+					}
+					return a > b;
+				});
+				_loadingHistorical = false;
+				_skippedBefore = (messages.size() >= 50) ? 1 : 0;
+			}
+			if (_skippedBefore == 0 && _skippedAfter == 0) {
+				const auto root = _history->owner().message(peerId, _rootId);
+				const auto apiCount = root ? root->repliesCount() : 0;
+				_fullCount = (apiCount > 0) ? apiCount : int(_list.size());
+				LOG(("THREAD-DBG: loadBefore done listSize=%1 apiCount=%2 fullCount=%3")
+					.arg(_list.size())
+					.arg(apiCount)
+					.arg(_fullCount.current().value_or(-1)));
+			} else {
+				LOG(("THREAD-DBG: loadBefore more available listSize=%1 skippedBefore=%2 fullCount=%3")
+					.arg(_list.size())
+					.arg(_skippedBefore.value_or(-1))
+					.arg(_fullCount.current().value_or(-1)));
+			}
+			checkReadTillEnd();
+			_listChanges.fire({});
+		});
+		msgs->loadThread(chatId, parentId, fromId);
 		return;
 	}
 
@@ -968,6 +1116,9 @@ MsgId RepliesList::computeOutboxReadTillFull() const {
 }
 
 void RepliesList::setUnreadCount(std::optional<int> count) {
+	LOG(("UNREAD-DBG: setUnreadCount old=%1 new=%2")
+		.arg(_unreadCount.current().value_or(-1))
+		.arg(count.value_or(-1)));
 	_unreadCount = count;
 	if (!count && !_readRequestTimer.isActive() && !_readRequestId) {
 		reloadUnreadCountIfNeeded();
@@ -991,6 +1142,14 @@ bool RepliesList::isServerSideUnread(
 		: computeInboxReadTillFull();
 	if (MtsLink::hasChatId(_history->peer->id)) {
 		if (!till || !_mtsLinkInboxReadDate) {
+			static int logCount = 0;
+			if (logCount++ < 5) {
+				LOG(("BAR-DBG: isServerSideUnread UNKNOWN till=%1 readDate=%2 itemDate=%3 itemId=%4")
+					.arg(till.bare)
+					.arg(_mtsLinkInboxReadDate)
+					.arg(item->date())
+					.arg(item->id.bare));
+			}
 			return true;
 		}
 		return item->date() > _mtsLinkInboxReadDate;

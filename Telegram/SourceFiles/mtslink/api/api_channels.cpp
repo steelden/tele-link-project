@@ -185,6 +185,7 @@ ChannelData Channels::parseChat(const QJsonObject &obj) const {
 		.pinnedMessageCount = src.value("pinnedMessageCount").toInt(),
 		.memberRole = src.value("memberRole").toString(),
 		.interlocutorId = src.value("interlocutorId").toString(),
+		.memberCount = src.value("membersCount").toInt(),
 	};
 }
 

@@ -230,6 +230,7 @@ public:
 	[[nodiscard]] bool inboxReadTillKnown() const;
 	[[nodiscard]] MsgId inboxReadTillId() const;
 	[[nodiscard]] MsgId outboxReadTillId() const;
+	[[nodiscard]] TimeId mtsLinkInboxReadDate() const;
 
 	[[nodiscard]] bool isServerSideUnread(
 		not_null<const HistoryItem*> item) const override;

@@ -9,6 +9,7 @@ based on Telegram Desktop.
 #include <QObject>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QTimer>
 
 namespace MtsLink {
 class Rpc;

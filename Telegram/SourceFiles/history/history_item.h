@@ -466,6 +466,7 @@ public:
 		MsgId replyTo,
 		MsgId replyToTop,
 		bool isForumPost);
+	void ensureReplyComponent();
 	void setPostAuthor(const QString &author);
 	void setRealId(MsgId newId);
 	void markEphemeralSent();
