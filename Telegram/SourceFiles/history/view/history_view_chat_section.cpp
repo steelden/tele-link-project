@@ -3774,7 +3774,6 @@ void ChatWidget::showAtStart() {
 }
 
 void ChatWidget::showAtEnd() {
-	LOG(("MtsLink SCROLL-DBG: ChatWidget::showAtEnd called"));
 	showAtPosition(Data::MaxMessagePosition);
 }
 
@@ -3802,12 +3801,6 @@ void ChatWidget::showAtPosition(
 		Data::MessagePosition position,
 		FullMsgId originItemId,
 		const Window::SectionShow &params) {
-	LOG(("MtsLink SCROLL-DBG: ChatWidget::showAtPosition pos=(%1:%2 date=%3) isMax=%4 isUnread=%5")
-		.arg(position.fullId.peer.value)
-		.arg(position.fullId.msg.bare)
-		.arg(position.date)
-		.arg(position == Data::MaxMessagePosition)
-		.arg(position == Data::UnreadMessagePosition));
 	_lastShownAt = position.fullId;
 	controller()->setActiveChatEntry(activeChat());
 	const auto ignore = _repliesRootId
@@ -3974,28 +3967,20 @@ bool ChatWidget::showMessage(
 		PeerId peerId,
 		const Window::SectionShow &params,
 		MsgId messageId) {
-	LOG(("REPLY-NAV: ChatWidget::showMessage peerId=%1 messageId=%2 _repliesRootId=%3")
-		.arg(peerId.value).arg(messageId.bare).arg(_repliesRootId.bare));
 	if (peerId != _peer->id) {
-		LOG(("REPLY-NAV: peerId mismatch, returning false"));
 		return false;
 	}
 	const auto id = FullMsgId(_peer->id, messageId);
 	const auto message = _history->owner().message(id);
 	if (!message) {
-		LOG(("REPLY-NAV: message not found, returning false"));
 		return false;
 	} else if (_repliesRootId
 		&& !message->inThread(_repliesRootId)
 		&& id.msg != _repliesRootId) {
-		LOG(("REPLY-NAV: NOT in thread! replyToTop=%1 topicRootId=%2")
-			.arg(message->replyToTop().bare).arg(message->topicRootId().bare));
 		return false;
 	} else if (_sublist && message->savedSublist() != _sublist) {
-		LOG(("REPLY-NAV: sublist mismatch, returning false"));
 		return false;
 	}
-	LOG(("REPLY-NAV: will show message in thread"));
 	const auto originMessage = [&]() -> HistoryItem* {
 		using OriginMessage = Window::SectionShow::OriginMessage;
 		if (const auto origin = std::get_if<OriginMessage>(&params.origin)) {
@@ -5309,13 +5294,6 @@ MessagesBarData ChatWidget::listMessagesBar(
 	}
 	const auto hidden = (_replies && (repliesTill < 2))
 		|| (_sublist && (sublistTill < 2));
-	if (_replies) {
-		LOG(("BAR-DBG: listMessagesBar elements=%1 repliesTill=%2 hidden=%3 markLast=%4")
-			.arg(elements.size())
-			.arg(repliesTill.bare)
-			.arg(hidden)
-			.arg(markLastAsRead));
-	}
 	auto skippedReadIncoming = false;
 	for (auto i = 0, count = int(elements.size()); i != count; ++i) {
 		const auto item = elements[i]->data();
@@ -5329,14 +5307,6 @@ MessagesBarData ChatWidget::listMessagesBar(
 			|| (_sublist && item->id > sublistTill)
 			|| (migratedTill && (inHistory || item->id > migratedTill))
 			|| (historyTill && inHistory && item->id > historyTill);
-		if (_replies && unread && i < 5) {
-			LOG(("BAR-DBG: unread msg[%1] id=%2 date=%3 out=%4 replyToId=%5")
-				.arg(i)
-				.arg(item->id.bare)
-				.arg(item->date())
-				.arg(item->out())
-				.arg(item->replyToId().bare));
-		}
 		if (unread
 			&& (_replies || _sublist)
 			&& (markLastAsRead
@@ -5373,14 +5343,6 @@ MessagesBarData ChatWidget::listMessagesBar(
 		}
 		if (!skippedReadIncoming && !_replies && !_sublist) {
 			return {};
-		}
-		if (_replies) {
-			LOG(("BAR-DBG: PLACING BAR at element[%1] id=%2 date=%3 hidden=%4 skippedRead=%5")
-				.arg(i)
-				.arg(item->id.bare)
-				.arg(item->date())
-				.arg(hidden)
-				.arg(skippedReadIncoming));
 		}
 		return {
 			.bar = {

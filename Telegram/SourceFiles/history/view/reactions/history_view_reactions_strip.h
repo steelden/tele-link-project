@@ -150,6 +150,7 @@ private:
 
 	QImage _emojiParts;
 	std::array<bool, kFramesCount> _validEmoji = { { false } };
+	base::flat_map<ReactionId, QImage> _emojiFallbackCache;
 
 	rpl::lifetime _lifetime;
 

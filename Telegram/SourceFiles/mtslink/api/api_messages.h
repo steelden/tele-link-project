@@ -47,6 +47,13 @@ struct MentionInfo {
 	QString name;
 };
 
+struct ReactionData {
+	QString emojiId;
+	QString emoji;
+	int count = 0;
+	bool selected = false;
+};
+
 struct MessageData {
 	MessageId id;
 	ChatId chatId;
@@ -57,6 +64,7 @@ struct MessageData {
 	QJsonArray blocks;
 	QList<FileData> files;
 	QList<MentionInfo> mentions;
+	QList<ReactionData> reactions;
 	qint64 createdAt = 0;
 	qint64 updatedAt = 0;
 	bool isDeleted = false;

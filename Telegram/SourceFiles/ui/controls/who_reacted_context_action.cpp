@@ -350,7 +350,8 @@ Action::Action(
 
 	clicks(
 	) | rpl::on_next([=] {
-		if (_content.participants.size() == 1) {
+		if (_content.participants.size() == 1
+				&& _content.type != WhoReadType::Reacted) {
 			if (const auto onstack = _participantChosen) {
 				onstack(_content.participants.front());
 			}
@@ -530,7 +531,8 @@ void Action::refreshText() {
 		_st.itemStyle,
 		{ ((_content.state == WhoReadState::Unknown)
 			? tr::lng_context_seen_loading(tr::now)
-			: (usersCount == 1)
+			: (usersCount == 1
+				&& _content.type != WhoReadType::Reacted)
 			? _content.participants.front().name
 			: (_content.fullReactionsCount > 0
 				&& _content.fullReactionsCount <= _content.fullReadCount)

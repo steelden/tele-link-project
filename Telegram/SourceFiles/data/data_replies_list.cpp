@@ -168,10 +168,6 @@ rpl::producer<MessagesSlice> RepliesList::source(
 		int limitBefore,
 		int limitAfter) {
 	const auto around = aroundId.fullId.msg;
-	LOG(("MtsLink SCROLL-DBG: RepliesList::source() around=%1 limitBefore=%2 limitAfter=%3")
-		.arg(around.bare)
-		.arg(limitBefore)
-		.arg(limitAfter));
 	return [=](auto consumer) {
 		auto lifetime = rpl::lifetime();
 		const auto viewer = lifetime.make_state<Viewer>();
@@ -358,11 +354,6 @@ void RepliesList::injectRootDivider(
 }
 
 bool RepliesList::buildFromData(not_null<Viewer*> viewer) {
-	LOG(("MtsLink SCROLL-DBG: buildFromData around=%1 listSize=%2 skippedBefore=%3 skippedAfter=%4")
-		.arg(viewer->around.bare)
-		.arg(_list.size())
-		.arg(_skippedBefore.value_or(-1))
-		.arg(_skippedAfter.value_or(-1)));
 	if (_creating
 		|| (_list.empty() && _skippedBefore == 0 && _skippedAfter == 0)) {
 		viewer->slice.ids.clear();
@@ -446,11 +437,6 @@ bool RepliesList::buildFromData(not_null<Viewer*> viewer) {
 		peerId,
 		nearestToAround.value_or(
 			slice->ids.empty() ? 0 : slice->ids.back().msg));
-	LOG(("MtsLink SCROLL-DBG: buildFromData result: nearestToAround=%1 idsCount=%2 useBefore=%3 useAfter=%4")
-		.arg(slice->nearestToAround.msg.bare)
-		.arg(slice->ids.size())
-		.arg(useBefore)
-		.arg(useAfter));
 	slice->fullCount = _fullCount.current();
 
 	injectRootMessageAndReverse(viewer);
@@ -577,10 +563,6 @@ HistoryItem *RepliesList::lookupRoot() {
 void RepliesList::loadAround(MsgId id) {
 	Expects(!_creating);
 
-	LOG(("MtsLink SCROLL-DBG: loadAround id=%1 loadingAround=%2")
-		.arg(id.bare)
-		.arg(_loadingAround ? QString::number(_loadingAround->bare) : "none"));
-
 	if (_loadingAround && *_loadingAround == id) {
 		return;
 	}
@@ -660,29 +642,17 @@ void RepliesList::loadAround(MsgId id) {
 				_skippedAfter = 0;
 				if (const auto root = _history->owner().message(peerId, _rootId)) {
 					const auto apiCount = root->repliesCount();
-					LOG(("THREAD-DBG: initial load listSize=%1 apiCount=%2 skippedBefore=%3 rootId=%4")
-						.arg(_list.size())
-						.arg(apiCount)
-						.arg(_skippedBefore.value_or(-1))
-						.arg(_rootId.bare));
 					if (apiCount > 0) {
 						_fullCount = apiCount;
 					} else if (_skippedBefore == 0) {
 						_fullCount = int(_list.size());
 					}
 				} else {
-					LOG(("THREAD-DBG: initial load listSize=%1 rootNotFound skippedBefore=%2")
-						.arg(_list.size())
-						.arg(_skippedBefore.value_or(-1)));
 					if (_skippedBefore == 0) {
 						_fullCount = int(_list.size());
 					}
 				}
 			}
-			LOG(("THREAD-DBG: initial load _fullCount=%1 _mtsLinkInboxReadDate=%2 _inboxReadTillId=%3")
-				.arg(_fullCount.current().value_or(-1))
-				.arg(_mtsLinkInboxReadDate)
-				.arg(_inboxReadTillId.bare));
 			checkReadTillEnd();
 			_listChanges.fire({});
 		});
@@ -824,15 +794,6 @@ void RepliesList::loadBefore() {
 				const auto root = _history->owner().message(peerId, _rootId);
 				const auto apiCount = root ? root->repliesCount() : 0;
 				_fullCount = (apiCount > 0) ? apiCount : int(_list.size());
-				LOG(("THREAD-DBG: loadBefore done listSize=%1 apiCount=%2 fullCount=%3")
-					.arg(_list.size())
-					.arg(apiCount)
-					.arg(_fullCount.current().value_or(-1)));
-			} else {
-				LOG(("THREAD-DBG: loadBefore more available listSize=%1 skippedBefore=%2 fullCount=%3")
-					.arg(_list.size())
-					.arg(_skippedBefore.value_or(-1))
-					.arg(_fullCount.current().value_or(-1)));
 			}
 			checkReadTillEnd();
 			_listChanges.fire({});
@@ -1116,9 +1077,6 @@ MsgId RepliesList::computeOutboxReadTillFull() const {
 }
 
 void RepliesList::setUnreadCount(std::optional<int> count) {
-	LOG(("UNREAD-DBG: setUnreadCount old=%1 new=%2")
-		.arg(_unreadCount.current().value_or(-1))
-		.arg(count.value_or(-1)));
 	_unreadCount = count;
 	if (!count && !_readRequestTimer.isActive() && !_readRequestId) {
 		reloadUnreadCountIfNeeded();
@@ -1142,14 +1100,6 @@ bool RepliesList::isServerSideUnread(
 		: computeInboxReadTillFull();
 	if (MtsLink::hasChatId(_history->peer->id)) {
 		if (!till || !_mtsLinkInboxReadDate) {
-			static int logCount = 0;
-			if (logCount++ < 5) {
-				LOG(("BAR-DBG: isServerSideUnread UNKNOWN till=%1 readDate=%2 itemDate=%3 itemId=%4")
-					.arg(till.bare)
-					.arg(_mtsLinkInboxReadDate)
-					.arg(item->date())
-					.arg(item->id.bare));
-			}
 			return true;
 		}
 		return item->date() > _mtsLinkInboxReadDate;

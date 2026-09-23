@@ -1772,10 +1772,6 @@ void MainWidget::showMessage(
 		const SectionShow &params) {
 	const auto peerId = item->history()->peer->id;
 	const auto itemId = item->id;
-	LOG(("REPLY-NAV: MainWidget::showMessage peerId=%1 itemId=%2 hasOrigin=%3 hasMainSection=%4")
-		.arg(peerId.value).arg(itemId.bare)
-		.arg(!v::is_null(params.origin))
-		.arg(_mainSection != nullptr));
 	if (!v::is_null(params.origin)) {
 		if (_mainSection) {
 			if (_mainSection->showMessage(peerId, params, itemId)) {

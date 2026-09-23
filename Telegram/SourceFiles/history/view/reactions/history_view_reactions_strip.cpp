@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/frame_generator.h"
 #include "ui/animated_icon.h"
 #include "ui/painter.h"
+#include "ui/emoji_config.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 
@@ -193,6 +194,22 @@ void Strip::paintOne(
 			paintFrame(appear);
 		} else if (const auto select = icon.select.get()) {
 			paintFrame(select);
+		} else if (!icon.id.emoji().isEmpty()) {
+			auto it = _emojiFallbackCache.find(icon.id);
+			if (it == _emojiFallbackCache.end()) {
+				if (const auto e = Ui::Emoji::Find(icon.id.emoji())) {
+					const auto large = Ui::Emoji::GetSizeLarge();
+					auto img = QImage(
+						large, large,
+						QImage::Format_ARGB32_Premultiplied);
+					img.fill(Qt::transparent);
+					{ QPainter ep(&img); Ui::Emoji::Draw(ep, e, large, 0, 0); }
+					it = _emojiFallbackCache.emplace(icon.id, std::move(img)).first;
+				}
+			}
+			if (it != _emojiFallbackCache.end()) {
+				p.drawImage(target, it->second);
+			}
 		}
 	}
 }
@@ -410,13 +427,16 @@ void Strip::loadIcons() {
 	};
 	auto all = true;
 	for (auto &icon : _icons) {
-		if (icon.appearAnimation && !icon.appear) {
+		const auto isDummy = [](DocumentData *doc) {
+			return doc && !doc->sticker();
+		};
+		if (icon.appearAnimation && !icon.appear && !isDummy(icon.appearAnimation)) {
 			icon.appear = load(icon.appearAnimation);
 			if (!icon.appear) {
 				all = false;
 			}
 		}
-		if (icon.selectAnimation && !icon.select) {
+		if (icon.selectAnimation && !icon.select && !isDummy(icon.selectAnimation)) {
 			icon.select = load(icon.selectAnimation);
 			if (!icon.select) {
 				all = false;
@@ -456,6 +476,24 @@ void Strip::resolveMainReactionIcon() {
 	const auto main = _icons.front().selectAnimation;
 	Assert(main != nullptr);
 	_icons.front().appearAnimated = true;
+	if (!main->sticker()) {
+		const auto &id = _icons.front().id;
+		if (!id.emoji().isEmpty()) {
+			if (const auto e = Ui::Emoji::Find(id.emoji())) {
+				const auto large = Ui::Emoji::GetSizeLarge();
+				_mainReactionImage = QImage(
+					large, large, QImage::Format_ARGB32_Premultiplied);
+				_mainReactionImage.fill(Qt::transparent);
+				{
+					QPainter p(&_mainReactionImage);
+					Ui::Emoji::Draw(p, e, large, 0, 0);
+				}
+				ranges::fill(_validEmoji, false);
+				loadIcons();
+			}
+		}
+		return;
+	}
 	if (_mainReactionMedia && _mainReactionMedia->owner() == main) {
 		if (!_mainReactionLifetime) {
 			loadIcons();

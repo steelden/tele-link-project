@@ -2572,7 +2572,8 @@ void AddWhoReactedAction(
 	if (!menu->empty()) {
 		menu->addSeparator(&st::expandedMenuSeparator);
 	}
-	if (item->history()->peer->isUser()) {
+	if (item->history()->peer->isUser()
+			&& !MtsLink::hasChatId(item->history()->peer->id)) {
 		AddWhenEditedForwardedAuthorActionHelper(
 			menu,
 			item,

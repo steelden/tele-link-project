@@ -4077,19 +4077,12 @@ void HistoryItem::setReplies(HistoryMessageRepliesData &&data, bool notify) {
 		return;
 	}
 	auto views = Get<HistoryMessageViews>();
-	const auto oldCount = views ? views->replies.count : -1;
 	if (!views) {
 		AddComponents(HistoryMessageViews::Bit());
 		views = Get<HistoryMessageViews>();
 	}
 	const auto &repliers = data.recentRepliers;
 	const auto count = data.repliesCount;
-	if (count > 0) {
-		LOG(("THREAD-DBG: setReplies id=%1 oldCount=%2 newCount=%3")
-			.arg(id.bare)
-			.arg(oldCount)
-			.arg(count));
-	}
 	const auto channelId = data.channelId;
 	const auto readTillId = data.readMaxId
 		? std::max({
