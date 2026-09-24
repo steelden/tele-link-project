@@ -1084,9 +1084,18 @@ not_null<HistoryItem*> History::addNewToBack(
 		bool unread) {
 	Expects(!isBuildingFrontBlock());
 
-	addItemToBlock(item);
+	if (MtsLink::hasChatId(peer->id) && !isEmpty()) {
+		const auto lastDate = blocks.back()->messages.back()->data()->date();
+		if (item->date() < lastDate) {
+			insertMessageToBlocks(item);
+		} else {
+			addItemToBlock(item);
+		}
+	} else {
+		addItemToBlock(item);
+	}
 
-	if (!unread && item->isRegular()) {
+	if ((!unread || MtsLink::hasChatId(peer->id)) && item->isRegular()) {
 		const auto from = loadedAtTop() ? 0 : minMsgId();
 		const auto till = loadedAtBottom() ? ServerMaxMsgId : maxMsgId();
 		if (_messages) {
@@ -1707,7 +1716,7 @@ void History::newItemAdded(not_null<HistoryItem*> item, NewAddType type) {
 			} else if (!isForum()) {
 				owner().histories().requestDialogEntry(this);
 			}
-		} else {
+		} else if (!MtsLink::hasChatId(peer->id)) {
 			inboxRead(item);
 		}
 	}
@@ -1851,7 +1860,6 @@ void History::addEdgesToSharedMedia() {
 
 void History::addOlderSlice(const QVector<MTPMessage> &slice) {
 	if (slice.isEmpty()) {
-		LOG(("MtsLink DEBUG: addOlderSlice empty for peer=%1").arg(peer->id.value));
 		_loadedAtTop = true;
 		checkLocalMessages();
 		return;
@@ -1860,7 +1868,6 @@ void History::addOlderSlice(const QVector<MTPMessage> &slice) {
 	if (const auto added = createItems(slice); !added.empty()) {
 		addCreatedOlderSlice(added);
 	} else {
-		LOG(("MtsLink DEBUG: addOlderSlice no items added for peer=%1").arg(peer->id.value));
 		_loadedAtTop = true;
 		addEdgesToSharedMedia();
 	}
@@ -2809,11 +2816,13 @@ Dialogs::BadgesState History::chatListBadgesState() const {
 }
 
 Dialogs::BadgesState History::computeBadgesState() const {
-	return adjustBadgesStateByFolder(
+	const auto state = computeUnreadState();
+	const auto result = adjustBadgesStateByFolder(
 		Dialogs::BadgesForUnread(
-			computeUnreadState(),
+			state,
 			Dialogs::CountInBadge::Messages,
 			Dialogs::IncludeInBadge::All));
+	return result;
 }
 
 Dialogs::BadgesState History::adjustBadgesStateByFolder(
@@ -2995,7 +3004,6 @@ void History::markLoadedAtTop() {
 	if (_loadedAtTop) {
 		return;
 	}
-	LOG(("MtsLink DEBUG: markLoadedAtTop for peer=%1").arg(peer->id.value));
 	_loadedAtTop = true;
 	checkLocalMessages();
 	addEdgesToSharedMedia();

@@ -767,18 +767,16 @@ void PaintRow(
 			});
 		}
 	} else if (!item) {
-		auto availableWidth = namewidth;
-		if (const auto used = PaintRightButton(p, context)) {
-			availableWidth -= used;
-		} else if (entry->isPinnedDialog(context.filter)
-			&& (context.filter || !entry->fixedOnTopIndex())) {
-			auto &icon = ThreeStateIcon(
-				st::dialogsPinnedIcon,
-				context.active,
-				context.selected);
-			icon.paint(p, context.width - context.st->padding.right() - icon.width(), texttop, context.width);
-			availableWidth -= icon.width() + st::dialogsUnreadPadding;
-		}
+		const auto pinnedIcon = badgesState.empty()
+			&& entry->isPinnedDialog(context.filter)
+			&& (context.filter || !entry->fixedOnTopIndex());
+		auto availableWidth = PaintWideCounter(
+			p,
+			context,
+			badgesState,
+			texttop,
+			namewidth,
+			pinnedIcon);
 
 		auto &color = context.active
 			? st::dialogsTextFgServiceActive

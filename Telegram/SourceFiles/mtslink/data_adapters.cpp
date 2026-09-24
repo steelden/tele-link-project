@@ -65,6 +65,8 @@ struct PendingChatEvent {
 QHash<QString, QList<PendingChatEvent>> PendingChatEvents;
 QSet<QString> ChatInfoRequested;
 QSet<QString> UserProfileRequested;
+QSet<QString> ReadRequestSentChats;
+QMap<QPair<PeerId, MsgId>, int> PendingThreadUnread;
 
 const auto kStorageThumbBase =
 	u"https://prod-storage-chat.mts-link.ru/thumb/"_q;
@@ -749,6 +751,14 @@ bool hasChatId(PeerId peerId) {
 	return PeerToChatMap.contains(peerId);
 }
 
+void markReadRequestSent(const QString &chatId) {
+	ReadRequestSentChats.insert(chatId);
+}
+
+bool consumeReadRequestSent(const QString &chatId) {
+	return ReadRequestSentChats.remove(chatId);
+}
+
 ChatType chatTypeForPeer(PeerId peerId) {
 	return PeerToChatTypeMap.value(peerId, ChatType::Channel);
 }
@@ -983,6 +993,9 @@ HistoryItem *addMessage(
 	if (!src.parentId.isEmpty()) {
 		const auto parentBareId = uuidToBareId(src.parentId);
 		const auto parentMsgId = MsgId(parentBareId & 0x7FFFFFFFLL);
+		if (fields.replyTo.messageId.msg == 0) {
+			fields.replyTo.messageId = FullMsgId(chatPeerId, parentMsgId);
+		}
 		fields.replyTo.topicRootId = parentMsgId;
 		fields.flags |= MessageFlag::HasReplyInfo;
 		registerThreadRoot(chatPeerId, msgId, parentMsgId);
@@ -1053,6 +1066,16 @@ HistoryItem *addMessage(
 		auto repliesData = HistoryMessageRepliesData();
 		repliesData.isNull = false;
 		repliesData.repliesCount = src.threadChildrenCount;
+		repliesData.maxId = MsgId(src.threadChildrenCount);
+		const auto key = qMakePair(chatPeerId, msgId);
+		const auto pendingIt = PendingThreadUnread.find(key);
+		if (pendingIt != PendingThreadUnread.end()) {
+			repliesData.readMaxId = MsgId(
+				src.threadChildrenCount - pendingIt.value());
+			PendingThreadUnread.erase(pendingIt);
+		} else {
+			repliesData.readMaxId = MsgId(src.threadChildrenCount);
+		}
 		item->setReplies(std::move(repliesData));
 	}
 	if (item && src.updatedAt > 0 && src.updatedAt != src.createdAt) {
@@ -1213,6 +1236,7 @@ void handleNotificationEvent(
 			if (!hasChatId(peerId)) {
 				continue;
 			}
+			markReadRequestSent(chatId);
 			const auto readBareId = uuidToBareId(lastReadMsgId);
 			const auto readMsgId = MsgId(readBareId & 0x7FFFFFFFLL);
 			if (!threadId.isEmpty()) {
@@ -1321,6 +1345,39 @@ void handleChatEvent(
 		} else if (!replacePendingWithReal(session, chatPeerId, msg)) {
 			addMessage(session, msg, isThread);
 		}
+		if (isThread) {
+			const auto parentBareId = uuidToBareId(msg.parentId);
+			const auto parentMsgId = MsgId(parentBareId & 0x7FFFFFFFLL);
+			const auto parent = session->data().message(
+				chatPeerId, parentMsgId);
+			if (parent) {
+				if (const auto views = parent->Get<HistoryMessageViews>()) {
+					auto data = HistoryMessageRepliesData();
+					data.isNull = false;
+					data.repliesCount = views->replies.count + 1;
+					data.maxId = MsgId(data.repliesCount);
+					parent->setReplies(std::move(data));
+				}
+				session->data().requestItemViewRefresh(parent);
+			} else {
+				const auto key = qMakePair(chatPeerId, parentMsgId);
+				PendingThreadUnread[key]++;
+			}
+			const auto mts = session->account().mtsLinkSession();
+			const auto isOutgoing = mts && (msg.authorId == mts->userId());
+			if (!isOutgoing) {
+				const auto history = session->data().history(chatPeerId);
+				if (history->unreadCountKnown()) {
+					history->setUnreadCount(history->unreadCount() + 1);
+				}
+				const auto last = history->lastMessage();
+				if (last) {
+					last->invalidateChatListEntry();
+				} else {
+					history->updateChatListEntry();
+				}
+			}
+		}
 	} else if (type == "MessageDeletedEvent") {
 		const auto messageId = value.value("messageId").toString();
 		deleteMessage(session, chatId, messageId);
@@ -1412,7 +1469,14 @@ void handleChatEvent(
 			return;
 		}
 		const auto count = value.value("unreadMessageCount").toInt();
+		const auto localCount = history->unreadCount();
+		if (count < localCount && !consumeReadRequestSent(eventChatId)) {
+			return;
+		}
 		history->setUnreadCount(count);
+		if (const auto last = history->lastMessage()) {
+			last->invalidateChatListEntry();
+		}
 	} else if (type == "MessageChildrenCountUpdatedEvent") {
 		const auto messageId = value.value("messageId").toString();
 		const auto childrenCount = value.value("childrenCount").toInt();
@@ -1427,6 +1491,7 @@ void handleChatEvent(
 			auto repliesData = HistoryMessageRepliesData();
 			repliesData.isNull = false;
 			repliesData.repliesCount = childrenCount;
+			repliesData.maxId = MsgId(childrenCount);
 			item->setReplies(std::move(repliesData));
 			session->data().requestItemViewRefresh(item);
 		}
