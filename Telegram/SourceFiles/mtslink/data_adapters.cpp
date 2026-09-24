@@ -233,17 +233,32 @@ MTPMessageMedia buildFileMedia(
 	const auto fileUrl = u"https://prod-storage-chat.mts-link.ru/file/"_q
 		+ file.id + u"/download"_q;
 
+	const auto isVideo = file.mime.startsWith(u"video/"_q);
+
 	QVector<MTPDocumentAttribute> attrs;
 	attrs.push_back(
 		MTP_documentAttributeFilename(MTP_string(file.name)));
-	if (file.width > 0 && file.height > 0) {
+	if (isVideo) {
+		using Flag = MTPDdocumentAttributeVideo::Flag;
+		attrs.push_back(MTP_documentAttributeVideo(
+			MTP_flags(Flag::f_supports_streaming),
+			MTP_double(0),
+			MTP_int(file.width),
+			MTP_int(file.height),
+			MTPint(),
+			MTPdouble(),
+			MTPstring()));
+	} else if (file.width > 0 && file.height > 0) {
 		attrs.push_back(MTP_documentAttributeImageSize(
 			MTP_int(file.width), MTP_int(file.height)));
 	}
 
-	const auto thumbUrl = kStorageThumbBase + file.id + u"/S"_q;
 	auto thumbnail = ImageWithLocation{};
-	if (!file.id.isEmpty()) {
+	const auto hasVisualThumb = !file.id.isEmpty()
+		&& (file.mime.startsWith(u"image/"_q)
+			|| file.mime.startsWith(u"video/"_q));
+	if (hasVisualThumb) {
+		const auto thumbUrl = kStorageThumbBase + file.id + u"/S"_q;
 		thumbnail = ImageWithLocation{
 			.location = ImageLocation(
 				DownloadLocation{ PlainUrlLocation{ thumbUrl } },
@@ -1096,9 +1111,9 @@ void applyChannelData(
 	flags &= ~ChannelDataFlag::Left;
 	flags &= ~ChannelDataFlag::Forbidden;
 
-	if (src.type == ChatType::Channel) {
-		flags |= ChannelDataFlag::Megagroup;
-		flags &= ~ChannelDataFlag::Broadcast;
+	if (src.isReadOnly) {
+		flags |= ChannelDataFlag::Broadcast;
+		flags &= ~ChannelDataFlag::Megagroup;
 	} else {
 		flags |= ChannelDataFlag::Megagroup;
 		flags &= ~ChannelDataFlag::Broadcast;
@@ -1106,7 +1121,7 @@ void applyChannelData(
 	channel->setFlags(flags);
 	{
 		auto adminRights = ChatAdminRights(0);
-		if (src.type == ChatType::Channel) {
+		if (src.type == ChatType::Channel && !src.isReadOnly) {
 			adminRights |= ChatAdminRight::PostMessages;
 		}
 		const auto isAdmin =
@@ -1117,9 +1132,7 @@ void applyChannelData(
 			adminRights |= ChatAdminRight::PinMessages;
 			adminRights |= ChatAdminRight::DeleteMessages;
 		}
-		if (adminRights) {
-			channel->setAdminRights(adminRights);
-		}
+		channel->setAdminRights(adminRights);
 	}
 	channel->setName(src.name, {});
 	applyUserpic(channel, src.avatarFileId);
@@ -1275,6 +1288,30 @@ HistoryItem *addMessage(
 		fields.flags |= MessageFlag::HasReplyInfo;
 		registerThreadRoot(chatPeerId, msgId, parentMsgId);
 	}
+	if (src.forward) {
+		const auto &fwd = *src.forward;
+		fields.forwardDate = TimeId(fwd.createdAt / 1000);
+		if (!fwd.authorId.isEmpty()) {
+			const auto fwdBareId = uuidToBareId(fwd.authorId);
+			fields.forwardFrom = PeerId(::UserId(fwdBareId));
+			if (const auto fwdUser = session->data().userLoaded(
+					::UserId(fwdBareId))) {
+				fields.forwardSenderName = fwdUser->name();
+			}
+		}
+		if (fields.forwardDate == 0) {
+			fields.forwardDate = date;
+		}
+		if (!fwd.chatId.isEmpty()) {
+			fields.forwardOriginalPeer = chatIdToPeerId(fwd.chatId);
+		}
+		if (!fwd.messageId.isEmpty()) {
+			const auto it = MtsLinkIdToMsgMap.constFind(fwd.messageId);
+			fields.forwardOriginalMsgId = (it != MtsLinkIdToMsgMap.constEnd())
+				? it.value().second
+				: MsgId(uuidToBareId(fwd.messageId) & 0x7FFFFFFFLL);
+		}
+	}
 
 	auto text = parseMentionedText(src.text, src.markdown, src.mentions, session);
 
@@ -1321,6 +1358,11 @@ HistoryItem *addMessage(
 		return existing;
 	}
 
+	const auto multiFile = (src.files.size() > 1);
+	if (multiFile) {
+		fields.groupedId = msgBareId;
+	}
+
 	const auto media = (!src.files.isEmpty())
 		? buildFileMedia(session, src.files.first(), date)
 		: MTP_messageMediaEmpty();
@@ -1336,6 +1378,34 @@ HistoryItem *addMessage(
 			media);
 	if (item && !src.files.isEmpty()) {
 		reapplyPhotoUrls(item, src.files.first());
+	}
+	if (item && multiFile) {
+		for (int fi = 1; fi < src.files.size(); ++fi) {
+			const auto extraId = MsgId(
+				(uuidToBareId(src.id + QString::number(fi))
+					& 0x7FFFFFFFLL));
+			auto extraFields = HistoryItemCommonFields{
+				.id = extraId,
+				.flags = flags,
+				.from = fromPeerId,
+				.date = date,
+				.groupedId = msgBareId,
+			};
+			const auto extraMedia = buildFileMedia(
+				session, src.files[fi], date);
+			const auto extra = threadOnly
+				? history->makeMessage(
+					std::move(extraFields),
+					TextWithEntities(),
+					extraMedia)
+				: history->addNewExternalMessage(
+					std::move(extraFields),
+					TextWithEntities(),
+					extraMedia);
+			if (extra) {
+				reapplyPhotoUrls(extra, src.files[fi]);
+			}
+		}
 	}
 	if (item && src.threadChildrenCount > 0) {
 		auto repliesData = HistoryMessageRepliesData();
@@ -1447,10 +1517,40 @@ bool addOlderMessages(
 			};
 			fields.flags |= MessageFlag::HasReplyInfo;
 		}
+		if (src.forward) {
+			const auto &fwd = *src.forward;
+			fields.forwardDate = TimeId(fwd.createdAt / 1000);
+			if (!fwd.authorId.isEmpty()) {
+				const auto fwdBareId = uuidToBareId(fwd.authorId);
+				fields.forwardFrom = PeerId(::UserId(fwdBareId));
+				if (const auto fwdUser = session->data().userLoaded(
+						::UserId(fwdBareId))) {
+					fields.forwardSenderName = fwdUser->name();
+				}
+			}
+			if (fields.forwardDate == 0) {
+				fields.forwardDate = date;
+			}
+			if (!fwd.chatId.isEmpty()) {
+				fields.forwardOriginalPeer = chatIdToPeerId(fwd.chatId);
+			}
+			if (!fwd.messageId.isEmpty()) {
+				const auto it = MtsLinkIdToMsgMap.constFind(fwd.messageId);
+				fields.forwardOriginalMsgId =
+					(it != MtsLinkIdToMsgMap.constEnd())
+					? it.value().second
+					: MsgId(uuidToBareId(fwd.messageId) & 0x7FFFFFFFLL);
+			}
+		}
 
 		auto text = parseMentionedText(src.text, src.markdown, src.mentions, session);
 
 		registerMessageId(chatPeerId, msgId, src.id);
+
+		const auto multiFile = (src.files.size() > 1);
+		if (multiFile) {
+			fields.groupedId = msgBareId;
+		}
 
 		const auto media = (!src.files.isEmpty())
 			? buildFileMedia(session, src.files.first(), date)
@@ -1464,6 +1564,31 @@ bool addOlderMessages(
 			reapplyPhotoUrls(item, src.files.first());
 		}
 		items.push_back(item);
+
+		if (item && multiFile) {
+			for (int fi = 1; fi < src.files.size(); ++fi) {
+				const auto extraId = MsgId(
+					(uuidToBareId(src.id + QString::number(fi))
+						& 0x7FFFFFFFLL));
+				auto extraFields = HistoryItemCommonFields{
+					.id = extraId,
+					.flags = flags,
+					.from = fromPeerId,
+					.date = date,
+					.groupedId = msgBareId,
+				};
+				const auto extraMedia = buildFileMedia(
+					session, src.files[fi], date);
+				const auto extra = history->makeMessage(
+					std::move(extraFields),
+					TextWithEntities(),
+					extraMedia);
+				if (extra) {
+					reapplyPhotoUrls(extra, src.files[fi]);
+					items.push_back(extra);
+				}
+			}
+		}
 	}
 
 	LOG(("MtsLink Paging: newItems=%1, duplicates=%2")
@@ -1578,7 +1703,24 @@ void handleChatEvent(
 		if (msg.parentId.isEmpty()) {
 			msg.parentId = m.value("parentMessage").toObject().value("id").toString();
 		}
-		msg.type = MessageType::Text;
+		msg.type = [&] {
+			const auto t = m.value("type").toString();
+			if (t == "Forward") return MessageType::Forward;
+			if (t == "Call") return MessageType::Call;
+			if (t == "System") return MessageType::System;
+			return MessageType::Text;
+		}();
+		{
+			const auto fwd = m.value("forward").toObject();
+			if (!fwd.isEmpty()) {
+				msg.forward = Api::ForwardInfo{
+					.authorId = fwd.value("authorId").toString(),
+					.messageId = fwd.value("messageId").toString(),
+					.chatId = fwd.value("chatId").toString(),
+					.createdAt = qint64(fwd.value("createdAt").toDouble()),
+				};
+			}
+		}
 		{
 			auto mentionsArr = m.value("metadata").toObject()
 				.value("value").toObject()

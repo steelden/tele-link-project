@@ -3819,7 +3819,9 @@ void ApiWrap::sendAction(const SendAction &action) {
 	_sendActions.fire_copy(action);
 }
 
-void ApiWrap::finishForwarding(const SendAction &action) {
+void ApiWrap::finishForwarding(
+		const SendAction &action,
+		const QString &forwardText) {
 	const auto history = action.history;
 	const auto topicRootId = action.replyTo.topicRootId;
 	const auto monoforumPeerId = action.replyTo.monoforumPeerId;
@@ -3838,7 +3840,7 @@ void ApiWrap::finishForwarding(const SendAction &action) {
 		}
 
 		history->setForwardDraft(topicRootId, monoforumPeerId, {});
-		forwardMessages(std::move(toForward), action);
+		forwardMessages(std::move(toForward), action, nullptr, forwardText);
 	}
 
 	_session->data().sendHistoryChangeNotifications();
@@ -3854,8 +3856,32 @@ void ApiWrap::finishForwarding(const SendAction &action) {
 void ApiWrap::forwardMessages(
 		Data::ResolvedForwardDraft &&draft,
 		SendAction action,
-		FnMut<void()> &&successCallback) {
+		FnMut<void()> &&successCallback,
+		const QString &forwardText) {
 	Expects(!draft.items.empty());
+
+	const auto mts = _session->account().mtsLinkSession();
+	if (mts) {
+		const auto destPeerId = action.history->peer->id;
+		const auto destChatId = MtsLink::peerIdToChatId(destPeerId);
+		if (!destChatId.isEmpty()) {
+			for (const auto &item : draft.items) {
+				const auto srcMtsId = MtsLink::msgIdToMtsLinkId(
+					item->history()->peer->id,
+					item->id);
+				if (!srcMtsId.isEmpty()) {
+					mts->sending()->forwardMessage(
+						destChatId,
+						srcMtsId,
+						forwardText);
+				}
+			}
+		}
+		if (successCallback) {
+			successCallback();
+		}
+		return;
+	}
 
 	auto &histories = _session->data().histories();
 
@@ -4731,9 +4757,21 @@ void ApiWrap::sendMessage(
 		if (chatId.isEmpty()) {
 			return;
 		}
+		sendAction(message.action);
 		auto content = MtsLink::convertMentionsForSending(
 			textWithTags, _session);
 		content.text = content.text.trimmed();
+		{
+			const auto topicRootId = message.action.replyTo.topicRootId;
+			const auto monoforumPeerId = message.action.replyTo.monoforumPeerId;
+			const auto &fwdDraft = history->forwardDraft(
+				topicRootId, monoforumPeerId);
+			if (!fwdDraft.ids.empty()) {
+				finishForwarding(message.action, content.text);
+				return;
+			}
+		}
+		finishForwarding(message.action);
 		if (content.text.isEmpty()) {
 			return;
 		}
@@ -4790,7 +4828,6 @@ void ApiWrap::sendMessage(
 			QStringList(),
 			parentMtsId,
 			sendClientId);
-		sendAction(message.action);
 		return;
 	}
 

@@ -1150,6 +1150,9 @@ void Gif::paintTimestampMark(
 	if (_videoTimestamp <= 0 && _videoPosition < crl::time(200)) {
 		return;
 	}
+	const auto duration = _data->duration()
+		? _data->duration()
+		: _streamDuration;
 	PaintVideoTimestampMark(
 		p,
 		rthumb,
@@ -1157,7 +1160,7 @@ void Gif::paintTimestampMark(
 		((_videoPosition > 0)
 			? _videoPosition
 			: (_videoTimestamp * crl::time(1000))),
-		_data->duration());
+		duration);
 }
 
 void Gif::paintRoundPlaybackProgress(
@@ -2309,6 +2312,8 @@ void Gif::updateStatusText() const {
 			_videoPosition = std::max(
 				crl::time(position * crl::time(1000) / state.frequency),
 				crl::time(1));
+			_streamDuration = crl::time(
+				state.length * crl::time(1000) / state.frequency);
 		} else {
 			if (!frozen) {
 				statusSize = -1 - (_data->duration() / 1000);

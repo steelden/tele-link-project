@@ -10,6 +10,7 @@ based on Telegram Desktop.
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QTimer>
+#include <optional>
 
 namespace MtsLink {
 class Rpc;
@@ -54,6 +55,13 @@ struct ReactionData {
 	bool selected = false;
 };
 
+struct ForwardInfo {
+	UserId authorId;
+	MessageId messageId;
+	ChatId chatId;
+	qint64 createdAt = 0;
+};
+
 struct MessageData {
 	MessageId id;
 	ChatId chatId;
@@ -72,6 +80,7 @@ struct MessageData {
 	MessageId parentId;
 	int threadChildrenCount = 0;
 	int threadUnreadCount = 0;
+	std::optional<ForwardInfo> forward;
 };
 
 class Messages final : public QObject {

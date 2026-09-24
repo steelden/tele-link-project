@@ -41,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_click_handler.h"
 #include "api/api_transcribes.h"
 #include "apiwrap.h"
+#include "layout/layout_document_generic_preview.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_style.h"
 #include "styles/style_dialogs.h"
@@ -820,6 +821,14 @@ void Document::draw(
 			&& _openl;
 		const auto ttlRect = hasTtlBadge ? TTLRectFromInner(inner) : QRect();
 
+		const auto isTypedFile = !_data->isSong()
+			&& !_data->isVoiceMessage()
+			&& !_data->isSongWithCover();
+		const auto generic = isTypedFile
+			? Layout::DocumentGenericPreview::Create(_data)
+			: Layout::DocumentGenericPreview::Create(
+				static_cast<DocumentData*>(nullptr));
+
 		paintPlaybackBlobs(p, context, inner);
 
 		const auto coverDrawn = _data->isSongWithCover()
@@ -847,10 +856,23 @@ void Document::draw(
 				}
 			} else {
 				auto hq = PainterHighQualityEnabler(p);
-				p.setBrush(stm->msgFileBg);
+				if (isTypedFile) {
+					p.setBrush(context.selected()
+						? generic.selected
+						: generic.color);
+				} else {
+					p.setBrush(stm->msgFileBg);
+				}
 				p.drawEllipse(inner);
 			}
 		}
+
+		const auto showExtInCircle = isTypedFile
+			&& !generic.ext.isEmpty()
+			&& (loaded || _dataMedia->canBePlayed())
+			&& !_data->loading()
+			&& !_data->uploading()
+			&& !_data->waitingForAlbum();
 
 		const auto &icon = [&]() -> const style::icon& {
 			if (_data->waitingForAlbum()) {
@@ -909,6 +931,10 @@ void Document::draw(
 				}
 			} else if (previous && radialOpacity > 0. && radialOpacity < 1.) {
 				PaintInterpolatedIcon(q, icon, *previous, radialOpacity, inner);
+			} else if (showExtInCircle) {
+				q.setFont(st::semiboldFont);
+				q.setPen(Qt::white);
+				q.drawText(inner, generic.ext.toUpper(), QTextOption(Qt::AlignCenter));
 			} else {
 				icon.paintInCenter(q, inner);
 			}

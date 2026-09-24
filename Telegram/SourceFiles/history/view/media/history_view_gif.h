@@ -280,6 +280,7 @@ private:
 	mutable QImage _thumbCache;
 	mutable QImage _roundingMask;
 	mutable crl::time _videoPosition = 0;
+	mutable crl::time _streamDuration = 0;
 	std::shared_ptr<VoiceSeekClickHandler> _seekl;
 	std::unique_ptr<VideoMessageSeek> _roundSeek;
 	crl::time _seekPreviewTime = 0;

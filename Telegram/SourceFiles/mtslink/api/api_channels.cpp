@@ -182,6 +182,7 @@ ChannelData Channels::parseChat(const QJsonObject &obj) const {
 		.avatarFileId = src.value("coverFileId").toString(),
 		.isMuted = !src.value("isNotifiable").toBool(true),
 		.isPinned = src.value("pinPosition").toInt() > 0,
+		.isReadOnly = src.value("isReadOnly").toBool(false),
 		.pinnedMessageCount = src.value("pinnedMessageCount").toInt(),
 		.memberRole = src.value("memberRole").toString(),
 		.interlocutorId = src.value("interlocutorId").toString(),

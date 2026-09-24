@@ -386,7 +386,9 @@ void HistoryMessageForwarded::create(
 	}
 	text.setMarkedText(st::fwdTextStyle, phrase, kMarkupTextOptions, context);
 
-	text.setLink(1, fromChannel
+	text.setLink(1, (originalChatPeer && originalId)
+		? JumpToMessageClickHandler(originalChatPeer, originalId)
+		: fromChannel
 		? JumpToMessageClickHandler(originalSender, originalId)
 		: originalSender
 		? originalSender->openLink()

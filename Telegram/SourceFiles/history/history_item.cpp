@@ -249,6 +249,7 @@ struct HistoryItem::CreateConfig {
 	MsgId originalId = 0;
 	TimeId originalDate = 0;
 	PeerId originalSenderId = 0;
+	PeerId originalChatPeerId = 0;
 	QString originalSenderName;
 	QString originalPostAuthor;
 
@@ -5120,6 +5121,9 @@ void HistoryItem::setupForwardedComponent(const CreateConfig &config) {
 				config.imported);
 	}
 	forwarded->originalId = config.originalId;
+	forwarded->originalChatPeer = config.originalChatPeerId
+		? _history->owner().peer(config.originalChatPeerId).get()
+		: nullptr;
 	forwarded->originalPostAuthor = config.originalPostAuthor;
 	forwarded->psaType = config.forwardPsaType;
 	forwarded->savedFromPeer = _history->owner().peerLoaded(
@@ -5278,6 +5282,15 @@ void HistoryItem::createComponentsHelper(HistoryItemCommonFields &&fields) {
 	}
 	if (fields.suggest.exists) {
 		config.suggest = fields.suggest;
+	}
+	if (fields.forwardDate != 0) {
+		config.originalDate = fields.forwardDate;
+		config.originalSenderId = fields.forwardFrom;
+		config.originalSenderName = fields.forwardSenderName;
+		if (fields.forwardOriginalMsgId) {
+			config.originalId = fields.forwardOriginalMsgId;
+			config.originalChatPeerId = fields.forwardOriginalPeer;
+		}
 	}
 
 	createComponents(std::move(config));

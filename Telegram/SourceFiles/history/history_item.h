@@ -104,6 +104,11 @@ struct HistoryItemCommonFields {
 	bool ignoreForwardFrom = false;
 	bool ignoreForwardCaptions = false;
 	bool mediaSpoiler = false;
+	TimeId forwardDate = 0;
+	PeerId forwardFrom = 0;
+	QString forwardSenderName;
+	PeerId forwardOriginalPeer = 0;
+	MsgId forwardOriginalMsgId = 0;
 };
 
 enum class HistoryReactionSource : char {
