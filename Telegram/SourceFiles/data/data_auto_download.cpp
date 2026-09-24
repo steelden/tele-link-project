@@ -355,10 +355,12 @@ bool Should(
 		not_null<DocumentData*> document) {
 	if (document->sticker() || document->isGifv()) {
 		return true;
-	} else if (document->isVoiceMessage()
-		|| document->isVideoMessage()
-		|| document->isSong()
-		|| document->isVideoFile()) {
+	} else if (document->isVideoMessage() || document->isVideoFile()) {
+		return data.shouldDownload(
+			source,
+			AutoPlayTypeFromDocument(document),
+			document->size);
+	} else if (document->isVoiceMessage() || document->isSong()) {
 		return false;
 	}
 	return data.shouldDownload(source, Type::File, document->size);
@@ -377,10 +379,14 @@ bool Should(
 	} else if (document->isGifv()) {
 		return true;
 	} else if (override == Override::ForceAllow) {
-		if (document->isVoiceMessage()
-			|| document->isVideoMessage()
-			|| document->isSong()
-			|| document->isVideoFile()) {
+		if (document->isVideoMessage() || document->isVideoFile()) {
+			return ForceAllowed(
+				data,
+				SourceFromPeer(peer),
+				AutoPlayTypeFromDocument(document),
+				document->size);
+		}
+		if (document->isVoiceMessage() || document->isSong()) {
 			return false;
 		}
 		return ForceAllowed(

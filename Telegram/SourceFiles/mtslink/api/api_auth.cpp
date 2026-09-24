@@ -4,6 +4,7 @@ based on Telegram Desktop.
 */
 #include "mtslink/api/api_auth.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/env_config.h"
 
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -15,7 +16,7 @@ based on Telegram Desktop.
 
 namespace MtsLink::Api {
 
-const QString Auth::kGatewayUrl = "https://gw.mts-link.ru";
+const QString Auth::kGatewayUrl; // unused, kept for linkage
 
 Auth::Auth(QObject *parent)
 : QObject(parent)
@@ -154,7 +155,8 @@ void Auth::postJson(
 		const QJsonObject &body,
 		std::function<void(const QJsonObject &)> done,
 		std::function<void(const QString &)> fail) {
-	QNetworkRequest request(QUrl(kGatewayUrl + path));
+	QNetworkRequest request(QUrl(
+		EnvConfig::instance().httpsServerUrl() + path));
 	request.setHeader(
 		QNetworkRequest::ContentTypeHeader,
 		"application/json");

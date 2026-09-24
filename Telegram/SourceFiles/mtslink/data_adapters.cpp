@@ -4,6 +4,7 @@ based on Telegram Desktop.
 */
 #include "mtslink/data_adapters.h"
 #include "mtslink/session.h"
+#include "mtslink/env_config.h"
 
 #include "main/main_session.h"
 #include "main/main_account.h"
@@ -68,10 +69,15 @@ QSet<QString> UserProfileRequested;
 QSet<QString> ReadRequestSentChats;
 QMap<QPair<PeerId, MsgId>, int> PendingThreadUnread;
 
-const auto kStorageThumbBase =
-	u"https://prod-storage-chat.mts-link.ru/thumb/"_q;
-const auto kAvatarCdnBase =
-	u"https://prod-cdn-thumb-public-chat.mts-link.ru/thumb_"_q;
+[[nodiscard]] QString storageThumbBase() {
+	return EnvConfig::instance().baseMediaUrl() + u"/thumb/"_q;
+}
+[[nodiscard]] QString avatarCdnBase() {
+	return EnvConfig::instance().publicCdnMediaUrl() + u"/thumb_"_q;
+}
+[[nodiscard]] QString fileDownloadBase() {
+	return EnvConfig::instance().baseMediaUrl() + u"/file/"_q;
+}
 
 quint64 makeMsgKey(PeerId peerId, MsgId msgId) {
 	return (quint64(peerId.value) ^ (quint64(msgId.bare) << 32));
@@ -145,8 +151,8 @@ void reapplyPhotoUrls(
 		return;
 	}
 
-	const auto thumbUrl = kStorageThumbBase + file.id + u"/S"_q;
-	const auto fullUrl = kStorageThumbBase + file.id + u"/XL"_q;
+	const auto thumbUrl = storageThumbBase() + file.id + u"/S"_q;
+	const auto fullUrl = storageThumbBase() + file.id + u"/XL"_q;
 
 	const auto thumbLocation = ImageLocation(
 		DownloadLocation{ PlainUrlLocation{ thumbUrl } },
@@ -172,8 +178,8 @@ MTPMessageMedia buildPhotoMedia(
 		not_null<Main::Session*> session,
 		const Api::FileData &file,
 		TimeId date) {
-	const auto thumbUrl = kStorageThumbBase + file.id + u"/S"_q;
-	const auto fullUrl = kStorageThumbBase + file.id + u"/XL"_q;
+	const auto thumbUrl = storageThumbBase() + file.id + u"/S"_q;
+	const auto fullUrl = storageThumbBase() + file.id + u"/XL"_q;
 
 	const auto photoId = base::RandomValue<PhotoId>();
 
@@ -230,8 +236,7 @@ MTPMessageMedia buildFileMedia(
 		return buildPhotoMedia(session, file, date);
 	}
 
-	const auto fileUrl = u"https://prod-storage-chat.mts-link.ru/file/"_q
-		+ file.id + u"/download"_q;
+	const auto fileUrl = fileDownloadBase() + file.id + u"/download"_q;
 
 	const auto isVideo = file.mime.startsWith(u"video/"_q);
 
@@ -258,7 +263,7 @@ MTPMessageMedia buildFileMedia(
 		&& (file.mime.startsWith(u"image/"_q)
 			|| file.mime.startsWith(u"video/"_q));
 	if (hasVisualThumb) {
-		const auto thumbUrl = kStorageThumbBase + file.id + u"/S"_q;
+		const auto thumbUrl = storageThumbBase() + file.id + u"/S"_q;
 		thumbnail = ImageWithLocation{
 			.location = ImageLocation(
 				DownloadLocation{ PlainUrlLocation{ thumbUrl } },
@@ -313,7 +318,7 @@ void applyUserpic(not_null<PeerData*> peer, const QString &fileId) {
 	if (peer->userpicPhotoId() == photoId) {
 		return;
 	}
-	const auto url = kAvatarCdnBase + fileId + u"_s.jpg"_q;
+	const auto url = avatarCdnBase() + fileId + u"_s.jpg"_q;
 	const auto location = ImageLocation(
 		DownloadLocation{ PlainUrlLocation{ url } }, 160, 160);
 	peer->setUserpic(photoId, location, false);
@@ -360,10 +365,17 @@ TextWithEntities parseMentionedText(
 		}
 	}
 
-	const bool hasMarkdown = !markdown.isEmpty();
 	const bool hasMentions = source.contains(u"<@u:"_q);
+	const bool hasMarkdownChars = source.contains('*')
+		|| source.contains('~')
+		|| source.contains('`')
+		|| source.contains('_')
+		|| source.contains('|')
+		|| source.contains('[');
+	const bool needsMarkdownParse = !markdown.isEmpty()
+		|| hasMarkdownChars;
 
-	if (!hasMarkdown && !hasMentions) {
+	if (!needsMarkdownParse && !hasMentions) {
 		auto result = TextWithEntities{ source };
 		TextUtilities::ParseEntities(result, TextParseLinks);
 		return result;
@@ -372,7 +384,7 @@ TextWithEntities parseMentionedText(
 	QString result;
 	EntitiesInText entities;
 
-	if (!hasMarkdown) {
+	if (!needsMarkdownParse) {
 		static const auto re = QRegularExpression(
 			QStringLiteral("<@u:([0-9a-f\\-]{36})>"));
 		int pos = 0;
@@ -473,12 +485,37 @@ TextWithEntities parseMentionedText(
 			} else {
 				pos += 3;
 				const auto nlPos = unescaped.indexOf('\n', pos);
-				if (nlPos != -1) {
-					preLang = unescaped.mid(pos, nlPos - pos).trimmed();
-					pos = nlPos + 1;
+				const auto searchEnd = (nlPos != -1) ? nlPos : len;
+				int closeTriple = -1;
+				for (int i = pos; i + 2 < searchEnd; ++i) {
+					if (unescaped[i] == '`'
+						&& unescaped[i + 1] == '`'
+						&& unescaped[i + 2] == '`') {
+						closeTriple = i;
+						break;
+					}
 				}
-				preStart = result.size();
-				inPre = true;
+				if (closeTriple >= 0) {
+					const auto content = unescaped.mid(
+						pos, closeTriple - pos);
+					const auto entityStart = result.size();
+					result += content;
+					if (!content.isEmpty()) {
+						entities.push_back(EntityInText(
+							EntityType::Pre,
+							entityStart,
+							content.size()));
+					}
+					pos = closeTriple + 3;
+				} else {
+					if (nlPos != -1) {
+						preLang = unescaped.mid(
+							pos, nlPos - pos).trimmed();
+						pos = nlPos + 1;
+					}
+					preStart = result.size();
+					inPre = true;
+				}
 				continue;
 			}
 		}
@@ -525,6 +562,29 @@ TextWithEntities parseMentionedText(
 				}
 				pos = end + 1;
 				continue;
+			}
+		}
+
+		if (unescaped[pos] == '[') {
+			const auto closeB = unescaped.indexOf(']', pos + 1);
+			if (closeB != -1
+				&& closeB + 1 < len
+				&& unescaped[closeB + 1] == '(') {
+				const auto closeP = unescaped.indexOf(')', closeB + 2);
+				if (closeP != -1) {
+					const auto linkText = unescaped.mid(pos + 1, closeB - pos - 1);
+					const auto linkUrl = unescaped.mid(closeB + 2, closeP - closeB - 2);
+					if (!linkText.isEmpty() && !linkUrl.isEmpty()) {
+						entities.push_back(EntityInText(
+							EntityType::CustomUrl,
+							result.size(),
+							linkText.size(),
+							linkUrl));
+						result += linkText;
+						pos = closeP + 1;
+						continue;
+					}
+				}
 			}
 		}
 
@@ -679,6 +739,50 @@ TextWithEntities parseMentionedText(
 	auto parsed = TextWithEntities{ result, entities };
 	TextUtilities::ParseEntities(parsed, TextParseLinks);
 	return parsed;
+}
+
+QString markdownFromBlocks(const QJsonArray &blocks) {
+	QString md;
+	for (const auto &b : blocks) {
+		const auto obj = b.toObject();
+		const auto type = obj.value(u"type"_q).toString();
+		const auto value = obj.value(u"value"_q).toObject();
+
+		if (type == u"LineBreak"_q) {
+			md += '\n';
+		} else if (type == u"TextElement"_q) {
+			const auto text = value.value(u"text"_q).toString();
+			const auto style = value.value(u"style"_q).toObject();
+			const auto bold = style.value(u"bold"_q).toBool();
+			const auto italic = style.value(u"italic"_q).toBool();
+			const auto strike = style.value(u"strike"_q).toBool();
+			QString wrapped = text;
+			if (bold) wrapped = u"**"_q + wrapped + u"**"_q;
+			if (italic) wrapped = u"*"_q + wrapped + u"*"_q;
+			if (strike) wrapped = u"~~"_q + wrapped + u"~~"_q;
+			md += wrapped;
+		} else if (type == u"MentionElement"_q) {
+			const auto id = value.value(u"id"_q).toString();
+			md += u"<@u:"_q + id + u">"_q;
+		} else if (type == u"LinkElement"_q) {
+			const auto url = value.value(u"url"_q).toString();
+			const auto elements = value.value(u"elements"_q).toArray();
+			QString linkText;
+			for (const auto &el : elements) {
+				const auto eo = el.toObject();
+				if (eo.value(u"type"_q).toString() == u"TextElement"_q) {
+					linkText += eo.value(u"value"_q).toObject()
+						.value(u"text"_q).toString();
+				}
+			}
+			if (linkText == url || linkText.isEmpty()) {
+				md += url;
+			} else {
+				md += u"["_q + linkText + u"]("_q + url + u")"_q;
+			}
+		}
+	}
+	return md;
 }
 
 } // namespace
@@ -1695,6 +1799,12 @@ void handleChatEvent(
 		msg.authorId = m.value("authorId").toString();
 		msg.text = m.value("text").toString();
 		msg.markdown = m.value("markdown").toString();
+		if (msg.markdown.isEmpty()) {
+			const auto blocksArr = m.value("blocks").toArray();
+			if (!blocksArr.isEmpty()) {
+				msg.markdown = markdownFromBlocks(blocksArr);
+			}
+		}
 		msg.createdAt = parseTimestamp(m, "createdAtMs", "createdAt");
 		msg.updatedAt = parseTimestamp(m, "updatedAtMs", "updatedAt");
 		const auto repliedMsg = m.value("repliedMessage").toObject();
@@ -1801,7 +1911,13 @@ void handleChatEvent(
 	} else if (type == "MessageUpdatedV2Event") {
 		const auto messageId = value.value("messageId").toString();
 		const auto newText = value.value("text").toString();
-		const auto newMarkdown = value.value("markdown").toString();
+		auto newMarkdown = value.value("markdown").toString();
+		if (newMarkdown.isEmpty()) {
+			const auto blocksArr = value.value("blocks").toArray();
+			if (!blocksArr.isEmpty()) {
+				newMarkdown = markdownFromBlocks(blocksArr);
+			}
+		}
 		const auto updatedAt = value.value("updatedAt").toDouble();
 
 		if (messageId.isEmpty()) {
@@ -2031,8 +2147,7 @@ bool replacePendingWithReal(
 			if (!realMsg.files.isEmpty()) {
 				const auto &f = realMsg.files.first();
 				doc->setContentUrl(
-					u"https://prod-storage-chat.mts-link.ru/file/"_q
-					+ f.id + u"/download"_q);
+					fileDownloadBase() + f.id + u"/download"_q);
 			}
 		}
 	}
@@ -2178,87 +2293,223 @@ MtsLinkMessageContent convertMentionsForSending(
 	const auto &text = textWithTags.text;
 	const auto &tags = textWithTags.tags;
 
-	struct MentionHit {
-		int offset = 0;
-		int length = 0;
-		QString uuid;
-		QString displayName;
-	};
-	QList<MentionHit> hits;
-	for (const auto &tag : tags) {
-		if (!TextUtilities::IsMentionLink(tag.id)) {
-			continue;
-		}
-		const auto data = TextUtilities::MentionEntityData(tag.id);
-		if (data.isEmpty()) {
-			continue;
-		}
-		const auto fields = TextUtilities::MentionNameDataToFields(data);
-		const auto mentionUuid = userBareIdToUuid(fields.userId);
-		if (mentionUuid.isEmpty()) {
-			continue;
-		}
-		MentionHit hit;
-		hit.offset = tag.offset;
-		hit.length = tag.length;
-		hit.uuid = mentionUuid;
-		hit.displayName = text.mid(tag.offset, tag.length);
-		hits.push_back(std::move(hit));
-	}
-
-	if (hits.isEmpty()) {
+	if (tags.isEmpty()) {
 		MtsLinkMessageContent plain;
 		plain.text = text;
 		return plain;
 	}
 
-	QString mtsText;
-	QJsonArray blocks;
-	QJsonArray mentionsMeta;
-	QSet<QString> addedMentions;
-	int pos = 0;
+	static const auto styleMap = QHash<QString, QString>{
+		{u"**"_q, u"bold"_q},
+		{u"__"_q, u"italic"_q},
+		{u"~~"_q, u"strike"_q},
+	};
+	static const auto mdMap = QHash<QString, QString>{
+		{u"**"_q, u"**"_q},
+		{u"__"_q, u"*"_q},
+		{u"^^"_q, u"__"_q},
+		{u"~~"_q, u"~~"_q},
+		{u"`"_q, u"`"_q},
+		{u"```"_q, u"```"_q},
+		{u"||"_q, u"||"_q},
+	};
 
 	const auto mts = session->account().mtsLinkSession();
 	const auto orgId = mts ? mts->organizationId() : QString();
 
-	for (const auto &hit : hits) {
-		const auto before = text.mid(pos, hit.offset - pos);
-		if (!before.isEmpty()) {
-			blocks.append(QJsonObject{
-				{QStringLiteral("type"), QStringLiteral("TextElement")},
-				{QStringLiteral("value"), QJsonObject{{QStringLiteral("text"), before}}},
-			});
-		}
-		mtsText += before;
-		mtsText += QStringLiteral("<@u:") + hit.uuid + QStringLiteral(">");
+	enum class HitType { Mention, Link };
+	struct TagHit {
+		int offset = 0;
+		int length = 0;
+		HitType type = HitType::Mention;
+		QString uuid;
+		QString displayName;
+		QString url;
+	};
+	QList<TagHit> hits;
+	QJsonArray mentionsMeta;
+	QSet<QString> addedMentions;
 
-		blocks.append(QJsonObject{
-			{QStringLiteral("type"), QStringLiteral("MentionElement")},
-			{QStringLiteral("value"), QJsonObject{
-				{QStringLiteral("id"), hit.uuid},
-				{QStringLiteral("type"), QStringLiteral("User")},
-				{QStringLiteral("organizationId"), orgId},
-			}},
-		});
+	struct StyleRange {
+		int offset, length;
+		QString name;
+	};
+	QList<StyleRange> styleRanges;
 
-		if (!addedMentions.contains(hit.uuid)) {
-			addedMentions.insert(hit.uuid);
-			mentionsMeta.append(QJsonObject{
-				{QStringLiteral("id"), hit.uuid},
-				{QStringLiteral("type"), QStringLiteral("User")},
-				{QStringLiteral("name"), hit.displayName},
-			});
+	QMap<int, QString> allMdMarkers;
+	QMap<int, QString> blockMdMarkers;
+
+	for (const auto &tag : tags) {
+		if (TextUtilities::IsMentionLink(tag.id)) {
+			const auto data = TextUtilities::MentionEntityData(tag.id);
+			if (data.isEmpty()) continue;
+			const auto fields = TextUtilities::MentionNameDataToFields(data);
+			const auto uuid = userBareIdToUuid(fields.userId);
+			if (uuid.isEmpty()) continue;
+			TagHit hit;
+			hit.offset = tag.offset;
+			hit.length = tag.length;
+			hit.type = HitType::Mention;
+			hit.uuid = uuid;
+			hit.displayName = text.mid(tag.offset, tag.length);
+			hits.push_back(std::move(hit));
+			if (!addedMentions.contains(uuid)) {
+				addedMentions.insert(uuid);
+				mentionsMeta.append(QJsonObject{
+					{u"id"_q, uuid},
+					{u"type"_q, u"User"_q},
+					{u"name"_q, text.mid(tag.offset, tag.length)},
+				});
+			}
+		} else if (!tag.id.isEmpty()
+			&& (tag.id.contains(u"://"_q) || tag.id.contains('.'))) {
+			TagHit hit;
+			hit.offset = tag.offset;
+			hit.length = tag.length;
+			hit.type = HitType::Link;
+			hit.url = tag.id;
+			hits.push_back(std::move(hit));
+		} else {
+			if (styleMap.contains(tag.id)) {
+				styleRanges.push_back({
+					tag.offset, tag.length, styleMap[tag.id]});
+			}
+			const auto mit = mdMap.constFind(tag.id);
+			if (mit != mdMap.constEnd()) {
+				allMdMarkers[tag.offset] += *mit;
+				allMdMarkers[tag.offset + tag.length] += *mit;
+				if (!styleMap.contains(tag.id)) {
+					blockMdMarkers[tag.offset] += *mit;
+					blockMdMarkers[tag.offset + tag.length] += *mit;
+				}
+			}
 		}
-		pos = hit.offset + hit.length;
 	}
-	const auto tail = text.mid(pos);
-	if (!tail.isEmpty()) {
+
+	if (hits.isEmpty() && styleRanges.isEmpty()
+		&& allMdMarkers.isEmpty()) {
+		MtsLinkMessageContent plain;
+		plain.text = text;
+		return plain;
+	}
+
+	std::sort(hits.begin(), hits.end(),
+		[](const auto &a, const auto &b) { return a.offset < b.offset; });
+
+	const auto insertMarkers = [&](
+			const QMap<int, QString> &map,
+			int from, int to) -> QString {
+		QString segment;
+		int p = from;
+		for (auto it = map.lowerBound(from);
+			it != map.end() && it.key() <= to; ++it) {
+			if (it.key() > p) {
+				segment += text.mid(p, it.key() - p);
+			}
+			segment += it.value();
+			p = it.key();
+		}
+		if (to > p) {
+			segment += text.mid(p, to - p);
+		}
+		return segment;
+	};
+
+	// Build markdown text field.
+	QString mtsText;
+	{
+		int pos = 0;
+		for (const auto &hit : hits) {
+			mtsText += insertMarkers(allMdMarkers, pos, hit.offset);
+			if (hit.type == HitType::Mention) {
+				mtsText += u"<@u:"_q + hit.uuid + u">"_q;
+			} else {
+				const auto lt = text.mid(hit.offset, hit.length);
+				mtsText += u"["_q + lt + u"]("_q + hit.url + u")"_q;
+			}
+			pos = hit.offset + hit.length;
+		}
+		mtsText += insertMarkers(allMdMarkers, pos, text.size());
+	}
+
+	// Build blocks: split text by style and special boundaries.
+	QSet<int> splitSet;
+	splitSet.insert(0);
+	splitSet.insert(text.size());
+	for (const auto &sr : styleRanges) {
+		splitSet.insert(sr.offset);
+		splitSet.insert(sr.offset + sr.length);
+	}
+	for (const auto &h : hits) {
+		splitSet.insert(h.offset);
+		splitSet.insert(h.offset + h.length);
+	}
+	auto splits = splitSet.values();
+	std::sort(splits.begin(), splits.end());
+
+	QJsonArray blocks;
+	for (int si = 0; si + 1 < splits.size(); ++si) {
+		const auto from = splits[si];
+		const auto to = splits[si + 1];
+		if (from >= to) continue;
+
+		const TagHit *inHit = nullptr;
+		for (const auto &h : hits) {
+			if (from >= h.offset && from < h.offset + h.length) {
+				inHit = &h;
+				break;
+			}
+		}
+
+		if (inHit) {
+			if (from != inHit->offset) continue;
+			if (inHit->type == HitType::Mention) {
+				blocks.append(QJsonObject{
+					{u"type"_q, u"MentionElement"_q},
+					{u"value"_q, QJsonObject{
+						{u"id"_q, inHit->uuid},
+						{u"type"_q, u"User"_q},
+						{u"organizationId"_q, orgId},
+					}},
+				});
+			} else {
+				const auto lt = text.mid(
+					inHit->offset, inHit->length);
+				blocks.append(QJsonObject{
+					{u"type"_q, u"LinkElement"_q},
+					{u"value"_q, QJsonObject{
+						{u"elements"_q, QJsonArray{QJsonObject{
+							{u"type"_q, u"TextElement"_q},
+							{u"value"_q, QJsonObject{
+								{u"text"_q, lt}}},
+						}}},
+						{u"url"_q, inHit->url},
+					}},
+				});
+			}
+			continue;
+		}
+
+		QJsonObject style;
+		for (const auto &sr : styleRanges) {
+			if (sr.offset <= from && from < sr.offset + sr.length) {
+				style[sr.name] = true;
+			}
+		}
+
+		const auto segText = insertMarkers(blockMdMarkers, from, to);
+		if (segText.isEmpty()) continue;
+
+		QJsonObject value;
+		value[u"text"_q] = segText;
+		if (!style.isEmpty()) {
+			value[u"style"_q] = style;
+		}
 		blocks.append(QJsonObject{
-			{QStringLiteral("type"), QStringLiteral("TextElement")},
-			{QStringLiteral("value"), QJsonObject{{QStringLiteral("text"), tail}}},
+			{u"type"_q, u"TextElement"_q},
+			{u"value"_q, value},
 		});
 	}
-	mtsText += tail;
 
 	MtsLinkMessageContent result;
 	result.text = mtsText;

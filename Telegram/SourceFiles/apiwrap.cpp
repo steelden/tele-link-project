@@ -4800,7 +4800,8 @@ void ApiWrap::sendMessage(
 			msg.id = tempId;
 			msg.chatId = chatId;
 			msg.authorId = mts->userId();
-			msg.text = content.text;
+			msg.text = textWithTags.text;
+			msg.markdown = content.text;
 			msg.createdAt = QDateTime::currentMSecsSinceEpoch();
 			if (!replyMtsId.isEmpty()) {
 				msg.repliedMessageId = replyMtsId;

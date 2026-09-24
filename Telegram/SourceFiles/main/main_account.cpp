@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session_settings.h"
 #include "mtslink/session.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/env_config.h"
 
 namespace Main {
 namespace {
@@ -572,6 +573,11 @@ void Account::forcedLogOut() {
 void Account::loggedOut() {
 	_loggingOut = false;
 	Media::Player::mixer()->stopAndClear();
+	if (_mtsLinkSession) {
+		LOG(("MtsLink: stopping session on logout"));
+		_mtsLinkSession->stop();
+		_mtsLinkSession.reset();
+	}
 	destroySession(DestroyReason::LoggedOut);
 	local().reset();
 	cSetOtherOnline(0);
@@ -668,6 +674,9 @@ bool Account::isMtsLink() const {
 void Account::startMtsLinkSession(const QString &token) {
 	LOG(("MtsLink: creating MtsLink::Session..."));
 	_mtsLinkSession = std::make_unique<MtsLink::Session>();
+
+	MtsLink::EnvConfig::instance().setCachePath(
+		local().envConfigCachePath());
 
 	_mtp->setConnectionState(MTP::ConnectingState);
 	const auto mtp = _mtp.get();

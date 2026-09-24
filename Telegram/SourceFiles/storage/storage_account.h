@@ -93,6 +93,7 @@ public:
 	};
 	void writeMtsLinkToken(const QString &token, quint64 userId);
 	[[nodiscard]] MtsLinkData readMtsLinkData() const;
+	[[nodiscard]] QString envConfigCachePath() const;
 
 	void registerDraftSource(
 		not_null<History*> history,
