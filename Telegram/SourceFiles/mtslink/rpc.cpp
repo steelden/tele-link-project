@@ -30,13 +30,22 @@ Rpc::Rpc(QObject *parent)
 Rpc::~Rpc() = default;
 
 void Rpc::connectAndAuth(const QString &token) {
-	_pending.clear();
+	cancelPending();
 	_connection.connectToServer(token);
 }
 
 void Rpc::disconnect() {
-	_pending.clear();
+	cancelPending();
 	_connection.disconnect();
+}
+
+void Rpc::cancelPending() {
+	auto pending = std::exchange(_pending, {});
+	for (auto &call : pending) {
+		if (call.failHandler) {
+			call.failHandler(u"disconnected"_q);
+		}
+	}
 }
 
 void Rpc::call(
@@ -46,7 +55,7 @@ void Rpc::call(
 		FailHandler fail) {
 	const auto id = generateId();
 	if (done) {
-		_pending.insert(id, { method, std::move(done) });
+		_pending.insert(id, { method, std::move(done), std::move(fail) });
 	}
 
 	const auto parts = method.split('.');

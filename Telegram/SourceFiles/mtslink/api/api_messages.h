@@ -95,6 +95,7 @@ public:
 		int limit = 50);
 
 	[[nodiscard]] bool isLoading(const ChatId &chatId) const;
+	void retryFailedLoads();
 
 	void search(
 		const ChatId &chatId,
@@ -145,6 +146,7 @@ private:
 
 	Rpc *_rpc = nullptr;
 	QSet<ChatId> _loadingChats;
+	QSet<ChatId> _failedChats;
 };
 
 } // namespace MtsLink::Api

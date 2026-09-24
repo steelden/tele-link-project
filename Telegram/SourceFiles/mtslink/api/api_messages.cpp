@@ -95,6 +95,12 @@ void Messages::load(
 				Q_EMIT messagesLoaded(
 					chatId, messages, profiles, rawLastId, rawCount);
 			}
+		},
+		[this, chatId, timer](const QString &) {
+			timer->stop();
+			timer->deleteLater();
+			_loadingChats.remove(chatId);
+			_failedChats.insert(chatId);
 		});
 }
 
@@ -349,6 +355,13 @@ void Messages::loadThread(
 
 bool Messages::isLoading(const ChatId &chatId) const {
 	return _loadingChats.contains(chatId);
+}
+
+void Messages::retryFailedLoads() {
+	auto chats = std::exchange(_failedChats, {});
+	for (const auto &chatId : chats) {
+		load(chatId);
+	}
 }
 
 } // namespace MtsLink::Api

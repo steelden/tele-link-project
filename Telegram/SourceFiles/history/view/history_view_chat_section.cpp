@@ -1114,12 +1114,6 @@ ChatWidget::~ChatWidget() {
 		auto state = ListMemento();
 		_inner->saveState(&state);
 		const auto ss = state.scrollTopState();
-		LOG(("MtsLink Thread: SAVE scroll rootId=%1 itemId=%2:%3 date=%4 shift=%5")
-			.arg(_repliesRootId.bare)
-			.arg(ss.item.fullId.peer.value)
-			.arg(ss.item.fullId.msg.bare)
-			.arg(ss.item.date)
-			.arg(ss.shift));
 		if (ss.item.fullId) {
 			MtsLink::saveThreadScroll(_peer->id, _repliesRootId, {
 				.itemId = ss.item.fullId,
@@ -4325,10 +4319,6 @@ void ChatWidget::restoreState(not_null<ChatMemento*> memento) {
 	const auto mtsLinkShowAtEnd = mtsLinkThread
 		&& (!mtsLinkSaved || !mtsLinkSaved->itemId);
 	if (mtsLinkSaved && mtsLinkSaved->itemId) {
-		LOG(("MtsLink Thread: RESTORE saved itemId=%1:%2 shift=%3")
-			.arg(mtsLinkSaved->itemId.peer.value)
-			.arg(mtsLinkSaved->itemId.msg.bare)
-			.arg(mtsLinkSaved->shift));
 		const auto savedPosition = Data::MessagePosition{
 			.fullId = mtsLinkSaved->itemId,
 			.date = mtsLinkSaved->date,
@@ -4342,10 +4332,8 @@ void ChatWidget::restoreState(not_null<ChatMemento*> memento) {
 	_inner->restoreState(memento->list());
 	if (mtsLinkShowAtEnd) {
 		if (mtsLinkSaved) {
-			LOG(("MtsLink Thread: saved at bottom, showAtEnd"));
 			showAtEnd();
 		} else {
-			LOG(("MtsLink Thread: first visit, show at unread"));
 			showAtPosition(Data::UnreadMessagePosition);
 		}
 	}
@@ -5211,6 +5199,9 @@ void ChatWidget::listSelectionChanged(SelectedItems &&items) {
 void ChatWidget::listMarkReadTill(not_null<HistoryItem*> item) {
 	if (_replies) {
 		_replies->readTill(item);
+		if (MtsLink::hasChatId(item->history()->peer->id)) {
+			_inner->clearUnreadBar();
+		}
 	} else if (_sublist) {
 		_sublist->readTill(item);
 	} else {

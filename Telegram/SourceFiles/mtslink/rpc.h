@@ -52,12 +52,14 @@ Q_SIGNALS:
 
 private:
 	void handleMessage(const QJsonObject &message);
+	void cancelPending();
 	[[nodiscard]] QString generateId() const;
 
 	Connection _connection;
 	struct PendingCall {
 		QString method;
 		DoneHandler handler;
+		FailHandler failHandler;
 	};
 	QHash<QString, PendingCall> _pending;
 	QHash<QString, EventHandler> _subscriptions;
