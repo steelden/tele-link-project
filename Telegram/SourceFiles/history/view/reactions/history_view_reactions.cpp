@@ -943,7 +943,6 @@ InlineListData InlineListDataFromMessage(not_null<Element*> view) {
 			MessageReaction{ .id = ReactionId::Paid(), .count = 0 });
 	}
 	if (const auto user = item->history()->peer->asUser()) {
-		// Always show userpics, we have all information.
 		result.recent.reserve(result.reactions.size());
 		const auto self = user->session().user();
 		for (const auto &reaction : result.reactions) {

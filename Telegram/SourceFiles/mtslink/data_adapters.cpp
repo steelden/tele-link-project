@@ -42,6 +42,9 @@ based on Telegram Desktop.
 #include "window/window_session_controller.h"
 
 #include <QtCore/QCryptographicHash>
+#include <QtCore/QDataStream>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QRegularExpression>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
@@ -68,6 +71,88 @@ QString FileAuthTokenValue;
 QList<QNetworkCookie> FileAuthCookies;
 QHash<QString, QString> EmojiToIdMap;
 QHash<QString, QString> IdToEmojiMap;
+bool EmojiMapsInitialized = false;
+
+QString emojiMapFilePath() {
+	return cWorkingDir() + u"tdata/mtslink_emoji_map.json"_q;
+}
+
+void saveEmojiMaps() {
+	QJsonObject obj;
+	for (auto it = IdToEmojiMap.constBegin(); it != IdToEmojiMap.constEnd(); ++it) {
+		obj[it.key()] = it.value();
+	}
+	QFile f(emojiMapFilePath());
+	if (f.open(QIODevice::WriteOnly)) {
+		f.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
+	}
+}
+
+void loadEmojiMaps() {
+	QFile f(emojiMapFilePath());
+	if (!f.open(QIODevice::ReadOnly)) {
+		return;
+	}
+	const auto doc = QJsonDocument::fromJson(f.readAll());
+	if (!doc.isObject()) {
+		return;
+	}
+	const auto obj = doc.object();
+	for (auto it = obj.constBegin(); it != obj.constEnd(); ++it) {
+		const auto &id = it.key();
+		const auto emoji = it.value().toString();
+		if (!id.isEmpty() && !emoji.isEmpty()) {
+			IdToEmojiMap[id] = emoji;
+			EmojiToIdMap[emoji] = id;
+		}
+	}
+}
+
+void ensureEmojiMapsInitialized() {
+	if (EmojiMapsInitialized) {
+		return;
+	}
+	EmojiMapsInitialized = true;
+	loadEmojiMaps();
+	static const struct { const char *id; const char *emoji; } kKnown[] = {
+		{"1ee90646-44c1-6729-b7ec-e379ab852b3a", "\xF0\x9F\x98\x80"},     // 😀
+		{"1ee90646-44c1-699f-b7ec-1c0820ce7d44", "\xF0\x9F\x98\x81"},     // 😁
+		{"1ee90646-44c1-6a64-b7ec-98d17e93ec9a", "\xF0\x9F\x98\x86"},     // 😆
+		{"1ee90646-44c1-6af6-b7ec-4344e5f5119d", "\xF0\x9F\x98\x85"},     // 😅
+		{"1ee90646-44c2-6748-b7ec-12ecf6e3bd10", "\xF0\x9F\xA5\xB2"},     // 🥲
+		{"1ee90646-44c2-6fd3-b7ec-9ff1a0c145a2", "\xF0\x9F\xA4\x94"},     // 🤔
+		{"1ee90646-44c3-640d-b7ec-3f519cd5e68f", "\xF0\x9F\xAB\xA5"},     // 🫥
+		{"1ee90646-44c3-6686-b7ec-ecbb4e188720", "\xF0\x9F\x98\x92"},     // 😒
+		{"1ee90646-44c4-6908-b7ec-ecf3406eac09", "\xF0\x9F\xA4\x95"},     // 🤕
+		{"1ee90646-44c5-6e54-b7ec-cf6de5283b5d", "\xF0\x9F\x98\xB0"},     // 😰
+		{"1ee90646-44c5-6ede-b7ec-4ce6d5975ecf", "\xF0\x9F\x98\xA5"},     // 😥
+		{"1ee90646-44c6-605a-b7ec-00979f9b910b", "\xF0\x9F\x98\xB1"},     // 😱
+		{"1ee90646-44ca-6ff6-b7ec-52a330d3955f",
+			"\xE2\x9D\xA4\xEF\xB8\x8F"},                                  // ❤️
+		{"1ee90646-44cf-6b25-b7ec-0291b8cfb5c7", "\xF0\x9F\x91\x8C"},     // 👌
+		{"1ee90646-44d4-6e10-b7ec-19333962b453", "\xF0\x9F\x91\x8D"},     // 👍
+		{"1ee90646-44d7-6a1e-b7ec-6f78b6dd5ff4", "\xF0\x9F\xA4\x9D"},     // 🤝
+		{"1ee90646-44db-62b5-b7ec-3423e195c7b0", "\xF0\x9F\x91\x80"},     // 👀
+		{"1ee90646-4a50-657c-b7ec-28855313e42c", "\xF0\x9F\x8C\xB4"},     // 🌴
+		{"1ee90646-4a5b-64fc-b7ec-64020d8be8e1", "\xF0\x9F\x94\xA5"},     // 🔥
+		{"1ee90646-4a6e-6ecb-b7ec-d586504d174b", "\xE2\x9E\x95"},         // ➕
+		{"1ee90646-4a6f-6ae5-b7ec-0ac07ed0e115", "\xE2\x9C\x85"},         // ✅
+	};
+	for (const auto &e : kKnown) {
+		const auto id = QString::fromLatin1(e.id);
+		const auto emoji = QString::fromUtf8(e.emoji);
+		if (!IdToEmojiMap.contains(id)) {
+			IdToEmojiMap[id] = emoji;
+			EmojiToIdMap[emoji] = id;
+		}
+	}
+	// Map ❤ without VS16 to the same emojiId as ❤️.
+	const auto heartNoVs16 = QString::fromUtf8("\xE2\x9D\xA4");
+	const auto heartId = QStringLiteral("1ee90646-44ca-6ff6-b7ec-52a330d3955f");
+	if (!EmojiToIdMap.contains(heartNoVs16)) {
+		EmojiToIdMap[heartNoVs16] = heartId;
+	}
+}
 PeerId FavoritesPeerIdValue = PeerId(0);
 
 struct PendingChatEvent {
@@ -104,6 +189,7 @@ std::optional<MTPMessageReactions> buildMtpReactions(
 	if (reactions.isEmpty()) {
 		return std::nullopt;
 	}
+	ensureEmojiMapsInitialized();
 
 	auto results = QVector<MTPReactionCount>();
 	results.reserve(reactions.size());
@@ -114,14 +200,19 @@ std::optional<MTPMessageReactions> buildMtpReactions(
 		if (emoji.isEmpty()) {
 			emoji = IdToEmojiMap.value(r.emojiId);
 		}
+		const auto knownEmoji = !emoji.isEmpty();
+		if (emoji.isEmpty() && !r.emojiId.isEmpty()) {
+			emoji = r.emojiId;
+		}
 		if (emoji.isEmpty()) {
 			continue;
 		}
-		if (!r.emojiId.isEmpty() && !IdToEmojiMap.contains(r.emojiId)) {
+		if (knownEmoji && !r.emojiId.isEmpty()
+			&& !IdToEmojiMap.contains(r.emojiId)) {
 			IdToEmojiMap[r.emojiId] = emoji;
 			EmojiToIdMap[emoji] = r.emojiId;
+			saveEmojiMaps();
 		}
-
 		auto rcFlags = MTPDreactionCount::Flags(0);
 		int order = 0;
 		if (r.selected) {
@@ -193,7 +284,7 @@ MTPMessageMedia buildPhotoMedia(
 	const auto thumbUrl = storageThumbBase() + file.id + u"/S"_q;
 	const auto fullUrl = storageThumbBase() + file.id + u"/XL"_q;
 
-	const auto photoId = base::RandomValue<PhotoId>();
+	const auto photoId = PhotoId(uuidToBareId(file.id));
 
 	const auto thumbLocation = ImageLocation(
 		DownloadLocation{ PlainUrlLocation{ thumbUrl } },
@@ -212,8 +303,6 @@ MTPMessageMedia buildPhotoMedia(
 		ImageWithLocation{},
 		crl::time(0));
 
-	session->data().cache().remove(Data::UrlCacheKey(thumbUrl));
-	session->data().cache().remove(Data::UrlCacheKey(fullUrl));
 
 	using Flag = MTPDmessageMediaPhoto::Flag;
 	return MTP_messageMediaPhoto(
@@ -283,7 +372,7 @@ MTPMessageMedia buildFileMedia(
 		};
 	}
 
-	const auto docId = base::RandomValue<DocumentId>();
+	const auto docId = DocumentId(uuidToBareId(file.id));
 	const auto doc = session->data().document(
 		docId,
 		uint64(0),
@@ -806,6 +895,7 @@ void handleNotificationEvent(
 void connectToSession(
 		not_null<Main::Session*> mainSession,
 		not_null<Session*> mtsSession) {
+	loadChatListFromCache(mainSession);
 	QObject::connect(
 		mtsSession,
 		&Session::initialized,
@@ -818,12 +908,14 @@ void connectToSession(
 		&Api::Channels::channelsLoaded,
 		[mainSession](const QList<Api::ChannelData> &list) {
 			applyChatList(mainSession, list);
+			saveChatListToCache(mainSession, list);
 		});
 	QObject::connect(
 		mtsSession->channels(),
 		&Api::Channels::dialogsLoaded,
 		[mainSession](const QList<Api::ChannelData> &list) {
 			applyChatList(mainSession, list);
+			saveChatListToCache(mainSession, list);
 		});
 	QObject::connect(
 		mtsSession->channels(),
@@ -857,20 +949,61 @@ void connectToSession(
 			for (const auto &p : profiles) {
 				applyUserData(mainSession, p);
 			}
+			const auto perfStart = crl::now();
+			const auto peerId = chatIdToPeerId(chatId);
+			TimeId newestExistingDate = 0;
+			{
+				const auto hist =
+					mainSession->data().historyLoaded(peerId);
+				if (hist) {
+					if (const auto last = hist->lastMessage()) {
+						newestExistingDate = last->date();
+					}
+				}
+			}
+			const bool hasCachedMessages = (newestExistingDate > 0);
+			std::vector<not_null<HistoryItem*>> newerItems;
 			int addedCount = 0;
+			int skippedOlder = 0;
 			for (int i = messages.size() - 1; i >= 0; --i) {
-				if (addMessage(mainSession, messages[i])) {
+				const auto msgDate = TimeId(
+					messages[i].createdAt / 1000);
+				if (newestExistingDate > 0
+					&& msgDate < newestExistingDate) {
+					++skippedOlder;
+					continue;
+				}
+				auto *item = addMessage(
+					mainSession,
+					messages[i],
+					false,
+					hasCachedMessages ? &newerItems : nullptr);
+				if (item) {
 					++addedCount;
 				}
 			}
+			if (!newerItems.empty()) {
+				const auto history =
+					mainSession->data().history(peerId);
+				history->addCreatedNewerSlice(newerItems);
+				history->applyDialogTopMessage(
+					newerItems.back()->id);
+				mainSession->data().notifyHistoryChangeDelayed(
+					history);
+			}
+			const auto perfEnd = crl::now();
 			LOG(("MtsLink Paging: messagesLoaded chatId=%1 "
-				"filtered=%2 added=%3 rawCount=%4 rawLastId=%5")
+				"filtered=%2 added=%3 skippedOlder=%4 "
+				"batchedNewer=%5 rawCount=%6 rawLastId=%7 "
+				"elapsed=%8ms")
 				.arg(chatId)
 				.arg(messages.size())
 				.arg(addedCount)
+				.arg(skippedOlder)
+				.arg(newerItems.size())
 				.arg(rawCount)
-				.arg(rawLastId));
-			const auto peerId = chatIdToPeerId(chatId);
+				.arg(rawLastId)
+				.arg(perfEnd - perfStart));
 			{
 				const auto history =
 					mainSession->data().historyLoaded(peerId);
@@ -892,6 +1025,7 @@ void connectToSession(
 				}
 			}
 			mainSession->data().sendHistoryChangeNotifications();
+			saveMessagesToCache(mainSession, chatId, messages, profiles);
 			if (!rawLastId.isEmpty()
 				&& oldestLoadedMessageId(peerId).isEmpty()) {
 				setOldestLoadedMessageId(peerId, rawLastId);
@@ -937,25 +1071,6 @@ void connectToSession(
 						}
 					});
 				mtsSession->messages()->load(chatId, rawLastId, 50);
-			}
-		});
-
-	QObject::connect(
-		mtsSession->messages(),
-		&Api::Messages::pinnedMessagesLoaded,
-		[mainSession](
-				const ChatId &chatId,
-				const QList<Api::MessageData> &messages,
-				const QList<Api::MemberProfile> &profiles,
-				int) {
-			for (const auto &p : profiles) {
-				applyUserData(mainSession, p);
-			}
-			for (const auto &src : messages) {
-				const auto item = addMessage(mainSession, src);
-				if (item) {
-					item->setIsPinned(true);
-				}
 			}
 		});
 
@@ -1083,8 +1198,10 @@ void connectToSession(
 			const auto peerId = chatIdToPeerId(chatId);
 			std::vector<MsgId> pinnedIds;
 			pinnedIds.reserve(messages.size());
+			std::vector<not_null<HistoryItem*>> batchItems;
 			for (const auto &src : messages) {
-				const auto item = addMessage(mainSession, src);
+				const auto item = addMessage(
+					mainSession, src, false, &batchItems);
 				if (item) {
 					item->setIsPinned(true);
 					pinnedIds.push_back(item->id);
@@ -1310,6 +1427,7 @@ void applyChannelData(
 		channel->setMembersCount(src.memberCount);
 	}
 	channel->setAllowedReactions({
+		.maxCount = 100,
 		.type = Data::AllowedReactionsType::All,
 	});
 
@@ -1400,7 +1518,8 @@ void applyUserData(
 HistoryItem *addMessage(
 		not_null<Main::Session*> session,
 		const Api::MessageData &src,
-		bool threadOnly) {
+		bool threadOnly,
+		std::vector<not_null<HistoryItem*>> *batchItems) {
 	if (src.isDeleted) {
 		return nullptr;
 	}
@@ -1504,6 +1623,13 @@ HistoryItem *addMessage(
 
 	const auto existing = session->data().message(chatPeerId, msgId);
 	if (existing) {
+		LOG(("MtsLink addMessage: EXISTING id=%1 msgId=%2 date=%3")
+			.arg(src.id).arg(msgId.bare).arg(date));
+	} else {
+		LOG(("MtsLink addMessage: NEW id=%1 msgId=%2 date=%3")
+			.arg(src.id).arg(msgId.bare).arg(date));
+	}
+	if (existing) {
 		if (!src.mentions.isEmpty()) {
 			existing->setText(text);
 			session->data().requestItemTextRefresh(existing);
@@ -1545,7 +1671,7 @@ HistoryItem *addMessage(
 		? buildFileMedia(session, src.files.first(), date)
 		: MTP_messageMediaEmpty();
 
-	const auto item = threadOnly
+	const auto item = (threadOnly || batchItems)
 		? history->makeMessage(
 			std::move(fields),
 			std::move(text),
@@ -1554,6 +1680,9 @@ HistoryItem *addMessage(
 			std::move(fields),
 			std::move(text),
 			media);
+	if (item && batchItems) {
+		batchItems->push_back(item);
+	}
 	if (item && !src.files.isEmpty()) {
 		reapplyPhotoUrls(item, src.files.first());
 	}
@@ -1571,7 +1700,7 @@ HistoryItem *addMessage(
 			};
 			const auto extraMedia = buildFileMedia(
 				session, src.files[fi], date);
-			const auto extra = threadOnly
+			const auto extra = (threadOnly || batchItems)
 				? history->makeMessage(
 					std::move(extraFields),
 					TextWithEntities(),
@@ -1582,6 +1711,9 @@ HistoryItem *addMessage(
 					extraMedia);
 			if (extra) {
 				reapplyPhotoUrls(extra, src.files[fi]);
+				if (batchItems) {
+					batchItems->push_back(extra);
+				}
 			}
 		}
 	}
@@ -1632,6 +1764,7 @@ bool addOlderMessages(
 	const auto chatPeerId = chatIdToPeerId(chatId);
 	const auto history = session->data().history(chatPeerId);
 
+	const auto olderStart = crl::now();
 	LOG(("MtsLink Paging: addOlderMessages count=%1 rawCount=%2")
 		.arg(messages.size())
 		.arg(rawCount));
@@ -1769,9 +1902,10 @@ bool addOlderMessages(
 		}
 	}
 
-	LOG(("MtsLink Paging: newItems=%1, duplicates=%2")
+	LOG(("MtsLink Paging: newItems=%1, duplicates=%2 elapsed=%3ms")
 		.arg(items.size())
-		.arg(duplicates));
+		.arg(duplicates)
+		.arg(crl::now() - olderStart));
 
 	if (items.empty()) {
 		if (duplicates > 0) {
@@ -1782,7 +1916,13 @@ bool addOlderMessages(
 		return false;
 	}
 
+	std::reverse(items.begin(), items.end());
 	history->addCreatedOlderSlice(items);
+	const auto currentLast = history->lastMessage();
+	if (!currentLast
+		|| items.back()->date() >= currentLast->date()) {
+		history->applyDialogTopMessage(items.back()->id);
+	}
 
 	for (const auto &item : items) {
 		item->updateDependencyItem();
@@ -2108,7 +2248,7 @@ void handleChatEvent(
 		const auto chatPeerId = chatIdToPeerId(chatId);
 		const auto mts = session->account().mtsLinkSession();
 		if (mts && !chatId.isEmpty()) {
-			mts->messages()->loadPinned(chatId);
+			mts->messages()->reloadPinned(chatId);
 		}
 	} else if (type == "ChatUnreadMessageCountUpdatedEvent") {
 		const auto eventChatId = value.value("chatId").toString();
@@ -2183,13 +2323,18 @@ void handleChatEvent(
 		const auto arr = value.value("reactions").toArray();
 		for (const auto &r : arr) {
 			const auto ro = r.toObject();
+			const auto eid = ro.value("emojiId").toString();
+			const auto emj = ro.value("emoji").toString();
+			const auto cnt = ro.value("count").toInt();
+			const auto sel = ro.value("selected").toBool();
 			reactions.push_back({
-				.emojiId = ro.value("emojiId").toString(),
-				.emoji = ro.value("emoji").toString(),
-				.count = ro.value("count").toInt(),
-				.selected = ro.value("selected").toBool(),
+				.emojiId = eid,
+				.emoji = emj,
+				.count = cnt,
+				.selected = sel,
 			});
 		}
+		session->data().reactions().clearMtsLinkSending(item);
 		const auto mtp = buildMtpReactions(reactions);
 		if (mtp) {
 			item->updateReactions(&*mtp);
@@ -2200,10 +2345,14 @@ void handleChatEvent(
 		|| type == "MessageReactionDeletedEvent") {
 		const auto emoji = value.value("emoji").toString();
 		const auto emojiId = value.value("emojiId").toString();
-		if (!emoji.isEmpty() && !emojiId.isEmpty()
-			&& !IdToEmojiMap.contains(emojiId)) {
+		if (!emoji.isEmpty() && !emojiId.isEmpty()) {
+			const auto isNew = !IdToEmojiMap.contains(emojiId)
+				|| IdToEmojiMap[emojiId] != emoji;
 			IdToEmojiMap[emojiId] = emoji;
 			EmojiToIdMap[emoji] = emojiId;
+			if (isNew) {
+				saveEmojiMaps();
+			}
 		}
 	}
 }
@@ -2385,6 +2534,304 @@ QString oldestLoadedMessageId(PeerId peerId) {
 	return OldestLoadedMsgMap.value(peerId);
 }
 
+namespace {
+
+constexpr auto kMtsLinkMsgCacheTag = uint64(0xBC01'0000'0000'0000ULL);
+
+Storage::Cache::Key messageCacheKey(const QString &chatId) {
+	const auto hash = QCryptographicHash::hash(
+		chatId.toUtf8(), QCryptographicHash::Md5);
+	uint64 low = 0;
+	memcpy(&low, hash.constData(), sizeof(low));
+	return { kMtsLinkMsgCacheTag, low };
+}
+
+QByteArray serializeMessages(
+		const QList<Api::MessageData> &messages,
+		const QList<Api::MemberProfile> &profiles) {
+	QByteArray result;
+	QDataStream s(&result, QIODevice::WriteOnly);
+	s.setVersion(QDataStream::Qt_5_1);
+
+	s << qint32(1); // format version
+	s << qint32(messages.size());
+	for (const auto &m : messages) {
+		s << m.id << m.chatId << m.authorId
+			<< m.text << m.markdown
+			<< qint32(int(m.type))
+			<< QJsonDocument(QJsonObject{{"b", m.blocks}}).toJson(QJsonDocument::Compact)
+			<< qint32(m.files.size());
+		for (const auto &f : m.files) {
+			s << f.id << f.name << f.url << f.size << f.mime
+				<< qint32(f.width) << qint32(f.height);
+		}
+		s << qint32(m.mentions.size());
+		for (const auto &mn : m.mentions) {
+			s << mn.userId << mn.name;
+		}
+		s << qint32(m.reactions.size());
+		for (const auto &r : m.reactions) {
+			s << r.emojiId << r.emoji << qint32(r.count) << r.selected;
+		}
+		s << m.createdAt << m.updatedAt << m.isDeleted
+			<< m.repliedMessageId << m.parentId
+			<< qint32(m.threadChildrenCount)
+			<< qint32(m.threadUnreadCount)
+			<< m.forward.has_value();
+		if (m.forward) {
+			s << m.forward->authorId << m.forward->messageId
+				<< m.forward->chatId << m.forward->createdAt;
+		}
+	}
+	s << qint32(profiles.size());
+	for (const auto &p : profiles) {
+		s << p.userId << p.organizationId << p.email
+			<< p.phone << p.position << p.department
+			<< p.firstName << p.lastName << p.displayName
+			<< qint32(int(p.presence))
+			<< p.avatarFileId << qint32(int(p.role));
+	}
+	return result;
+}
+
+struct CachedMessages {
+	QList<Api::MessageData> messages;
+	QList<Api::MemberProfile> profiles;
+};
+
+std::optional<CachedMessages> deserializeMessages(const QByteArray &data) {
+	if (data.isEmpty()) {
+		return std::nullopt;
+	}
+	QDataStream s(data);
+	s.setVersion(QDataStream::Qt_5_1);
+
+	qint32 version = 0;
+	s >> version;
+	if (version != 1) {
+		return std::nullopt;
+	}
+
+	qint32 msgCount = 0;
+	s >> msgCount;
+	if (s.status() != QDataStream::Ok || msgCount < 0) {
+		return std::nullopt;
+	}
+
+	CachedMessages result;
+	result.messages.reserve(msgCount);
+	for (int i = 0; i < msgCount; ++i) {
+		Api::MessageData m;
+		qint32 typeInt = 0, filesCount = 0, mentionsCount = 0,
+			reactionsCount = 0, threadChildren = 0, threadUnread = 0;
+		bool hasForward = false;
+		QByteArray blocksJson;
+
+		s >> m.id >> m.chatId >> m.authorId
+			>> m.text >> m.markdown >> typeInt
+			>> blocksJson >> filesCount;
+		m.type = MessageType(typeInt);
+		{
+			const auto doc = QJsonDocument::fromJson(blocksJson);
+			m.blocks = doc.object().value("b").toArray();
+		}
+		for (int fi = 0; fi < filesCount; ++fi) {
+			Api::FileData f;
+			qint32 w = 0, h = 0;
+			s >> f.id >> f.name >> f.url >> f.size >> f.mime >> w >> h;
+			f.width = w;
+			f.height = h;
+			m.files.push_back(std::move(f));
+		}
+		s >> mentionsCount;
+		for (int mi = 0; mi < mentionsCount; ++mi) {
+			Api::MentionInfo mn;
+			s >> mn.userId >> mn.name;
+			m.mentions.push_back(std::move(mn));
+		}
+		s >> reactionsCount;
+		for (int ri = 0; ri < reactionsCount; ++ri) {
+			Api::ReactionData r;
+			qint32 cnt = 0;
+			s >> r.emojiId >> r.emoji >> cnt >> r.selected;
+			r.count = cnt;
+			m.reactions.push_back(std::move(r));
+		}
+		s >> m.createdAt >> m.updatedAt >> m.isDeleted
+			>> m.repliedMessageId >> m.parentId
+			>> threadChildren >> threadUnread >> hasForward;
+		m.threadChildrenCount = threadChildren;
+		m.threadUnreadCount = threadUnread;
+		if (hasForward) {
+			Api::ForwardInfo fwd;
+			s >> fwd.authorId >> fwd.messageId
+				>> fwd.chatId >> fwd.createdAt;
+			m.forward = std::move(fwd);
+		}
+		if (s.status() != QDataStream::Ok) {
+			return std::nullopt;
+		}
+		result.messages.push_back(std::move(m));
+	}
+
+	qint32 profCount = 0;
+	s >> profCount;
+	result.profiles.reserve(profCount);
+	for (int i = 0; i < profCount; ++i) {
+		Api::MemberProfile p;
+		qint32 presInt = 0, roleInt = 0;
+		s >> p.userId >> p.organizationId >> p.email
+			>> p.phone >> p.position >> p.department
+			>> p.firstName >> p.lastName >> p.displayName
+			>> presInt >> p.avatarFileId >> roleInt;
+		p.presence = MemberPresence(presInt);
+		p.role = MemberRole(roleInt);
+		if (s.status() != QDataStream::Ok) {
+			return std::nullopt;
+		}
+		result.profiles.push_back(std::move(p));
+	}
+	return result;
+}
+
+constexpr auto kMtsLinkChatListTag = uint64(0xBC02'0000'0000'0000ULL);
+
+Storage::Cache::Key chatListCacheKey() {
+	return { kMtsLinkChatListTag, 0 };
+}
+
+QByteArray serializeChatList(const QList<Api::ChannelData> &channels) {
+	QByteArray result;
+	QDataStream s(&result, QIODevice::WriteOnly);
+	s.setVersion(QDataStream::Qt_5_1);
+
+	s << qint32(1); // format version
+	s << qint32(channels.size());
+	for (const auto &ch : channels) {
+		s << ch.id << ch.name << ch.description
+			<< qint32(int(ch.type))
+			<< ch.organizationId
+			<< qint32(ch.unreadCount)
+			<< ch.lastMessageId << ch.lastMessageText
+			<< ch.lastMessageTimestamp
+			<< ch.avatarFileId
+			<< ch.isMuted << ch.isPinned << ch.isReadOnly
+			<< qint32(ch.pinnedMessageCount)
+			<< ch.memberRole << ch.interlocutorId
+			<< qint32(ch.memberCount);
+	}
+	return result;
+}
+
+std::optional<QList<Api::ChannelData>> deserializeChatList(
+		const QByteArray &data) {
+	if (data.isEmpty()) {
+		return std::nullopt;
+	}
+	QDataStream s(data);
+	s.setVersion(QDataStream::Qt_5_1);
+
+	qint32 version = 0;
+	s >> version;
+	if (version != 1) {
+		return std::nullopt;
+	}
+
+	qint32 count = 0;
+	s >> count;
+	if (s.status() != QDataStream::Ok || count < 0) {
+		return std::nullopt;
+	}
+
+	QList<Api::ChannelData> result;
+	result.reserve(count);
+	for (int i = 0; i < count; ++i) {
+		Api::ChannelData ch;
+		qint32 typeInt = 0, unread = 0, pinned = 0, members = 0;
+		s >> ch.id >> ch.name >> ch.description
+			>> typeInt >> ch.organizationId
+			>> unread >> ch.lastMessageId >> ch.lastMessageText
+			>> ch.lastMessageTimestamp >> ch.avatarFileId
+			>> ch.isMuted >> ch.isPinned >> ch.isReadOnly
+			>> pinned >> ch.memberRole >> ch.interlocutorId
+			>> members;
+		ch.type = ChatType(typeInt);
+		ch.unreadCount = unread;
+		ch.pinnedMessageCount = pinned;
+		ch.memberCount = members;
+		if (s.status() != QDataStream::Ok) {
+			return std::nullopt;
+		}
+		result.push_back(std::move(ch));
+	}
+	return result;
+}
+
+} // anonymous namespace
+
+void saveMessagesToCache(
+		not_null<Main::Session*> session,
+		const QString &chatId,
+		const QList<Api::MessageData> &messages,
+		const QList<Api::MemberProfile> &profiles) {
+	auto data = serializeMessages(messages, profiles);
+	session->data().cache().put(
+		messageCacheKey(chatId),
+		std::move(data));
+}
+
+void loadMessagesFromCache(
+		not_null<Main::Session*> session,
+		const QString &chatId) {
+	const auto weak = base::make_weak(session);
+	session->data().cache().get(messageCacheKey(chatId), [=](QByteArray &&data) {
+		crl::on_main(weak, [=, data = std::move(data)]() mutable {
+			auto cached = deserializeMessages(data);
+			if (!cached || cached->messages.isEmpty()) {
+				return;
+			}
+			const auto strong = weak.get();
+			LOG(("MtsLink Cache: loaded %1 messages for chatId=%2")
+				.arg(cached->messages.size())
+				.arg(chatId));
+			const auto oldestId = cached->messages.last().id;
+			(void)addOlderMessages(
+				strong,
+				chatId,
+				cached->messages,
+				cached->profiles,
+				oldestId,
+				cached->messages.size());
+		});
+	});
+}
+
+void saveChatListToCache(
+		not_null<Main::Session*> session,
+		const QList<Api::ChannelData> &channels) {
+	auto data = serializeChatList(channels);
+	session->data().cache().put(
+		chatListCacheKey(),
+		std::move(data));
+}
+
+void loadChatListFromCache(
+		not_null<Main::Session*> session) {
+	const auto weak = base::make_weak(session);
+	session->data().cache().get(chatListCacheKey(), [=](QByteArray &&data) {
+		crl::on_main(weak, [=, data = std::move(data)]() mutable {
+			auto cached = deserializeChatList(data);
+			if (!cached || cached->isEmpty()) {
+				return;
+			}
+			const auto strong = weak.get();
+			LOG(("MtsLink Cache: loaded %1 chats from cache")
+				.arg(cached->size()));
+			applyChatList(strong, *cached);
+		});
+	});
+}
+
 void setFileAuthToken(const QString &token) {
 	FileAuthTokenValue = token;
 }
@@ -2401,6 +2848,8 @@ void setFileAuthCookies(const QList<QNetworkCookie> &cookies) {
 QList<QNetworkCookie> fileAuthCookies() {
 	return FileAuthCookies;
 }
+
+QSet<ChatId> MessageCacheLoadedChats;
 
 void applyChatList(
 		not_null<Main::Session*> session,
@@ -2419,6 +2868,12 @@ void applyChatList(
 		}
 	}
 	session->data().chatsList()->setLoaded();
+	for (const auto &ch : channels) {
+		if (!MessageCacheLoadedChats.contains(ch.id)) {
+			MessageCacheLoadedChats.insert(ch.id);
+			loadMessagesFromCache(session, ch.id);
+		}
+	}
 }
 
 QString userBareIdToUuid(uint64 bareId) {
@@ -2657,18 +3112,29 @@ MtsLinkMessageContent convertMentionsForSending(
 }
 
 void setEmojiMapping(const QHash<QString, QString> &emojiToId) {
-	EmojiToIdMap = emojiToId;
-	IdToEmojiMap.clear();
+	ensureEmojiMapsInitialized();
 	for (auto it = emojiToId.constBegin(); it != emojiToId.constEnd(); ++it) {
+		EmojiToIdMap[it.key()] = it.value();
 		IdToEmojiMap[it.value()] = it.key();
 	}
 }
 
+void setEmojiIdMapping(const QString &emojiId, const QString &emoji) {
+	ensureEmojiMapsInitialized();
+	if (!emojiId.isEmpty() && !emoji.isEmpty()
+		&& !IdToEmojiMap.contains(emojiId)) {
+		IdToEmojiMap[emojiId] = emoji;
+		EmojiToIdMap[emoji] = emojiId;
+	}
+}
+
 QString emojiToId(const QString &emoji) {
+	ensureEmojiMapsInitialized();
 	return EmojiToIdMap.value(emoji);
 }
 
 QString idToEmoji(const QString &emojiId) {
+	ensureEmojiMapsInitialized();
 	return IdToEmojiMap.value(emojiId);
 }
 

@@ -3,6 +3,7 @@ This file is part of MTS Link Desktop,
 based on Telegram Desktop.
 */
 #include "mtslink/api/api_messages.h"
+#include "mtslink/data_adapters.h"
 #include "mtslink/rpc.h"
 
 namespace MtsLink::Api {
@@ -135,9 +136,12 @@ MessageData Messages::parseMessage(const QJsonObject &obj) const {
 	const auto reactionsArray = obj.value("reactions").toArray();
 	for (const auto &r : reactionsArray) {
 		const auto ro = r.toObject();
+		const auto eid = ro.value("emojiId").toString();
+		const auto emj = ro.value("emoji").toString();
+		MtsLink::setEmojiIdMapping(eid, emj);
 		reactions.push_back({
-			.emojiId = ro.value("emojiId").toString(),
-			.emoji = ro.value("emoji").toString(),
+			.emojiId = eid,
+			.emoji = emj,
 			.count = ro.value("count").toInt(),
 			.selected = ro.value("selected").toBool(),
 		});
@@ -269,6 +273,11 @@ void Messages::search(
 }
 
 void Messages::loadPinned(const ChatId &chatId, int limit) {
+	if (_loadingPinnedChats.contains(chatId)) {
+		return;
+	}
+	_loadingPinnedChats.insert(chatId);
+
 	QJsonObject param;
 	param["chatId"] = chatId;
 	param["limit"] = limit;
@@ -277,6 +286,7 @@ void Messages::loadPinned(const ChatId &chatId, int limit) {
 		"Chat.GetPinnedMessagesV2",
 		param,
 		[this, chatId](const QJsonObject &result) {
+
 			const auto value = result.value("value").toObject();
 			const auto msgArray = value.value("messages").toArray();
 			const auto profilesArray =
@@ -305,6 +315,11 @@ void Messages::loadPinned(const ChatId &chatId, int limit) {
 
 			Q_EMIT pinnedMessagesLoaded(chatId, messages, profiles, total);
 		});
+}
+
+void Messages::reloadPinned(const ChatId &chatId) {
+	_loadingPinnedChats.remove(chatId);
+	loadPinned(chatId);
 }
 
 void Messages::loadThread(

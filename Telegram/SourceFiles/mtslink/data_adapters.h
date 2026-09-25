@@ -60,7 +60,8 @@ void applyUserData(
 HistoryItem *addMessage(
 	not_null<Main::Session*> session,
 	const Api::MessageData &src,
-	bool threadOnly = false);
+	bool threadOnly = false,
+	std::vector<not_null<HistoryItem*>> *batchItems = nullptr);
 
 [[nodiscard]] bool addOlderMessages(
 	not_null<Main::Session*> session,
@@ -124,6 +125,21 @@ bool replacePendingWithReal(
 void setOldestLoadedMessageId(PeerId peerId, const QString &mtsLinkId);
 [[nodiscard]] QString oldestLoadedMessageId(PeerId peerId);
 
+void saveMessagesToCache(
+	not_null<Main::Session*> session,
+	const QString &chatId,
+	const QList<Api::MessageData> &messages,
+	const QList<Api::MemberProfile> &profiles);
+void loadMessagesFromCache(
+	not_null<Main::Session*> session,
+	const QString &chatId);
+
+void saveChatListToCache(
+	not_null<Main::Session*> session,
+	const QList<Api::ChannelData> &channels);
+void loadChatListFromCache(
+	not_null<Main::Session*> session);
+
 void setFileAuthToken(const QString &token);
 [[nodiscard]] QString fileAuthToken();
 
@@ -143,6 +159,7 @@ struct MtsLinkMessageContent {
 [[nodiscard]] QString userBareIdToUuid(uint64 bareId);
 
 void setEmojiMapping(const QHash<QString, QString> &emojiToId);
+void setEmojiIdMapping(const QString &emojiId, const QString &emoji);
 [[nodiscard]] QString emojiToId(const QString &emoji);
 [[nodiscard]] QString idToEmoji(const QString &emojiId);
 

@@ -149,6 +149,7 @@ public:
 		bool addToRecent,
 		const ReactionId &removedReaction = {});
 	[[nodiscard]] bool sending(not_null<HistoryItem*> item) const;
+	void clearMtsLinkSending(not_null<HistoryItem*> item);
 
 	void poll(not_null<HistoryItem*> item, crl::time now);
 
@@ -360,6 +361,7 @@ private:
 	bool _waitingForEffects = false;
 
 	base::flat_map<FullMsgId, mtpRequestId> _sentRequests;
+	base::flat_set<FullMsgId> _mtsLinkSending;
 
 	base::flat_map<not_null<HistoryItem*>, crl::time> _repaintItems;
 	base::Timer _repaintTimer;
