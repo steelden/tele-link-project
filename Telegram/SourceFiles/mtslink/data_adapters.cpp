@@ -75,6 +75,7 @@ struct PendingChatEvent {
 	QJsonObject param;
 };
 QHash<QString, QList<PendingChatEvent>> PendingChatEvents;
+QHash<QString, QList<PendingChatEvent>> PendingUserEvents;
 QSet<QString> ChatInfoRequested;
 QSet<QString> UserProfileRequested;
 QSet<QString> ReadRequestSentChats;
@@ -1024,6 +1025,10 @@ void connectToSession(
 		&Api::Users::memberLoaded,
 		[mainSession](const Api::MemberProfile &profile) {
 			applyUserData(mainSession, profile);
+			const auto pending = PendingUserEvents.take(profile.userId);
+			for (const auto &ev : pending) {
+				handleChatEvent(mainSession, ev.dst, ev.param);
+			}
 		});
 	QObject::connect(
 		mtsSession->users(),
@@ -1870,6 +1875,25 @@ void handleChatEvent(
 		if (m.value("isDeleted").toBool()) {
 			return;
 		}
+		const auto authorId = m.value("authorId").toString();
+		if (!authorId.isEmpty()) {
+			const auto authorBareId = uuidToBareId(authorId);
+			const auto authorPeerId = PeerId(::UserId(authorBareId));
+			const auto user = session->data().userLoaded(
+				peerToUser(authorPeerId));
+			if (!user || user->name().isEmpty()) {
+				PendingUserEvents[authorId].append({ dst, param });
+				if (!UserProfileRequested.contains(authorId)) {
+					UserProfileRequested.insert(authorId);
+					const auto mts = session->account().mtsLinkSession();
+					if (mts) {
+						mts->users()->loadMember(
+							authorId, mts->organizationId());
+					}
+				}
+				return;
+			}
+		}
 		Api::MessageData msg;
 		msg.id = m.value("id").toString();
 		msg.chatId = chatId;
@@ -1957,7 +1981,11 @@ void handleChatEvent(
 			if (!isOutgoing) {
 				const auto history =
 					session->data().history(chatPeerId);
-				if (history->unreadCountKnown()) {
+				const auto channel = session->data().channelLoaded(
+					peerToChannel(chatPeerId));
+				const auto skipUnread = isThread
+					&& channel && channel->isBroadcast();
+				if (!skipUnread && history->unreadCountKnown()) {
 					history->setUnreadCount(
 						history->unreadCount() + 1);
 				}

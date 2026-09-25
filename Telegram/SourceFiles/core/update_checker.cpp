@@ -35,9 +35,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_intro.h"
 #include "ui/layers/box_content.h"
 
+#include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QFileSystemWatcher>
+
+#include <minizip/unzip.h>
 
 #include <ksandbox.h>
 
@@ -169,13 +172,6 @@ private:
 	void gotFailure(QNetworkReply::NetworkError e);
 	void clearSentRequest();
 	bool handleResponse(const QByteArray &response);
-	std::optional<QString> parseOldResponse(
-		const QByteArray &response) const;
-	std::optional<QString> parseResponse(const QByteArray &response) const;
-	QString validateLatestUrl(
-		uint64 availableVersion,
-		bool isAvailableAlpha,
-		QString url) const;
 
 	std::unique_ptr<QNetworkAccessManager> _manager;
 	QNetworkReply *_reply = nullptr;
@@ -356,8 +352,13 @@ QString FindUpdateFile() {
 			"(-beta|-canary-\\d+(-private)?)?$",
 			QRegularExpression::CaseInsensitiveOption
 		);
+		static const auto RegExpTeleLink = QRegularExpression(
+			"^TeleLink.*\\.zip$",
+			QRegularExpression::CaseInsensitiveOption
+		);
 		if (RegExp.match(info.fileName()).hasMatch()
-			|| RegExpV2.match(info.fileName()).hasMatch()) {
+			|| RegExpV2.match(info.fileName()).hasMatch()
+			|| RegExpTeleLink.match(info.fileName()).hasMatch()) {
 			return info.absoluteFilePath();
 		}
 	}
@@ -401,7 +402,7 @@ QString ExtractFilename(const QString &url) {
 	const auto expression = QRegularExpression(u"/([^/\\?]+)(\\?|$)"_q);
 	if (const auto match = expression.match(url); match.hasMatch()) {
 		return match.captured(1).replace(
-			QRegularExpression(u"[^a-zA-Z0-9_\\-]"_q),
+			QRegularExpression(u"[^a-zA-Z0-9_\\-\\.]"_q),
 			QString());
 	}
 	return QString();
@@ -707,51 +708,24 @@ bool UnpackUpdate(const QString &filepath) {
 		return false;
 	}
 
-#if defined Q_OS_WIN && !defined TDESKTOP_USE_PACKAGED // use Lzma SDK for win
-	const int32 hSigLen = 128, hShaLen = 20, hPropsLen = LZMA_PROPS_SIZE, hOriginalSizeLen = sizeof(int32), hSize = hSigLen + hShaLen + hPropsLen + hOriginalSizeLen; // header
-#else // Q_OS_WIN && !TDESKTOP_USE_PACKAGED
-	const int32 hSigLen = 128, hShaLen = 20, hPropsLen = 0, hOriginalSizeLen = sizeof(int32), hSize = hSigLen + hShaLen + hOriginalSizeLen; // header
-#endif // Q_OS_WIN && !TDESKTOP_USE_PACKAGED
+	const int32 hSigLen = 128, hShaLen = 20;
+	const int32 hSize = hSigLen + hShaLen;
 
-	QByteArray compressed = input.readAll();
+	QByteArray package = input.readAll();
 	input.close();
 
-	if (Updates::IsV2UpdateFile(compressed)) {
-		if (UnpackUpdateV2(filepath, compressed)) {
-			return true;
-		} else if (BuildIsCanary) {
-			return false;
-		}
-		// A v1 file whose RSA signature happens to begin with the magic
-		// bytes lands here too, so a failed v2 parse falls through to the
-		// v1 path below: it accepts nothing without a valid RSA signature
-		// over these same bytes.
-		LOG(("Update Info: trying v1 unpacking for a file with v2 magic."));
-	} else if (BuildIsCanary) {
-		// The channel policy lives in the v2 envelope only, a classical
-		// RSA package has no channel and would let any official v1 file
-		// posted to the canary channel jump a canary off its lane.
-		LOG(("Update Error: canary builds accept only v2 updates."));
+	if (package.size() <= hSize) {
+		LOG(("Update Error: package too small: %1").arg(package.size()));
 		return false;
 	}
 
-	int32 compressedLen = compressed.size() - hSize;
-	if (compressedLen <= 0) {
-		LOG(("Update Error: bad compressed size: %1").arg(compressed.size()));
-		return false;
-	}
-
-	QString tempDirPath = cWorkingDir() + u"tupdates/temp"_q, readyFilePath = cWorkingDir() + u"tupdates/temp/ready"_q;
-	base::Platform::DeleteDirectory(tempDirPath);
-
-	QDir tempDir(tempDirPath);
-	if (tempDir.exists() || QFile(readyFilePath).exists()) {
-		LOG(("Update Error: cant clear tupdates/temp dir!"));
-		return false;
-	}
+	const int32 zipLen = package.size() - hSize;
 
 	uchar sha1Buffer[20];
-	bool goodSha1 = !memcmp(compressed.constData() + hSigLen, hashSha1(compressed.constData() + hSigLen + hShaLen, compressedLen + hPropsLen + hOriginalSizeLen, sha1Buffer), hShaLen);
+	bool goodSha1 = !memcmp(
+		package.constData() + hSigLen,
+		hashSha1(package.constData() + hSize, zipLen, sha1Buffer),
+		hShaLen);
 	if (!goodSha1) {
 		LOG(("Update Error: bad SHA1 hash of update file!"));
 		return false;
@@ -770,93 +744,113 @@ bool UnpackUpdate(const QString &filepath) {
 		LOG(("Update Error: cant read public rsa key!"));
 		return false;
 	}
-	if (RSA_verify(NID_sha1, (const uchar*)(compressed.constData() + hSigLen), hShaLen, (const uchar*)(compressed.constData()), hSigLen, pbKey) != 1) { // verify signature
+	if (RSA_verify(NID_sha1, (const uchar*)(package.constData() + hSigLen), hShaLen, (const uchar*)(package.constData()), hSigLen, pbKey) != 1) {
 		RSA_free(pbKey);
-
-		// try other public key, if we update from beta to stable or vice versa
-		pbKey = [] {
-			const auto bio = MakeBIO(
-				const_cast<char*>(
-					AppBetaVersion
-						? UpdatesPublicKey
-						: UpdatesPublicBetaKey),
-				-1);
-			return PEM_read_bio_RSAPublicKey(bio.get(), 0, 0, 0);
-		}();
-		if (!pbKey) {
-			LOG(("Update Error: cant read public rsa key!"));
-			return false;
-		}
-		if (RSA_verify(NID_sha1, (const uchar*)(compressed.constData() + hSigLen), hShaLen, (const uchar*)(compressed.constData()), hSigLen, pbKey) != 1) { // verify signature
-			RSA_free(pbKey);
-			LOG(("Update Error: bad RSA signature of update file!"));
-			return false;
-		}
+		LOG(("Update Error: bad RSA signature of update file!"));
+		return false;
 	}
 	RSA_free(pbKey);
 
-	const auto uncompressed = DecompressUpdatePayload(
-		compressed.constData() + hSigLen + hShaLen,
-		compressed.size() - hSigLen - hShaLen);
-	if (!uncompressed) {
+	LOG(("Update Info: RSA signature verified, extracting zip..."));
+
+	const auto tempDirPath = cWorkingDir() + u"tupdates/temp"_q;
+	const auto readyFilePath = tempDirPath + u"/ready"_q;
+	base::Platform::DeleteDirectory(tempDirPath);
+
+	QDir tempDir(tempDirPath);
+	if (tempDir.exists() || QFile(readyFilePath).exists()) {
+		LOG(("Update Error: cant clear tupdates/temp dir!"));
+		return false;
+	}
+	tempDir.mkpath(tempDirPath);
+
+	const auto zipTmpPath = cWorkingDir() + u"tupdates/update.zip"_q;
+	{
+		QFile zipFile(zipTmpPath);
+		if (!zipFile.open(QIODevice::WriteOnly)) {
+			LOG(("Update Error: cant write temp zip!"));
+			return false;
+		}
+		zipFile.write(package.constData() + hSize, zipLen);
+		zipFile.close();
+	}
+
+	const auto zipPathUtf8 = zipTmpPath.toUtf8();
+	const auto uf = unzOpen(zipPathUtf8.constData());
+	if (!uf) {
+		LOG(("Update Error: cant open zip!"));
+		QFile(zipTmpPath).remove();
 		return false;
 	}
 
-	tempDir.mkdir(tempDir.absolutePath());
-
-	quint32 version;
-	{
-		QDataStream stream(*uncompressed);
-		stream.setVersion(QDataStream::Qt_5_1);
-
-		stream >> version;
-		if (stream.status() != QDataStream::Ok) {
-			LOG(("Update Error: cant read version from downloaded stream, status: %1").arg(stream.status()));
+	bool hasFiles = false;
+	int ret = unzGoToFirstFile(uf);
+	while (ret == UNZ_OK) {
+		char filename[512];
+		unz_file_info fileInfo;
+		if (unzGetCurrentFileInfo(uf, &fileInfo, filename, sizeof(filename), nullptr, 0, nullptr, 0) != UNZ_OK) {
+			LOG(("Update Error: cant get file info from zip!"));
+			unzClose(uf);
+			QFile(zipTmpPath).remove();
 			return false;
 		}
 
-		quint64 alphaVersion = 0;
-		if (version == 0x7FFFFFFF) { // alpha version
-			stream >> alphaVersion;
-			if (stream.status() != QDataStream::Ok) {
-				LOG(("Update Error: cant read alpha version from downloaded stream, status: %1").arg(stream.status()));
-				return false;
-			}
-			if (!cAlphaVersion() || alphaVersion <= cAlphaVersion()) {
-				LOG(("Update Error: downloaded alpha version %1 is not greater, than mine %2").arg(alphaVersion).arg(cAlphaVersion()));
-				return false;
-			}
-		} else if (int32(version) <= AppVersion) {
-			LOG(("Update Error: downloaded version %1 is not greater, than mine %2").arg(version).arg(AppVersion));
+		const auto name = QString::fromUtf8(filename);
+		if (name.endsWith('/')) {
+			ret = unzGoToNextFile(uf);
+			continue;
+		}
+
+		const auto outPath = tempDirPath + '/' + name;
+		QDir().mkpath(QFileInfo(outPath).absolutePath());
+
+		if (unzOpenCurrentFile(uf) != UNZ_OK) {
+			LOG(("Update Error: cant open file in zip: %1").arg(name));
+			unzClose(uf);
+			QFile(zipTmpPath).remove();
 			return false;
 		}
 
-		quint32 filesCount;
-		stream >> filesCount;
-		if (stream.status() != QDataStream::Ok) {
-			LOG(("Update Error: cant read files count from downloaded stream, status: %1").arg(stream.status()));
+		QFile outFile(outPath);
+		if (!outFile.open(QIODevice::WriteOnly)) {
+			LOG(("Update Error: cant create file: %1").arg(outPath));
+			unzCloseCurrentFile(uf);
+			unzClose(uf);
+			QFile(zipTmpPath).remove();
 			return false;
 		}
-		if (!filesCount) {
-			LOG(("Update Error: update is empty!"));
-			return false;
+
+		char buf[8192];
+		int bytesRead;
+		while ((bytesRead = unzReadCurrentFile(uf, buf, sizeof(buf))) > 0) {
+			outFile.write(buf, bytesRead);
 		}
-		if (!ExtractUpdateFiles(stream, filesCount, tempDirPath)
-			|| !WriteUpdateVersionFile(
-				tempDir,
-				tempDirPath,
-				version,
-				alphaVersion,
-				0)) {
-			return false;
-		}
+		outFile.close();
+		unzCloseCurrentFile(uf);
+		hasFiles = true;
+
+		LOG(("Update Info: extracted '%1' (%2 bytes)")
+			.arg(name).arg(fileInfo.uncompressed_size));
+
+		ret = unzGoToNextFile(uf);
+	}
+	unzClose(uf);
+	QFile(zipTmpPath).remove();
+
+	if (!hasFiles) {
+		LOG(("Update Error: zip is empty!"));
+		return false;
 	}
 
+	if (!WriteUpdateVersionFile(tempDir, tempDirPath, AppVersion + 1, 0, 0)) {
+		return false;
+	}
 	if (!WriteUpdateReadyFile(readyFilePath)) {
 		return false;
 	}
-	input.remove();
 
+	QFile(filepath).remove();
+	LOG(("Update Info: update unpacked successfully."));
 	return true;
 #else // !TDESKTOP_DISABLE_AUTOUPDATE
 	return false;
@@ -991,14 +985,12 @@ HttpChecker::HttpChecker(bool testing) : Checker(testing) {
 }
 
 void HttpChecker::start() {
-	const auto updaterVersion = Platform::AutoUpdateVersion();
-	const auto path = Local::readAutoupdatePrefix()
-		+ qstr("/current")
-		+ (updaterVersion > 1 ? QString::number(updaterVersion) : QString());
-	auto url = QUrl(path);
-	DEBUG_LOG(("Update Info: requesting update state"));
-	const auto request = QNetworkRequest(url);
+	auto url = QUrl(u"https://api.github.com/repos/steelden/tele-link-project/releases/latest"_q);
+	DEBUG_LOG(("Update Info: checking GitHub releases"));
+	auto request = QNetworkRequest(url);
+	request.setRawHeader("Accept", "application/vnd.github+json");
 	_manager = std::make_unique<QNetworkAccessManager>();
+	_manager->setRedirectPolicy(QNetworkRequest::NoLessSafeRedirectPolicy);
 	_reply = _manager->get(request);
 	_reply->connect(_reply, &QNetworkReply::finished, [=] {
 		gotResponse();
@@ -1024,16 +1016,64 @@ void HttpChecker::gotResponse() {
 }
 
 bool HttpChecker::handleResponse(const QByteArray &response) {
-	const auto handle = [&](const QString &url) {
-		done(url.isEmpty() ? nullptr : std::make_shared<HttpLoader>(url));
-		return true;
-	};
-	if (const auto url = parseOldResponse(response)) {
-		return handle(*url);
-	} else if (const auto url = parseResponse(response)) {
-		return handle(*url);
+	auto error = QJsonParseError{ 0, QJsonParseError::NoError };
+	const auto document = QJsonDocument::fromJson(response, &error);
+	if (error.error != QJsonParseError::NoError) {
+		LOG(("Update Error: GitHub JSON parse error: %1"
+			).arg(error.errorString()));
+		return false;
 	}
-	return false;
+	if (!document.isObject()) {
+		LOG(("Update Error: GitHub response is not an object."));
+		return false;
+	}
+	const auto root = document.object();
+	const auto tagName = root.value("tag_name").toString();
+	if (tagName.isEmpty()) {
+		LOG(("Update Error: no tag_name in GitHub release."));
+		return false;
+	}
+
+	const auto versionStr = tagName.startsWith('v')
+		? tagName.mid(1)
+		: tagName;
+	const auto parts = versionStr.split('.');
+	if (parts.size() != 3) {
+		LOG(("Update Error: bad version format: %1").arg(tagName));
+		return false;
+	}
+	const auto major = parts[0].toInt();
+	const auto minor = parts[1].toInt();
+	const auto patch = parts[2].toInt();
+	const auto remoteVersion = major * 1000000 + minor * 1000 + patch;
+
+	LOG(("Update Info: GitHub latest release %1 (version %2), "
+		"current %3").arg(tagName).arg(remoteVersion).arg(AppVersion));
+
+	if (remoteVersion <= AppVersion) {
+		done(nullptr);
+		return true;
+	}
+
+	const auto assets = root.value("assets").toArray();
+	QString downloadUrl;
+	for (const auto &asset : assets) {
+		const auto obj = asset.toObject();
+		const auto name = obj.value("name").toString();
+		if (name.endsWith(u".zip"_q, Qt::CaseInsensitive)
+			&& name.contains(u"TeleLink"_q, Qt::CaseInsensitive)) {
+			downloadUrl = obj.value("browser_download_url").toString();
+			break;
+		}
+	}
+	if (downloadUrl.isEmpty()) {
+		LOG(("Update Error: no TeleLink zip asset in release."));
+		return false;
+	}
+
+	LOG(("Update Info: downloading update from %1").arg(downloadUrl));
+	done(std::make_shared<HttpLoader>(downloadUrl));
+	return true;
 }
 
 void HttpChecker::clearSentRequest() {
@@ -1058,79 +1098,6 @@ void HttpChecker::gotFailure(QNetworkReply::NetworkError e) {
 	fail();
 }
 
-std::optional<QString> HttpChecker::parseOldResponse(
-		const QByteArray &response) const {
-	const auto string = QString::fromLatin1(response);
-	const auto old = QRegularExpression(
-		u"^\\s*(\\d+)\\s*:\\s*([\\x21-\\x7f]+)\\s*$"_q
-	).match(string);
-	if (!old.hasMatch()) {
-		return std::nullopt;
-	}
-	const auto availableVersion = old.captured(1).toULongLong();
-	const auto url = old.captured(2);
-	const auto isAvailableAlpha = url.startsWith(qstr("beta_"));
-	return validateLatestUrl(
-		availableVersion,
-		isAvailableAlpha,
-		isAvailableAlpha ? url.mid(5) + "_{signature}" : url);
-}
-
-std::optional<QString> HttpChecker::parseResponse(
-		const QByteArray &response) const {
-	auto bestAvailableVersion = 0ULL;
-	auto bestIsAvailableAlpha = false;
-	auto bestLink = QString();
-	const auto accumulate = [&](
-			uint64 version,
-			bool isAlpha,
-			const QJsonObject &map) {
-		bestAvailableVersion = version;
-		bestIsAvailableAlpha = isAlpha;
-		const auto link = map.constFind("link");
-		if (link == map.constEnd()) {
-			LOG(("Update Error: Link not found for version %1."
-				).arg(version));
-			return false;
-		} else if (!(*link).isString()) {
-			LOG(("Update Error: Link is not a string for version %1."
-				).arg(version));
-			return false;
-		}
-		bestLink = (*link).toString();
-		return true;
-	};
-	const auto result = ParseCommonMap(response, testing(), accumulate);
-	if (!result) {
-		return std::nullopt;
-	}
-	return validateLatestUrl(
-		bestAvailableVersion,
-		bestIsAvailableAlpha,
-		Local::readAutoupdatePrefix() + bestLink);
-}
-
-QString HttpChecker::validateLatestUrl(
-		uint64 availableVersion,
-		bool isAvailableAlpha,
-		QString url) const {
-	const auto myVersion = isAvailableAlpha
-		? cAlphaVersion()
-		: uint64(AppVersion);
-	const auto validVersion = (cAlphaVersion() || !isAvailableAlpha);
-	if (!validVersion || availableVersion <= myVersion) {
-		return QString();
-	}
-	const auto versionUrl = url.replace(
-		"{version}",
-		QString::number(availableVersion));
-	const auto finalUrl = isAvailableAlpha
-		? QString(versionUrl).replace(
-			"{signature}",
-			countAlphaVersionSignature(availableVersion))
-		: versionUrl;
-	return finalUrl;
-}
 
 HttpChecker::~HttpChecker() {
 	clearSentRequest();
@@ -1171,6 +1138,7 @@ HttpLoaderActor::HttpLoaderActor(
 	_url = url;
 	moveToThread(thread);
 	_manager.moveToThread(thread);
+	_manager.setRedirectPolicy(QNetworkRequest::NoLessSafeRedirectPolicy);
 
 	connect(thread, &QThread::started, this, [=] { start(); });
 }
@@ -1987,20 +1955,9 @@ void Updater::start(bool forceWait) {
 		}
 #endif // !Q_OS_WIN && !Q_OS_MAC
 	} else if (sendRequest) {
-		if (BuildIsCanary) {
-			// Canary builds discover updates only through their own MTP
-			// channels, the v1 HTTP feed serves other channels.
-			startImplementation(&_httpImplementation, nullptr);
-		} else {
-			startImplementation(
-				&_httpImplementation,
-				std::make_unique<HttpChecker>(_testing));
-		}
 		startImplementation(
-			&_mtpImplementation,
-			std::make_unique<MtpChecker>(
-				LookupCanaryPrivateSession(_session),
-				_testing));
+			&_httpImplementation,
+			std::make_unique<HttpChecker>(_testing));
 
 		_checking.fire({});
 	} else {

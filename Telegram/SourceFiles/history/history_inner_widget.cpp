@@ -4776,6 +4776,13 @@ void HistoryInner::changeItemsRevealHeight(int revealHeight) {
 	updateSize();
 }
 
+void HistoryInner::setExtraBottomPadding(int padding) {
+	if (_extraBottomPadding != padding) {
+		_extraBottomPadding = padding;
+		updateSize();
+	}
+}
+
 void HistoryInner::updateSize() {
 	if (_thanosController) {
 		_thanosController->flushRemovals(historyHeight() - _revealHeight);
@@ -4788,7 +4795,7 @@ void HistoryInner::updateSize() {
 	const auto itemsHeight = historyHeight() - _revealHeight + collapseGapTotal;
 	const auto aboutAboveHistory = _aboutView && _aboutView->aboveHistory();
 	const auto aboutBelowHistory = _aboutView && !aboutAboveHistory;
-	auto newHistoryMarginBottom = st::historyPaddingBottom;
+	auto newHistoryMarginBottom = st::historyPaddingBottom + _extraBottomPadding;
 	if (aboutBelowHistory) {
 		accumulate_max(newHistoryMarginBottom, _aboutView->height);
 	}
