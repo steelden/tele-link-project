@@ -129,6 +129,18 @@ void Sending::readMessage(
 		[](const QJsonObject &) {});
 }
 
+void Sending::setChatNotifications(
+		const ChatId &chatId,
+		bool isNotifiable) {
+	QJsonObject param;
+	param["chatId"] = chatId;
+	param["isNotifiable"] = isNotifiable;
+	_rpc->call(
+		"Chat.SetChatNotifications",
+		param,
+		[](const QJsonObject &) {});
+}
+
 void Sending::addReaction(
 		const ChatId &chatId,
 		const MessageId &messageId,

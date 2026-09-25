@@ -671,8 +671,7 @@ void MainMenu::setupMenu() {
 				st::mainMenuButton,
 				{ &st::menuIconProfile })
 		)->setClickedCallback([=] {
-			controller->showSection(
-				Info::Stories::Make(controller->session().user()));
+			controller->showPeerInfo(controller->session().user());
 		});
 
 		SetupMenuBots(_menu, controller);

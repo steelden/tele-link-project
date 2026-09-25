@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio_track.h"
 #include "media/audio/media_audio.h"
 #include "mtproto/mtproto_config.h"
+#include "mtslink/data_adapters.h"
 #include "history/history.h"
 #include "history/history_item_components.h"
 #include "history/history_item_helpers.h"
@@ -1340,10 +1341,13 @@ Window::SessionController *Manager::openNotificationMessage(
 		return window;
 	}
 	const auto item = history->owner().message(history->peer, messageId);
-	const auto openExactlyMessage = !history->peer->isBroadcast()
-		&& item
+	const auto openExactlyMessage = item
 		&& item->isRegular()
-		&& (item->out() || (item->mentionsMe() && !history->peer->isUser()));
+		&& (MtsLink::hasChatId(history->peer->id)
+			|| (!history->peer->isBroadcast()
+				&& (item->out()
+					|| (item->mentionsMe()
+						&& !history->peer->isUser()))));
 	const auto topic = item ? item->topic() : nullptr;
 	const auto sublist = item ? item->savedSublist() : nullptr;
 

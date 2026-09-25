@@ -2117,6 +2117,15 @@ void ApiWrap::sendNotifySettingsUpdates() {
 		)).afterDelay(kSmallDelayMs).send();
 	}
 	for (const auto &peer : base::take(_updateNotifyPeers)) {
+		if (MtsLink::hasChatId(peer->id)) {
+			const auto mts = session().account().mtsLinkSession();
+			if (mts) {
+				const auto chatId = MtsLink::peerIdToChatId(peer->id);
+				const auto muted = peer->notify().muteUntil().value_or(0) > 0;
+				mts->sending()->setChatNotifications(chatId, !muted);
+			}
+			continue;
+		}
 		const auto channel = peer->asChannel();
 		request(MTPaccount_UpdateNotifySettings(
 			(channel && channel->isCommunity())

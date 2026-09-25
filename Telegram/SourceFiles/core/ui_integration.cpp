@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/ui_integration.h"
 
+#include "mtslink/data_adapters.h"
 #include "api/api_text_entities.h"
 #include "core/local_url_handlers.h"
 #include "core/file_utilities.h"
@@ -418,7 +419,10 @@ bool UiIntegration::handleUrlClick(
 		return true;
 	}
 
-	if (UrlClickHandler::IsEmail(url)) {
+	if (MtsLink::isMtsLinkUrl(url)) {
+		MtsLink::handleMtsLinkUrl(url, context);
+		return true;
+	} else if (UrlClickHandler::IsEmail(url)) {
 		File::OpenEmailLink(url);
 		return true;
 	} else if (local.startsWith(u"tg://"_q, Qt::CaseInsensitive)) {
