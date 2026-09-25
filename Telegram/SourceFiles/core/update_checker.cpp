@@ -353,7 +353,7 @@ QString FindUpdateFile() {
 			QRegularExpression::CaseInsensitiveOption
 		);
 		static const auto RegExpTeleLink = QRegularExpression(
-			"^TeleLink.*\\.zip$",
+			"^TeleLink.*\\.pkg$",
 			QRegularExpression::CaseInsensitiveOption
 		);
 		if (RegExp.match(info.fileName()).hasMatch()
@@ -1060,14 +1060,14 @@ bool HttpChecker::handleResponse(const QByteArray &response) {
 	for (const auto &asset : assets) {
 		const auto obj = asset.toObject();
 		const auto name = obj.value("name").toString();
-		if (name.endsWith(u".zip"_q, Qt::CaseInsensitive)
+		if (name.endsWith(u".pkg"_q, Qt::CaseInsensitive)
 			&& name.contains(u"TeleLink"_q, Qt::CaseInsensitive)) {
 			downloadUrl = obj.value("browser_download_url").toString();
 			break;
 		}
 	}
 	if (downloadUrl.isEmpty()) {
-		LOG(("Update Error: no TeleLink zip asset in release."));
+		LOG(("Update Error: no TeleLink pkg asset in release."));
 		return false;
 	}
 
