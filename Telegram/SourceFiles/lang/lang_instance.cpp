@@ -561,6 +561,12 @@ void Instance::loadFromContent(const QByteArray &content) {
 	}
 }
 
+void Instance::notifyUpdated() {
+	if (!_derived) {
+		_updated.fire({});
+	}
+}
+
 void Instance::fillFromCustomContent(
 		const QString &absolutePath,
 		const QString &relativePath,

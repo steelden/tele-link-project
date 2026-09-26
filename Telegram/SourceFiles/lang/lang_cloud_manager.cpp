@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "core/click_handler_types.h"
 #include "boxes/abstract_box.h" // Ui::hideLayer().
+#include "mtslink/lang_overrides.h"
 #include "styles/style_layers.h"
 
 namespace Lang {
@@ -305,26 +306,13 @@ void CloudManager::applyLangPackDifference(
 }
 
 void CloudManager::requestLanguageList() {
-	if (!_api) {
-		_languagesRequestId = -1;
-		return;
+	if (_languages.empty()) {
+		_languages = {
+			{ u"en"_q, {}, {}, u"English"_q, u"English"_q },
+			{ u"ru"_q, {}, {}, u"Russian"_q, u"Русский"_q },
+		};
+		_languageListChanged.fire({});
 	}
-	_api->request(base::take(_languagesRequestId)).cancel();
-	_languagesRequestId = _api->request(MTPlangpack_GetLanguages(
-		MTP_string(CloudLangPackName())
-	)).done([=](const MTPVector<MTPLangPackLanguage> &result) {
-		auto languages = Languages();
-		for (const auto &language : result.v) {
-			languages.push_back(ParseLanguage(language));
-		}
-		if (_languages != languages) {
-			_languages = languages;
-			_languageListChanged.fire({});
-		}
-		_languagesRequestId = 0;
-	}).fail([=] {
-		_languagesRequestId = 0;
-	}).send();
 }
 
 void CloudManager::offerSwitchLangPack() {
@@ -427,6 +415,13 @@ void CloudManager::requestLanguageAndSwitch(
 		return;
 	}
 
+	for (const auto &lang : _languages) {
+		if (lang.id == id) {
+			performSwitchAndRestart(lang);
+			return;
+		}
+	}
+
 	_switchingToLanguageId = id;
 	_switchingToLanguageWarning = warning;
 	sendSwitchingToLanguageRequest();
@@ -473,14 +468,27 @@ void CloudManager::sendSwitchingToLanguageRequest() {
 void CloudManager::switchToLanguage(const Language &data) {
 	if (_langpack.id() == data.id && data.id != u"#custom"_q) {
 		return;
-	} else if (!_api) {
+	}
+
+	if (data.id == u"#custom"_q) {
+		performSwitchToCustom();
+		return;
+	}
+
+	for (const auto &lang : _languages) {
+		if (lang.id == data.id) {
+			performSwitchAndRestart(data);
+			return;
+		}
+	}
+
+	if (!_api) {
+		performSwitchAndRestart(data);
 		return;
 	}
 
 	_api->request(base::take(_getKeysForSwitchRequestId)).cancel();
-	if (data.id == u"#custom"_q) {
-		performSwitchToCustom();
-	} else if (canApplyWithoutRestart(data.id)) {
+	if (canApplyWithoutRestart(data.id)) {
 		performSwitchAndAddToRecent(data);
 	} else {
 		QVector<MTPstring> keys;
@@ -587,11 +595,19 @@ void CloudManager::performSwitchAndAddToRecent(const Language &data) {
 }
 
 void CloudManager::performSwitchAndRestart(const Language &data) {
-	performSwitchAndAddToRecent(data);
-	restartAfterSwitch();
+	LOG(("Lang: performSwitchAndRestart id='%1'").arg(data.id));
+	Local::pushRecentLanguage(data);
+	_restartAfterSwitch = false;
+	switchLangPackId(data);
+	MtsLink::applyLangOverrides();
+	_langpack.notifyUpdated();
+	Local::writeLangPack();
 }
 
 void CloudManager::restartAfterSwitch() {
+	LOG(("Lang: restartAfterSwitch reqId=%1 baseReqId=%2")
+		.arg(_langPackRequestId)
+		.arg(_langPackBaseRequestId));
 	if (_langPackRequestId || _langPackBaseRequestId) {
 		_restartAfterSwitch = true;
 	} else {
