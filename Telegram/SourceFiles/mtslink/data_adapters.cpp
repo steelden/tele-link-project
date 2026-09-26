@@ -330,12 +330,12 @@ qint64 parseTimestamp(const QJsonObject &obj, const char *msKey, const char *key
 
 TextWithEntities parseMentionedText(
 		const QString &text,
+		const QString &markdown,
 		const QList<Api::MentionInfo> &mentions,
 		not_null<Main::Session*> session) {
-	if (text.isEmpty() || !text.contains(u"<@u:"_q)) {
-		auto result = TextWithEntities{ text };
-		TextUtilities::ParseEntities(result, TextParseLinks);
-		return result;
+	const auto &source = markdown.isEmpty() ? text : markdown;
+	if (source.isEmpty()) {
+		return TextWithEntities{};
 	}
 
 	QHash<QString, QString> nameMap;
@@ -345,47 +345,322 @@ TextWithEntities parseMentionedText(
 		}
 	}
 
-	static const auto re = QRegularExpression(
-		QStringLiteral("<@u:([0-9a-f\\-]{36})>"));
+	const bool hasMarkdown = !markdown.isEmpty();
+	const bool hasMentions = source.contains(u"<@u:"_q);
+
+	if (!hasMarkdown && !hasMentions) {
+		auto result = TextWithEntities{ source };
+		TextUtilities::ParseEntities(result, TextParseLinks);
+		return result;
+	}
 
 	QString result;
 	EntitiesInText entities;
-	int pos = 0;
-	auto it = re.globalMatch(text);
-	while (it.hasNext()) {
-		const auto match = it.next();
-		result += text.mid(pos, match.capturedStart() - pos);
 
-		const auto userId = match.captured(1);
-		auto displayName = nameMap.value(userId);
-		if (displayName.isEmpty()) {
-			const auto bareId = uuidToBareId(userId);
-			if (const auto user = session->data().userLoaded(
-					::UserId(bareId))) {
-				displayName = user->name();
+	if (!hasMarkdown) {
+		static const auto re = QRegularExpression(
+			QStringLiteral("<@u:([0-9a-f\\-]{36})>"));
+		int pos = 0;
+		auto it = re.globalMatch(source);
+		while (it.hasNext()) {
+			const auto match = it.next();
+			result += source.mid(pos, match.capturedStart() - pos);
+			const auto userId = match.captured(1);
+			auto displayName = nameMap.value(userId);
+			if (displayName.isEmpty()) {
+				const auto bareId = uuidToBareId(userId);
+				if (const auto user = session->data().userLoaded(
+						::UserId(bareId))) {
+					displayName = user->name();
+				}
+			}
+			if (!displayName.isEmpty()) {
+				const auto mention = u"@"_q + displayName;
+				const auto bareId = uuidToBareId(userId);
+				const auto selfBareId = session->userId().bare;
+				const auto data = TextUtilities::MentionNameDataFromFields({
+					.selfId = selfBareId,
+					.userId = bareId,
+					.accessHash = 0,
+				});
+				entities.push_back(EntityInText(
+					EntityType::MentionName,
+					result.size(),
+					mention.size(),
+					data));
+				result += mention;
+			} else {
+				result += match.captured(0);
+			}
+			pos = match.capturedEnd();
+		}
+		result += source.mid(pos);
+		auto parsed = TextWithEntities{ result, entities };
+		TextUtilities::ParseEntities(parsed, TextParseLinks);
+		return parsed;
+	}
+
+	int boldStart = -1;
+	int italicStart = -1;
+	int strikeStart = -1;
+	int underlineStart = -1;
+	int spoilerStart = -1;
+	int codeStart = -1;
+	bool inCode = false;
+	int preStart = -1;
+	QString preLang;
+	bool inPre = false;
+
+	QString unescaped;
+	unescaped.reserve(source.size());
+	for (int i = 0, sz = source.size(); i < sz; ++i) {
+		if (source[i] == '\\' && i + 1 < sz) {
+			const auto next = source[i + 1];
+			if (next == '*'
+				|| next == '~'
+				|| next == '`'
+				|| next == '\\'
+				|| next == '_'
+				|| next == '|') {
+				unescaped += next;
+				++i;
+				continue;
 			}
 		}
-		if (!displayName.isEmpty()) {
-			const auto mention = u"@"_q + displayName;
-			const auto bareId = uuidToBareId(userId);
-			const auto selfBareId = session->userId().bare;
-			const auto data = TextUtilities::MentionNameDataFromFields({
-				.selfId = selfBareId,
-				.userId = bareId,
-				.accessHash = 0,
-			});
-			entities.push_back(EntityInText(
-				EntityType::MentionName,
-				result.size(),
-				mention.size(),
-				data));
-			result += mention;
-		} else {
-			result += match.captured(0);
-		}
-		pos = match.capturedEnd();
+		unescaped += source[i];
 	}
-	result += text.mid(pos);
+
+	int pos = 0;
+	const int len = unescaped.size();
+
+	const auto isTripleBacktick = [&](int p) {
+		return p + 2 < len
+			&& unescaped[p] == '`'
+			&& unescaped[p + 1] == '`'
+			&& unescaped[p + 2] == '`';
+	};
+	while (pos < len) {
+		if (isTripleBacktick(pos)) {
+			if (inPre) {
+				entities.push_back(EntityInText(
+					EntityType::Pre,
+					preStart,
+					result.size() - preStart,
+					preLang));
+				preStart = -1;
+				preLang.clear();
+				inPre = false;
+				pos += 3;
+				if (pos < len && unescaped[pos] == '\n') {
+					++pos;
+				}
+				continue;
+			} else {
+				pos += 3;
+				const auto nlPos = unescaped.indexOf('\n', pos);
+				if (nlPos != -1) {
+					preLang = unescaped.mid(pos, nlPos - pos).trimmed();
+					pos = nlPos + 1;
+				}
+				preStart = result.size();
+				inPre = true;
+				continue;
+			}
+		}
+
+		if (inPre) {
+			result += unescaped[pos];
+			++pos;
+			continue;
+		}
+
+		if (pos + 3 < len
+			&& unescaped[pos] == '<'
+			&& unescaped[pos + 1] == '@'
+			&& unescaped[pos + 2] == 'u'
+			&& unescaped[pos + 3] == ':') {
+			const auto end = unescaped.indexOf('>', pos + 4);
+			if (end != -1) {
+				const auto userId = unescaped.mid(pos + 4, end - pos - 4);
+				auto displayName = nameMap.value(userId);
+				if (displayName.isEmpty()) {
+					const auto bareId = uuidToBareId(userId);
+					if (const auto user = session->data().userLoaded(
+							::UserId(bareId))) {
+						displayName = user->name();
+					}
+				}
+				if (!displayName.isEmpty()) {
+					const auto mention = u"@"_q + displayName;
+					const auto bareId = uuidToBareId(userId);
+					const auto selfBareId = session->userId().bare;
+					const auto data = TextUtilities::MentionNameDataFromFields({
+						.selfId = selfBareId,
+						.userId = bareId,
+						.accessHash = 0,
+					});
+					entities.push_back(EntityInText(
+						EntityType::MentionName,
+						result.size(),
+						mention.size(),
+						data));
+					result += mention;
+				} else {
+					result += unescaped.mid(pos, end - pos + 1);
+				}
+				pos = end + 1;
+				continue;
+			}
+		}
+
+		if (unescaped[pos] == '`') {
+			if (codeStart >= 0) {
+				entities.push_back(EntityInText(
+					EntityType::Code,
+					codeStart,
+					result.size() - codeStart));
+				codeStart = -1;
+				inCode = false;
+			} else {
+				codeStart = result.size();
+				inCode = true;
+			}
+			++pos;
+			continue;
+		}
+
+		if (inCode) {
+			result += unescaped[pos];
+			++pos;
+			continue;
+		}
+
+		if (pos + 1 < len
+			&& unescaped[pos] == '~'
+			&& unescaped[pos + 1] == '~') {
+			if (strikeStart >= 0) {
+				entities.push_back(EntityInText(
+					EntityType::StrikeOut,
+					strikeStart,
+					result.size() - strikeStart));
+				strikeStart = -1;
+			} else {
+				strikeStart = result.size();
+			}
+			pos += 2;
+			continue;
+		}
+
+		if (pos + 1 < len
+			&& unescaped[pos] == '|'
+			&& unescaped[pos + 1] == '|') {
+			if (spoilerStart >= 0) {
+				entities.push_back(EntityInText(
+					EntityType::Spoiler,
+					spoilerStart,
+					result.size() - spoilerStart));
+				spoilerStart = -1;
+			} else {
+				spoilerStart = result.size();
+			}
+			pos += 2;
+			continue;
+		}
+
+		if (pos + 1 < len
+			&& unescaped[pos] == '*'
+			&& unescaped[pos + 1] == '*') {
+			if (boldStart >= 0) {
+				entities.push_back(EntityInText(
+					EntityType::Bold,
+					boldStart,
+					result.size() - boldStart));
+				boldStart = -1;
+			} else {
+				boldStart = result.size();
+			}
+			pos += 2;
+			continue;
+		}
+
+		if (pos + 1 < len
+			&& unescaped[pos] == '_'
+			&& unescaped[pos + 1] == '_') {
+			if (underlineStart >= 0) {
+				entities.push_back(EntityInText(
+					EntityType::Underline,
+					underlineStart,
+					result.size() - underlineStart));
+				underlineStart = -1;
+			} else {
+				underlineStart = result.size();
+			}
+			pos += 2;
+			continue;
+		}
+
+		if (unescaped[pos] == '*') {
+			if (italicStart >= 0) {
+				entities.push_back(EntityInText(
+					EntityType::Italic,
+					italicStart,
+					result.size() - italicStart));
+				italicStart = -1;
+			} else {
+				italicStart = result.size();
+			}
+			++pos;
+			continue;
+		}
+
+		result += unescaped[pos];
+		++pos;
+	}
+
+	struct UnmatchedMarker {
+		int *start;
+		const char *marker;
+	};
+	for (const auto &u : {
+		UnmatchedMarker{ &boldStart, "**" },
+		UnmatchedMarker{ &italicStart, "*" },
+		UnmatchedMarker{ &strikeStart, "~~" },
+		UnmatchedMarker{ &underlineStart, "__" },
+		UnmatchedMarker{ &spoilerStart, "||" },
+		UnmatchedMarker{ &codeStart, "`" },
+	}) {
+		if (*u.start >= 0) {
+			const auto marker = QString::fromLatin1(u.marker);
+			result.insert(*u.start, marker);
+			const auto shift = marker.size();
+			for (auto &e : entities) {
+				if (e.offset() >= *u.start) {
+					e = EntityInText(
+						e.type(),
+						e.offset() + shift,
+						e.length(),
+						e.data());
+				}
+			}
+		}
+	}
+	if (inPre) {
+		const auto marker = u"```"_q
+			+ (preLang.isEmpty() ? QString() : preLang)
+			+ u"\n"_q;
+		result.insert(preStart, marker);
+		const auto shift = marker.size();
+		for (auto &e : entities) {
+			if (e.offset() >= preStart) {
+				e = EntityInText(
+					e.type(),
+					e.offset() + shift,
+					e.length(),
+					e.data());
+			}
+		}
+	}
+
 	auto parsed = TextWithEntities{ result, entities };
 	TextUtilities::ParseEntities(parsed, TextParseLinks);
 	return parsed;
@@ -1001,7 +1276,7 @@ HistoryItem *addMessage(
 		registerThreadRoot(chatPeerId, msgId, parentMsgId);
 	}
 
-	auto text = parseMentionedText(src.text, src.mentions, session);
+	auto text = parseMentionedText(src.text, src.markdown, src.mentions, session);
 
 	const auto uuidIt = MtsLinkIdToMsgMap.constFind(src.id);
 	if (uuidIt != MtsLinkIdToMsgMap.constEnd()
@@ -1173,7 +1448,7 @@ bool addOlderMessages(
 			fields.flags |= MessageFlag::HasReplyInfo;
 		}
 
-		auto text = parseMentionedText(src.text, src.mentions, session);
+		auto text = parseMentionedText(src.text, src.markdown, src.mentions, session);
 
 		registerMessageId(chatPeerId, msgId, src.id);
 
@@ -1384,6 +1659,7 @@ void handleChatEvent(
 	} else if (type == "MessageUpdatedV2Event") {
 		const auto messageId = value.value("messageId").toString();
 		const auto newText = value.value("text").toString();
+		const auto newMarkdown = value.value("markdown").toString();
 		const auto updatedAt = value.value("updatedAt").toDouble();
 
 		if (messageId.isEmpty()) {
@@ -1409,7 +1685,7 @@ void handleChatEvent(
 			chatPeerId, existingMsgId);
 		if (existing) {
 			existing->setText(parseMentionedText(
-				newText, mentions, session));
+				newText, newMarkdown, mentions, session));
 			if (updatedAt > 0) {
 				existing->setEditDate(TimeId(
 					qint64(updatedAt) / 1000));
@@ -1557,7 +1833,7 @@ void updateMessage(
 	const auto msgId = MsgId(msgBareId & 0x7FFFFFFFLL);
 	const auto item = session->data().message(chatPeerId, msgId);
 	if (item) {
-		item->setText(parseMentionedText(src.text, src.mentions, session));
+		item->setText(parseMentionedText(src.text, src.markdown, src.mentions, session));
 		session->data().requestItemTextRefresh(item);
 	}
 }
@@ -1619,7 +1895,7 @@ bool replacePendingWithReal(
 		}
 	}
 	item->setText(parseMentionedText(
-		realMsg.text, realMsg.mentions, session));
+		realMsg.text, realMsg.markdown, realMsg.mentions, session));
 	registerMessageId(peerId, tempMsgId, realMsg.id);
 	session->data().requestItemTextRefresh(item);
 	item->invalidateChatListEntry();
