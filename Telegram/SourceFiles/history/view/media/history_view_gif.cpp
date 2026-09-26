@@ -629,6 +629,7 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 	_smallGroupPart = false;
 
 	ensureDataMediaCreated();
+	_dataMedia->automaticLoad(_realParent->fullId(), _realParent);
 	const auto item = _parent->data();
 	const auto loaded = dataLoaded();
 	const auto displayLoading = (item->isSending() || _data->displayLoading());

@@ -4,6 +4,7 @@ based on Telegram Desktop.
 */
 #include "mtslink/session.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/env_config.h"
 
 namespace MtsLink {
 
@@ -53,7 +54,24 @@ void Session::start(const QString &token) {
 	_sending = std::make_unique<Api::Sending>(&_rpc);
 	_typing = std::make_unique<Api::Typing>(&_rpc);
 	_files = std::make_unique<Api::Files>(&_rpc);
-	_rpc.connectAndAuth(token);
+
+	auto &env = EnvConfig::instance();
+	if (env.isLoaded()) {
+		_rpc.connectAndAuth(token);
+	} else {
+		QObject::connect(&env, &EnvConfig::loaded, this, [this] {
+			if (!_manualStop) {
+				_rpc.connectAndAuth(_token);
+			}
+		}, Qt::SingleShotConnection);
+		QObject::connect(&env, &EnvConfig::loadFailed, this, [this] {
+			LOG(("MtsLink Session: env-config failed, connecting with defaults"));
+			if (!_manualStop) {
+				_rpc.connectAndAuth(_token);
+			}
+		}, Qt::SingleShotConnection);
+		env.load(u"https://my.mts-link.ru/chats/env-config.js"_q);
+	}
 }
 
 void Session::stop() {

@@ -278,6 +278,7 @@ base::flat_set<QString> Account::collectGoodNames() const {
 		"maps",
 		"configs",
 		"mtslink_token",
+		"mtslink_env_config",
 	};
 	const auto push = [&](FileKey key) {
 		if (!key) {
@@ -1217,6 +1218,10 @@ Account::MtsLinkData Account::readMtsLinkData() const {
 		.token = content.mid(newline + 1).trimmed(),
 		.userId = ok ? userId : 0,
 	};
+}
+
+QString Account::envConfigCachePath() const {
+	return _basePath + u"mtslink_env_config"_q;
 }
 
 void Account::writeMtpConfig() {

@@ -3,6 +3,7 @@ This file is part of MTS Link Desktop,
 based on Telegram Desktop.
 */
 #include "mtslink/connection.h"
+#include "mtslink/env_config.h"
 
 #include <QJsonDocument>
 #include <QUrl>
@@ -15,7 +16,6 @@ based on Telegram Desktop.
 namespace MtsLink {
 namespace {
 
-constexpr auto kServerUrl = "wss://prod-ws-chat.mts-link.ru/v1";
 constexpr auto kPlatform = "desktop";
 constexpr auto kVersion = "1.0.0";
 constexpr auto kDefaultPingInterval = 10000;
@@ -108,7 +108,7 @@ void Connection::connectToServer(const QString &token) {
 	_readBuffer.clear();
 
 	const auto url = QUrl(QString("%1?p=%2&v=%3")
-		.arg(kServerUrl)
+		.arg(EnvConfig::instance().wssServerUrl())
 		.arg(kPlatform)
 		.arg(kVersion));
 	_host = url.host();

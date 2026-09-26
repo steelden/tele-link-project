@@ -1469,6 +1469,8 @@ PRIVATE
     mtslink/connection.cpp
     mtslink/connection.h
     mtslink/data_adapters.cpp
+    mtslink/env_config.cpp
+    mtslink/env_config.h
     mtslink/data_adapters.h
     mtslink/lang_overrides.cpp
     mtslink/lang_overrides.h

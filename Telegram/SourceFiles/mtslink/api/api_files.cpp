@@ -5,6 +5,7 @@ based on Telegram Desktop.
 #include "mtslink/api/api_files.h"
 #include "mtslink/rpc.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/env_config.h"
 
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkRequest>
@@ -62,7 +63,7 @@ void Files::uploadFile(
 
 			UploadResult uploadResult{
 				.id = id,
-				.url = u"https://prod-storage-chat.mts-link.ru/file/"_q + id + u"/download"_q,
+				.url = EnvConfig::instance().baseMediaUrl() + u"/file/"_q + id + u"/download"_q,
 				.name = filename,
 				.size = content.size(),
 				.mime = mime,

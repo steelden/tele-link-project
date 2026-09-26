@@ -3,6 +3,7 @@ This file is part of MTS Link Desktop,
 based on Telegram Desktop.
 */
 #include "mtslink/auth_widget.h"
+#include "mtslink/env_config.h"
 
 #include "webview/webview_embed.h"
 #include "base/options.h"
@@ -15,12 +16,6 @@ based on Telegram Desktop.
 #include <QtWidgets/QPushButton>
 
 namespace MtsLink {
-namespace {
-
-const auto kSigninUrl =
-	"https://my.mts-link.ru/signin";
-
-} // namespace
 
 AuthWidget::AuthWidget(QWidget *parent)
 : QWidget(parent) {
@@ -63,7 +58,8 @@ void AuthWidget::startAuth() {
 	_retryButton->hide();
 
 	createWebView();
-	_webView->navigate(QString(kSigninUrl));
+	_webView->navigate(
+		EnvConfig::instance().webinarHost() + u"/signin"_q);
 }
 
 void AuthWidget::createWebView() {
