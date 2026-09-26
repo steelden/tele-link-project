@@ -29,7 +29,8 @@ public:
 		const QJsonArray &mentionsMeta = {},
 		const MessageId &replyToMessageId = {},
 		const QStringList &fileIds = {},
-		const MessageId &parentId = {});
+		const MessageId &parentId = {},
+		const QString &clientId = {});
 
 	void deleteMessage(
 		const ChatId &chatId,

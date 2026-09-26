@@ -708,7 +708,10 @@ private:
 
 	Ui::ChatPaintContext preparePaintContext(const QRect &clip) const;
 
+public:
 	Element *viewForItem(FullMsgId itemId) const;
+
+private:
 	Element *viewForItem(const HistoryItem *item) const;
 	not_null<Element*> enforceViewForItem(
 		not_null<HistoryItem*> item,
@@ -997,6 +1000,7 @@ private:
 	bool _scrollDateShown = false;
 	Ui::Animations::Simple _scrollDateOpacity;
 	SingleQueuedInvokation _scrollDateCheck;
+	SingleQueuedInvokation _deferredMouseActionUpdate;
 	base::Timer _scrollDateHideTimer;
 	Element *_scrollDateLastItem = nullptr;
 	int _scrollDateLastItemTop = 0;

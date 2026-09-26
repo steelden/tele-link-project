@@ -4469,10 +4469,6 @@ void HistoryWidget::newItemAdded(not_null<HistoryItem*> item) {
 	if (_history != item->history()
 		|| !_historyInited
 		|| item->isScheduled()) {
-		LOG(("MtsLink UI: newItemAdded SKIP hist=%1 inited=%2 sched=%3")
-			.arg(_history == item->history())
-			.arg(_historyInited)
-			.arg(item->isScheduled()));
 		return;
 	}
 	if (item->isSponsored()) {
@@ -4492,12 +4488,6 @@ void HistoryWidget::newItemAdded(not_null<HistoryItem*> item) {
 	// - on first message we set unreadcount += 1, firstUnreadMessage.
 	// - on second we get wrong markingMessagesRead() and read both.
 	session().data().sendHistoryChangeNotifications();
-
-	LOG(("MtsLink UI: newItemAdded id=%1 sending=%2 scrollTop=%3 scrollMax=%4")
-		.arg(item->id.bare)
-		.arg(item->isSending())
-		.arg(_scroll->scrollTop())
-		.arg(_scroll->scrollTopMax()));
 
 	if (item->isSending()) {
 		synteticScrollToY(_scroll->scrollTopMax());
@@ -4924,10 +4914,6 @@ void HistoryWidget::loadMessages() {
 		const auto peerId = _history->peer->id;
 		const auto chatId = MtsLink::peerIdToChatId(peerId);
 		const auto oldestId = MtsLink::oldestLoadedMessageId(peerId);
-		LOG(("MtsLink Paging: loadMessages peerId=%1 chatId=%2 oldestId=%3")
-			.arg(peerId.value)
-			.arg(chatId)
-			.arg(oldestId));
 		if (chatId.isEmpty() || oldestId.isEmpty()) {
 			return;
 		}
@@ -4935,6 +4921,10 @@ void HistoryWidget::loadMessages() {
 			if (mts->messages()->isLoading(chatId)) {
 				return;
 			}
+			LOG(("MtsLink Paging: loadMessages peerId=%1 chatId=%2 oldestId=%3")
+				.arg(peerId.value)
+				.arg(chatId)
+				.arg(oldestId));
 			auto conn = std::make_shared<QMetaObject::Connection>();
 			*conn = QObject::connect(
 				mts->messages(),

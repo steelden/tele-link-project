@@ -168,6 +168,10 @@ rpl::producer<MessagesSlice> RepliesList::source(
 		int limitBefore,
 		int limitAfter) {
 	const auto around = aroundId.fullId.msg;
+	LOG(("MtsLink SCROLL-DBG: RepliesList::source() around=%1 limitBefore=%2 limitAfter=%3")
+		.arg(around.bare)
+		.arg(limitBefore)
+		.arg(limitAfter));
 	return [=](auto consumer) {
 		auto lifetime = rpl::lifetime();
 		const auto viewer = lifetime.make_state<Viewer>();
@@ -354,6 +358,11 @@ void RepliesList::injectRootDivider(
 }
 
 bool RepliesList::buildFromData(not_null<Viewer*> viewer) {
+	LOG(("MtsLink SCROLL-DBG: buildFromData around=%1 listSize=%2 skippedBefore=%3 skippedAfter=%4")
+		.arg(viewer->around.bare)
+		.arg(_list.size())
+		.arg(_skippedBefore.value_or(-1))
+		.arg(_skippedAfter.value_or(-1)));
 	if (_creating
 		|| (_list.empty() && _skippedBefore == 0 && _skippedAfter == 0)) {
 		viewer->slice.ids.clear();
@@ -391,9 +400,17 @@ bool RepliesList::buildFromData(not_null<Viewer*> viewer) {
 		loadAround(around);
 		return false;
 	}
-	const auto i = around
-		? ranges::lower_bound(_list, around, std::greater<>())
-		: end(_list);
+	const auto isMtsLink = MtsLink::hasChatId(_history->peer->id);
+	const auto i = [&] {
+		if (!around) {
+			return end(_list);
+		}
+		if (isMtsLink) {
+			const auto it = ranges::find(_list, around);
+			return (it != end(_list)) ? it : end(_list);
+		}
+		return ranges::lower_bound(_list, around, std::greater<>());
+	}();
 	const auto availableBefore = int(end(_list) - i);
 	const auto availableAfter = int(i - begin(_list));
 	const auto useBefore = std::min(availableBefore, viewer->limitBefore + 1);
@@ -411,6 +428,9 @@ bool RepliesList::buildFromData(not_null<Viewer*> viewer) {
 	const auto peerId = _history->peer->id;
 	slice->ids.clear();
 	auto nearestToAround = std::optional<MsgId>();
+	if (isMtsLink && around && i != end(_list)) {
+		nearestToAround = around;
+	}
 	slice->ids.reserve(useAfter + useBefore);
 	for (auto j = i - useAfter, e = i + useBefore; j != e; ++j) {
 		const auto id = *j;
@@ -427,6 +447,11 @@ bool RepliesList::buildFromData(not_null<Viewer*> viewer) {
 		peerId,
 		nearestToAround.value_or(
 			slice->ids.empty() ? 0 : slice->ids.back().msg));
+	LOG(("MtsLink SCROLL-DBG: buildFromData result: nearestToAround=%1 idsCount=%2 useBefore=%3 useAfter=%4")
+		.arg(slice->nearestToAround.msg.bare)
+		.arg(slice->ids.size())
+		.arg(useBefore)
+		.arg(useAfter));
 	slice->fullCount = _fullCount.current();
 
 	injectRootMessageAndReverse(viewer);
@@ -464,7 +489,10 @@ bool RepliesList::applyUpdate(const MessageUpdate &update) {
 	}
 
 	const auto id = update.item->id;
-	const auto inThread = update.item->inThread(_rootId);
+	const auto peerId = _history->peer->id;
+	const auto inThread = update.item->inThread(_rootId)
+		|| (MtsLink::hasChatId(peerId)
+			&& MtsLink::threadRootFor(peerId, id) == _rootId);
 	const auto added = (update.flags & Flag::ReplyToTopAdded);
 	const auto i = ranges::lower_bound(_list, id, std::greater<>());
 	if (update.flags & Flag::Destroyed) {
@@ -489,11 +517,17 @@ bool RepliesList::applyUpdate(const MessageUpdate &update) {
 	if (added) {
 		changeUnreadCountByPost(id, 1);
 	}
-	if (_skippedAfter != 0
-		|| (i != end(_list) && *i == id)) {
+	if (_skippedAfter != 0) {
 		return false;
 	}
-	_list.insert(i, id);
+	if (ranges::find(_list, id) != end(_list)) {
+		return false;
+	}
+	if (MtsLink::hasChatId(_history->peer->id)) {
+		_list.insert(begin(_list), id);
+	} else {
+		_list.insert(i, id);
+	}
 	if (_skippedBefore && _skippedAfter) {
 		_fullCount = *_skippedBefore + _list.size() + *_skippedAfter;
 	} else if (const auto known = _fullCount.current()) {
@@ -530,6 +564,10 @@ HistoryItem *RepliesList::lookupRoot() {
 
 void RepliesList::loadAround(MsgId id) {
 	Expects(!_creating);
+
+	LOG(("MtsLink SCROLL-DBG: loadAround id=%1 loadingAround=%2")
+		.arg(id.bare)
+		.arg(_loadingAround ? QString::number(_loadingAround->bare) : "none"));
 
 	if (_loadingAround && *_loadingAround == id) {
 		return;
@@ -571,13 +609,23 @@ void RepliesList::loadAround(MsgId id) {
 			if (messages.isEmpty()) {
 				_fullCount = _skippedBefore = _skippedAfter = 0;
 			} else {
-				for (const auto &msg : messages) {
-					MtsLink::addMessage(session, msg);
-					const auto bareId = MtsLink::uuidToBareId(msg.id);
-					const auto msgId = MsgId(bareId & 0x7FFFFFFFLL);
-					_list.push_back(msgId);
+				for (int i = messages.size() - 1; i >= 0; --i) {
+					const auto item = MtsLink::addMessage(
+						session, messages[i], true);
+					if (item) {
+						_list.push_back(item->id);
+					}
 				}
-				ranges::sort(_list, std::greater<>());
+				const auto &owner = _history->owner();
+				ranges::sort(_list, [&](MsgId a, MsgId b) {
+					const auto ia = owner.message(peerId, a);
+					const auto ib = owner.message(peerId, b);
+					if (!ia || !ib) return a > b;
+					if (ia->date() != ib->date()) {
+						return ia->date() > ib->date();
+					}
+					return a > b;
+				});
 				_skippedBefore = 0;
 				_skippedAfter = 0;
 				_fullCount = int(_list.size());

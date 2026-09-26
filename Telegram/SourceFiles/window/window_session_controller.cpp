@@ -1262,6 +1262,9 @@ void SessionNavigation::showRepliesForMessage(
 			},
 			commentId,
 			params.highlight);
+		if (auto cached = MtsLink::cachedRepliesList(history->peer->id, rootId)) {
+			memento->setReplies(std::move(cached));
+		}
 		showSection(std::move(memento), params);
 		return;
 	}

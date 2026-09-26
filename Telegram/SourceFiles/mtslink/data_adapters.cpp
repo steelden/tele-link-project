@@ -15,8 +15,10 @@ based on Telegram Desktop.
 #include "data/data_photo.h"
 #include "data/data_changes.h"
 #include "data/data_send_action.h"
+#include "data/data_replies_list.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/history_item_components.h"
 #include "history/history_item_reply_markup.h"
 #include "history/view/history_view_send_action.h"
 #include "dialogs/dialogs_main_list.h"
@@ -45,6 +47,8 @@ QHash<PeerId, std::vector<uint64>> ChatMembersMap;
 QHash<PeerId, MsgId> PendingTempMessages;
 QHash<QString, QPair<PeerId, MsgId>> MtsLinkIdToMsgMap;
 QSet<QString> PinnedMessagesLoadedChats;
+QSet<QString> PendingThreadClientIds;
+QHash<quint64, MsgId> ThreadRootMap;
 QString FileAuthTokenValue;
 QList<QNetworkCookie> FileAuthCookies;
 QHash<QString, QString> EmojiToIdMap;
@@ -717,7 +721,9 @@ void applyUserData(
 	const auto first = src.firstName;
 	const auto last = src.lastName;
 	const auto display = src.displayName;
-	if (isSelf) {
+	static bool selfLogged = false;
+	if (isSelf && !selfLogged) {
+		selfLogged = true;
 		LOG(("MtsLink: applying SELF user data: '%1 %2' display='%3' avatar='%4'")
 			.arg(first, last, display, src.avatarFileId));
 	}
@@ -769,13 +775,17 @@ void applyUserData(
 
 HistoryItem *addMessage(
 		not_null<Main::Session*> session,
-		const Api::MessageData &src) {
+		const Api::MessageData &src,
+		bool threadOnly) {
 	if (src.isDeleted) {
 		return nullptr;
 	}
 	const auto chatPeerId = chatIdToPeerId(src.chatId);
 
 	const auto history = session->data().history(chatPeerId);
+	if (!history->folderKnown()) {
+		history->clearFolder();
+	}
 
 	const auto msgBareId = uuidToBareId(src.id);
 	const auto msgId = MsgId(msgBareId & 0x7FFFFFFFLL);
@@ -812,8 +822,25 @@ HistoryItem *addMessage(
 		};
 		fields.flags |= MessageFlag::HasReplyInfo;
 	}
+	if (!src.parentId.isEmpty()) {
+		const auto parentBareId = uuidToBareId(src.parentId);
+		const auto parentMsgId = MsgId(parentBareId & 0x7FFFFFFFLL);
+		fields.replyTo.topicRootId = parentMsgId;
+		fields.flags |= MessageFlag::HasReplyInfo;
+		registerThreadRoot(chatPeerId, msgId, parentMsgId);
+	}
 
 	auto text = parseMentionedText(src.text, src.mentions, session);
+
+	const auto uuidIt = MtsLinkIdToMsgMap.constFind(src.id);
+	if (uuidIt != MtsLinkIdToMsgMap.constEnd()
+		&& uuidIt.value().second != msgId) {
+		const auto existing = session->data().message(
+			uuidIt.value().first, uuidIt.value().second);
+		if (existing) {
+			return existing;
+		}
+	}
 
 	registerMessageId(chatPeerId, msgId, src.id);
 
@@ -824,6 +851,11 @@ HistoryItem *addMessage(
 			session->data().requestItemTextRefresh(existing);
 			existing->invalidateChatListEntry();
 		}
+		if (const auto reply = existing->Get<HistoryMessageReply>()) {
+			if (!reply->resolvedMessage) {
+				existing->updateDependencyItem();
+			}
+		}
 		return existing;
 	}
 
@@ -831,10 +863,15 @@ HistoryItem *addMessage(
 		? buildFileMedia(session, src.files.first(), date)
 		: MTP_messageMediaEmpty();
 
-	const auto item = history->addNewExternalMessage(
-		std::move(fields),
-		std::move(text),
-		media);
+	const auto item = threadOnly
+		? history->makeMessage(
+			std::move(fields),
+			std::move(text),
+			media)
+		: history->addNewExternalMessage(
+			std::move(fields),
+			std::move(text),
+			media);
 	if (item && !src.files.isEmpty()) {
 		reapplyPhotoUrls(item, src.files.first());
 	}
@@ -846,6 +883,11 @@ HistoryItem *addMessage(
 	}
 	if (item && src.updatedAt > 0 && src.updatedAt != src.createdAt) {
 		item->setEditDate(TimeId(src.updatedAt / 1000));
+	}
+	if (item && threadOnly) {
+		session->changes().messageUpdated(
+			item,
+			Data::MessageUpdate::Flag::NewMaybeAdded);
 	}
 	return item;
 }
@@ -997,6 +1039,10 @@ void handleChatEvent(
 		msg.updatedAt = parseTimestamp(m, "updatedAtMs", "updatedAt");
 		const auto repliedMsg = m.value("repliedMessage").toObject();
 		msg.repliedMessageId = repliedMsg.value("id").toString();
+		msg.parentId = value.value("threadId").toString();
+		if (msg.parentId.isEmpty()) {
+			msg.parentId = m.value("parentMessage").toObject().value("id").toString();
+		}
 		msg.type = MessageType::Text;
 		{
 			auto mentionsArr = m.value("metadata").toObject()
@@ -1030,9 +1076,14 @@ void handleChatEvent(
 				.height = meta.value("height").toInt(),
 			});
 		}
+		const auto clientId = m.value("clientId").toString();
+		const auto isThreadReply = takePendingThreadSend(clientId);
 		const auto chatPeerId = chatIdToPeerId(chatId);
-		if (!replacePendingWithReal(session, chatPeerId, msg)) {
-			addMessage(session, msg);
+		const auto isThread = !msg.parentId.isEmpty();
+		if (isThreadReply) {
+			replacePendingWithReal(session, chatPeerId, msg);
+		} else if (!replacePendingWithReal(session, chatPeerId, msg)) {
+			addMessage(session, msg, isThread);
 		}
 	} else if (type == "MessageDeletedEvent") {
 		const auto messageId = value.value("messageId").toString();
@@ -1126,6 +1177,23 @@ void handleChatEvent(
 		}
 		const auto count = value.value("unreadMessageCount").toInt();
 		history->setUnreadCount(count);
+	} else if (type == "MessageChildrenCountUpdatedEvent") {
+		const auto messageId = value.value("messageId").toString();
+		const auto childrenCount = value.value("childrenCount").toInt();
+		if (messageId.isEmpty()) {
+			return;
+		}
+		const auto chatPeerId = chatIdToPeerId(chatId);
+		const auto msgBareId = uuidToBareId(messageId);
+		const auto msgId = MsgId(msgBareId & 0x7FFFFFFFLL);
+		const auto item = session->data().message(chatPeerId, msgId);
+		if (item) {
+			auto repliesData = HistoryMessageRepliesData();
+			repliesData.isNull = false;
+			repliesData.repliesCount = childrenCount;
+			item->setReplies(std::move(repliesData));
+			session->data().requestItemViewRefresh(item);
+		}
 	}
 }
 
@@ -1162,6 +1230,14 @@ void registerMessageId(PeerId peerId, MsgId msgId, const QString &mtsLinkId) {
 
 void setPendingTempMessage(PeerId peerId, MsgId msgId) {
 	PendingTempMessages[peerId] = msgId;
+}
+
+void addPendingThreadSend(const QString &clientId) {
+	PendingThreadClientIds.insert(clientId);
+}
+
+bool takePendingThreadSend(const QString &clientId) {
+	return PendingThreadClientIds.remove(clientId);
 }
 
 void clearPendingTempMessage(
@@ -1213,6 +1289,43 @@ bool replacePendingWithReal(
 
 QString msgIdToMtsLinkId(PeerId peerId, MsgId msgId) {
 	return MsgIdToMtsLinkIdMap.value(makeMsgKey(peerId, msgId));
+}
+
+void registerThreadRoot(PeerId peerId, MsgId msgId, MsgId rootId) {
+	ThreadRootMap[makeMsgKey(peerId, msgId)] = rootId;
+}
+
+MsgId threadRootFor(PeerId peerId, MsgId msgId) {
+	return ThreadRootMap.value(makeMsgKey(peerId, msgId));
+}
+
+QHash<quint64, ThreadScrollState> ThreadScrollMap;
+
+void saveThreadScroll(PeerId peerId, MsgId rootId, const ThreadScrollState &state) {
+	ThreadScrollMap[makeMsgKey(peerId, rootId)] = state;
+}
+
+std::optional<ThreadScrollState> threadScroll(PeerId peerId, MsgId rootId) {
+	const auto it = ThreadScrollMap.constFind(makeMsgKey(peerId, rootId));
+	if (it != ThreadScrollMap.constEnd()) {
+		return *it;
+	}
+	return std::nullopt;
+}
+
+using RepliesKey = std::pair<PeerId, MsgId>;
+static QMap<RepliesKey, std::shared_ptr<Data::RepliesList>> RepliesListCache;
+
+void cacheRepliesList(PeerId peerId, MsgId rootId, std::shared_ptr<Data::RepliesList> replies) {
+	RepliesListCache[{peerId, rootId}] = std::move(replies);
+}
+
+std::shared_ptr<Data::RepliesList> cachedRepliesList(PeerId peerId, MsgId rootId) {
+	const auto it = RepliesListCache.constFind({peerId, rootId});
+	if (it != RepliesListCache.constEnd()) {
+		return *it;
+	}
+	return nullptr;
 }
 
 void setOldestLoadedMessageId(PeerId peerId, const QString &mtsLinkId) {

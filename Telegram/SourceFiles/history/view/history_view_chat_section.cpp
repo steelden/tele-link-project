@@ -104,6 +104,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
 #include "data/data_replies_list.h"
+#include "mtslink/data_adapters.h"
 #include "data/data_peer_values.h"
 #include "data/data_changes.h"
 #include "data/data_drafts.h"
@@ -1107,6 +1108,30 @@ ChatWidget::~ChatWidget() {
 		auto state = ListMemento();
 		_inner->saveState(&state);
 		saveHistoryScrollState(state);
+	} else if (mode() == Mode::Replies
+		&& _repliesRootId
+		&& MtsLink::hasChatId(_peer->id)) {
+		auto state = ListMemento();
+		_inner->saveState(&state);
+		const auto ss = state.scrollTopState();
+		LOG(("MtsLink Thread: SAVE scroll rootId=%1 itemId=%2:%3 date=%4 shift=%5")
+			.arg(_repliesRootId.bare)
+			.arg(ss.item.fullId.peer.value)
+			.arg(ss.item.fullId.msg.bare)
+			.arg(ss.item.date)
+			.arg(ss.shift));
+		if (ss.item.fullId) {
+			MtsLink::saveThreadScroll(_peer->id, _repliesRootId, {
+				.itemId = ss.item.fullId,
+				.date = ss.item.date,
+				.shift = ss.shift,
+			});
+		} else {
+			MtsLink::saveThreadScroll(_peer->id, _repliesRootId, {});
+		}
+		if (_replies) {
+			MtsLink::cacheRepliesList(_peer->id, _repliesRootId, _replies);
+		}
 	}
 	if (const auto reserved = base::take(_creatingBotTopic)) {
 		if (reserved->creating()) {
@@ -3749,6 +3774,7 @@ void ChatWidget::showAtStart() {
 }
 
 void ChatWidget::showAtEnd() {
+	LOG(("MtsLink SCROLL-DBG: ChatWidget::showAtEnd called"));
 	showAtPosition(Data::MaxMessagePosition);
 }
 
@@ -3776,6 +3802,12 @@ void ChatWidget::showAtPosition(
 		Data::MessagePosition position,
 		FullMsgId originItemId,
 		const Window::SectionShow &params) {
+	LOG(("MtsLink SCROLL-DBG: ChatWidget::showAtPosition pos=(%1:%2 date=%3) isMax=%4 isUnread=%5")
+		.arg(position.fullId.peer.value)
+		.arg(position.fullId.msg.bare)
+		.arg(position.date)
+		.arg(position == Data::MaxMessagePosition)
+		.arg(position == Data::UnreadMessagePosition));
 	_lastShownAt = position.fullId;
 	controller()->setActiveChatEntry(activeChat());
 	const auto ignore = _repliesRootId
@@ -4291,7 +4323,37 @@ void ChatWidget::restoreState(not_null<ChatMemento*> memento) {
 			return true;
 		});
 	}
+	const auto mtsLinkThread = !memento->highlightId()
+		&& _repliesRootId
+		&& MtsLink::hasChatId(_peer->id);
+	const auto mtsLinkSaved = mtsLinkThread
+		? MtsLink::threadScroll(_peer->id, _repliesRootId)
+		: std::nullopt;
+	const auto mtsLinkShowAtEnd = mtsLinkThread
+		&& (!mtsLinkSaved || !mtsLinkSaved->itemId);
+	if (mtsLinkSaved && mtsLinkSaved->itemId) {
+		LOG(("MtsLink Thread: RESTORE saved itemId=%1:%2 shift=%3")
+			.arg(mtsLinkSaved->itemId.peer.value)
+			.arg(mtsLinkSaved->itemId.msg.bare)
+			.arg(mtsLinkSaved->shift));
+		memento->list()->setScrollTopState({
+			Data::MessagePosition{
+				.fullId = mtsLinkSaved->itemId,
+				.date = mtsLinkSaved->date,
+			},
+			mtsLinkSaved->shift,
+		});
+	}
 	_inner->restoreState(memento->list());
+	if (mtsLinkShowAtEnd) {
+		if (mtsLinkSaved) {
+			LOG(("MtsLink Thread: saved at bottom, showAtEnd"));
+			showAtEnd();
+		} else {
+			LOG(("MtsLink Thread: first visit, show at unread"));
+			showAtPosition(Data::UnreadMessagePosition);
+		}
+	}
 	if (const auto highlight = memento->highlightId()) {
 		auto params = Window::SectionShow(
 			Window::SectionShow::Way::Forward,
