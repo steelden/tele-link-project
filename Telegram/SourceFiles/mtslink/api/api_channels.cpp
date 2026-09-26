@@ -17,16 +17,8 @@ void Channels::loadMyChannels() {
 		"Chat.GetMyChannelsV3",
 		QJsonObject{},
 		[this](const QJsonObject &result) {
-			LOG(("MtsLink Channels: GetMyChannelsV3 raw keys: %1")
-				.arg(result.keys().join(", ")));
 			const auto value = result.value("value").toObject();
-			LOG(("MtsLink Channels: value keys: %1")
-				.arg(value.keys().join(", ")));
 			const auto list = value.value("items").toArray();
-			if (!list.isEmpty()) {
-				const auto first = QJsonDocument(list.first().toObject()).toJson(QJsonDocument::Compact);
-				LOG(("MtsLink Channels: first channel item: %1").arg(QString::fromUtf8(first.left(500))));
-			}
 			QList<ChannelData> channels;
 			channels.reserve(list.size());
 			for (const auto &item : list) {
@@ -44,12 +36,6 @@ void Channels::loadMyDialogsAndGroupChats() {
 			const auto value = result.value("value").toObject();
 			const auto list = value.value("items").toArray();
 			const auto profiles = value.value("memberProfiles").toArray();
-			LOG(("MtsLink Channels: dialogs count=%1, profiles=%2")
-				.arg(list.size()).arg(profiles.size()));
-			if (!profiles.isEmpty()) {
-				const auto first = QJsonDocument(profiles.first().toObject()).toJson(QJsonDocument::Compact);
-				LOG(("MtsLink Channels: first profile: %1").arg(QString::fromUtf8(first.left(500))));
-			}
 
 			QHash<QString, QString> chatNames;
 			QHash<QString, QString> userAvatars;
@@ -86,13 +72,6 @@ void Channels::loadMyDialogsAndGroupChats() {
 					userNames.insert(uid, name);
 				}
 			}
-			LOG(("MtsLink Channels: userNames mapped: %1").arg(userNames.size()));
-
-			for (int i = 0; i < qMin(3, int(list.size())); ++i) {
-				const auto raw = QJsonDocument(list[i].toObject()).toJson(QJsonDocument::Compact);
-				LOG(("MtsLink Channels: dialog[%1]: %2").arg(i).arg(QString::fromUtf8(raw.left(600))));
-			}
-
 			QList<ChannelData> dialogs;
 			dialogs.reserve(list.size());
 			for (const auto &item : list) {
@@ -183,6 +162,7 @@ ChannelData Channels::parseChat(const QJsonObject &obj) const {
 		.isMuted = !src.value("isNotifiable").toBool(true),
 		.isPinned = src.value("pinPosition").toInt() > 0,
 		.isReadOnly = src.value("isReadOnly").toBool(false),
+		.isPublic = src.value("isPublic").toBool(false),
 		.pinnedMessageCount = src.value("pinnedMessageCount").toInt(),
 		.memberRole = src.value("memberRole").toString(),
 		.interlocutorId = src.value("interlocutorId").toString(),

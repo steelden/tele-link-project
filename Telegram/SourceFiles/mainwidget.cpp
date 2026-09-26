@@ -1680,9 +1680,9 @@ void MainWidget::showHistory(
 	if (peerId && MtsLink::hasChatId(peerId)) {
 		const auto chatId = MtsLink::peerIdToChatId(peerId);
 		if (const auto mts = _controller->session().account().mtsLinkSession()) {
-			const auto loading = mts->messages()->isLoading(chatId);
 			static QSet<QString> refreshedThisSession;
-			if (!loading && !refreshedThisSession.contains(chatId)) {
+			if (!refreshedThisSession.contains(chatId)
+				&& mts->rpc()->isConnected()) {
 				refreshedThisSession.insert(chatId);
 				mts->messages()->load(chatId);
 			}

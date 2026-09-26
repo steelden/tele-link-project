@@ -1025,24 +1025,12 @@ void connectToSession(
 			}
 			const bool hasCachedMessages = (newestExistingDate > 0);
 			std::vector<not_null<HistoryItem*>> newerItems;
-			int addedCount = 0;
-			int skippedOlder = 0;
 			for (int i = messages.size() - 1; i >= 0; --i) {
-				const auto msgDate = TimeId(
-					messages[i].createdAt / 1000);
-				if (newestExistingDate > 0
-					&& msgDate < newestExistingDate) {
-					++skippedOlder;
-					continue;
-				}
-				auto *item = addMessage(
+				addMessage(
 					mainSession,
 					messages[i],
 					false,
 					hasCachedMessages ? &newerItems : nullptr);
-				if (item) {
-					++addedCount;
-				}
 			}
 			// Set active call state from the newest Call message only.
 			// messages[0] is the newest (server returns newest-first).
@@ -1492,7 +1480,7 @@ void applyChannelData(
 	flags &= ~ChannelDataFlag::Left;
 	flags &= ~ChannelDataFlag::Forbidden;
 
-	if (src.isReadOnly) {
+	if (src.isPublic) {
 		flags |= ChannelDataFlag::Broadcast;
 		flags &= ~ChannelDataFlag::Megagroup;
 	} else {
@@ -2067,6 +2055,12 @@ bool addOlderMessages(
 		if (item && src.updatedAt > 0 && src.updatedAt != src.createdAt) {
 			item->setEditDate(TimeId(src.updatedAt / 1000));
 		}
+		if (item && !src.reactions.isEmpty()) {
+			const auto mtp = buildMtpReactions(src.reactions);
+			if (mtp) {
+				item->updateReactions(&*mtp);
+			}
+		}
 	}
 
 	// Set active call state from the newest Call message only.
@@ -2489,8 +2483,10 @@ void handleChatEvent(
 			return;
 		}
 		const auto chatPeerId = chatIdToPeerId(chatId);
-		const auto msgBareId = uuidToBareId(messageId);
-		const auto msgId = MsgId(msgBareId & 0x7FFFFFFFLL);
+		const auto mapped = MtsLinkIdToMsgMap.constFind(messageId);
+		const auto msgId = (mapped != MtsLinkIdToMsgMap.constEnd())
+			? mapped.value().second
+			: MsgId(uuidToBareId(messageId) & 0x7FFFFFFFLL);
 		const auto item = session->data().message(chatPeerId, msgId);
 		if (item) {
 			auto repliesData = HistoryMessageRepliesData();
@@ -2506,8 +2502,10 @@ void handleChatEvent(
 			return;
 		}
 		const auto chatPeerId = chatIdToPeerId(chatId);
-		const auto msgBareId = uuidToBareId(messageId);
-		const auto msgId = MsgId(msgBareId & 0x7FFFFFFFLL);
+		const auto mapped = MtsLinkIdToMsgMap.constFind(messageId);
+		const auto msgId = (mapped != MtsLinkIdToMsgMap.constEnd())
+			? mapped.value().second
+			: MsgId(uuidToBareId(messageId) & 0x7FFFFFFFLL);
 		const auto item = session->data().message(chatPeerId, msgId);
 		if (!item) {
 			return;
@@ -2563,8 +2561,10 @@ void handleChatEvent(
 			const auto duration = int(mv.value("duration").toDouble() / 1000);
 			const auto joinLink = mv.value("joinLink").toString();
 			const auto chatPeerId = chatIdToPeerId(chatId);
-			const auto msgBareId = uuidToBareId(messageId);
-			const auto msgId = MsgId(msgBareId & 0x7FFFFFFFLL);
+			const auto callMapped = MtsLinkIdToMsgMap.constFind(messageId);
+			const auto msgId = (callMapped != MtsLinkIdToMsgMap.constEnd())
+				? callMapped.value().second
+				: MsgId(uuidToBareId(messageId) & 0x7FFFFFFFLL);
 			const auto item = session->data().message(chatPeerId, msgId);
 			if (status == "Ended") {
 				setActiveCall(session, chatPeerId, QString());
@@ -2601,8 +2601,10 @@ void handleChatEvent(
 		} else if (status == "Started" && !joinLink.isEmpty()) {
 			setActiveCall(session, chatPeerId, joinLink);
 		}
-		const auto msgBareId = uuidToBareId(messageId);
-		const auto msgId = MsgId(msgBareId & 0x7FFFFFFFLL);
+		const auto csMapped = MtsLinkIdToMsgMap.constFind(messageId);
+		const auto msgId = (csMapped != MtsLinkIdToMsgMap.constEnd())
+			? csMapped.value().second
+			: MsgId(uuidToBareId(messageId) & 0x7FFFFFFFLL);
 		const auto item = session->data().message(chatPeerId, msgId);
 		if (item) {
 			item->updateServiceText(
@@ -2624,8 +2626,10 @@ void deleteMessage(
 		const ChatId &chatId,
 		const MessageId &messageId) {
 	const auto chatPeerId = chatIdToPeerId(chatId);
-	const auto msgBareId = uuidToBareId(messageId);
-	const auto msgId = MsgId(msgBareId & 0x7FFFFFFFLL);
+	const auto mapped = MtsLinkIdToMsgMap.constFind(messageId);
+	const auto msgId = (mapped != MtsLinkIdToMsgMap.constEnd())
+		? mapped.value().second
+		: MsgId(uuidToBareId(messageId) & 0x7FFFFFFFLL);
 	const auto item = session->data().message(chatPeerId, msgId);
 	if (item) {
 		item->destroy();
@@ -2642,8 +2646,10 @@ void updateMessage(
 		not_null<Main::Session*> session,
 		const Api::MessageData &src) {
 	const auto chatPeerId = chatIdToPeerId(src.chatId);
-	const auto msgBareId = uuidToBareId(src.id);
-	const auto msgId = MsgId(msgBareId & 0x7FFFFFFFLL);
+	const auto mapped = MtsLinkIdToMsgMap.constFind(src.id);
+	const auto msgId = (mapped != MtsLinkIdToMsgMap.constEnd())
+		? mapped.value().second
+		: MsgId(uuidToBareId(src.id) & 0x7FFFFFFFLL);
 	const auto item = session->data().message(chatPeerId, msgId);
 	if (item) {
 		item->setText(parseMentionedText(src.text, src.markdown, src.mentions, session));

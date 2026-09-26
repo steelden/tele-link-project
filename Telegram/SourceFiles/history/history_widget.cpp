@@ -4847,7 +4847,9 @@ void HistoryWidget::firstLoadMessages() {
 				_history->setMtsLinkInboxReadDate(0);
 				_history->getReadyFor(ShowAtTheEndMsgId);
 				_firstLoadRequest = -1;
-				mts->messages()->load(chatId);
+				if (mts->rpc()->isConnected()) {
+					mts->messages()->load(chatId);
+				}
 				mts->users()->loadChatMembers(chatId);
 			}
 		}

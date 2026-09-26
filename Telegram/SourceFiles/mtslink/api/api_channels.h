@@ -31,6 +31,7 @@ struct ChannelData {
 	bool isMuted = false;
 	bool isPinned = false;
 	bool isReadOnly = false;
+	bool isPublic = false;
 	int pinnedMessageCount = 0;
 	QString memberRole;
 	QString interlocutorId;
