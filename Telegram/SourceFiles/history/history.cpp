@@ -1911,6 +1911,23 @@ void History::addCreatedOlderSlice(
 	addToSharedMedia(items);
 }
 
+void History::addCreatedNewerSlice(
+		const std::vector<not_null<HistoryItem*>> &items) {
+	Assert(!isBuildingFrontBlock());
+	for (const auto &item : items) {
+		addItemToBlock(item);
+	}
+	if (loadedAtBottom()) {
+		addItemsToLists(items);
+		for (const auto &item : items) {
+			if (const auto sublist = item->savedSublist()) {
+				sublist->applyMaybeLast(item);
+			}
+		}
+	}
+	addToSharedMedia(items);
+}
+
 void History::addNewerSlice(const QVector<MTPMessage> &slice) {
 	bool wasLoadedAtBottom = loadedAtBottom();
 
@@ -3060,7 +3077,7 @@ bool History::isReadyFor(MsgId msgId) {
 				return loadedAtBottom();
 			}
 			if (!_mtsLinkInboxReadDate) {
-				return false;
+				return loadedAtBottom();
 			}
 			if (!isEmpty()) {
 				const auto minDate =
@@ -3093,6 +3110,16 @@ bool History::isReadyFor(MsgId msgId) {
 }
 
 void History::getReadyFor(MsgId msgId) {
+	if (MtsLink::hasChatId(peer->id)) {
+		const auto ready = isReadyFor(msgId);
+		LOG(("MtsLink Perf: getReadyFor peerId=%1 msgId=%2 "
+			"isReady=%3 blocks=%4 empty=%5")
+			.arg(peer->id.value)
+			.arg(msgId.bare)
+			.arg(Logs::b(ready))
+			.arg(int(blocks.size()))
+			.arg(Logs::b(isEmpty())));
+	}
 	if (msgId < 0 && -msgId < ServerMaxMsgId && peer->migrateFrom()) {
 		const auto migrated = owner().history(peer->migrateFrom()->id);
 		migrated->getReadyFor(-msgId);
