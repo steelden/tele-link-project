@@ -304,14 +304,20 @@ not_null<QNetworkReply*> WebLoadManager::send(int id, const QString &url) {
 	auto request = QNetworkRequest(url);
 	if (url.contains(u"mts-link.ru"_q)) {
 		request.setRawHeader("Referer", "https://my.mts-link.ru/");
-		const auto token = MtsLink::fileAuthToken();
-		if (!token.isEmpty()) {
-			QNetworkCookie accessCookie("access", token.toUtf8());
-			accessCookie.setDomain(".mts-link.ru");
-			accessCookie.setPath("/");
-			_network->cookieJar()->setCookiesFromUrl(
-				{ accessCookie },
-				QUrl(url));
+		const auto access = MtsLink::fileAuthToken();
+		const auto refresh = MtsLink::fileRefreshToken();
+		QByteArray cookieHeader;
+		if (!access.isEmpty()) {
+			cookieHeader.append("access=" + access.toUtf8());
+		}
+		if (!refresh.isEmpty()) {
+			if (!cookieHeader.isEmpty()) {
+				cookieHeader.append("; ");
+			}
+			cookieHeader.append("refresh=" + refresh.toUtf8());
+		}
+		if (!cookieHeader.isEmpty()) {
+			request.setRawHeader("Cookie", cookieHeader);
 		}
 	}
 	const auto result = _network->get(request);

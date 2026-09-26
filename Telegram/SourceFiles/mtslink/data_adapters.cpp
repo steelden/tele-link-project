@@ -78,6 +78,7 @@ QSet<QString> ChatInfoLoadedChats;
 QSet<QString> PendingThreadClientIds;
 QHash<quint64, MsgId> ThreadRootMap;
 QString FileAuthTokenValue;
+QString FileRefreshTokenValue;
 QList<QNetworkCookie> FileAuthCookies;
 QHash<QString, QString> EmojiToIdMap;
 QHash<QString, QString> IdToEmojiMap;
@@ -199,8 +200,8 @@ QSet<QString> UserProfileRequested;
 QSet<QString> ReadRequestSentChats;
 QMap<QPair<PeerId, MsgId>, int> PendingThreadUnread;
 
-[[nodiscard]] QString storageThumbBase() {
-	return EnvConfig::instance().baseMediaUrl() + u"/thumb/"_q;
+[[nodiscard]] QString privateCdnThumbBase() {
+	return EnvConfig::instance().privateCdnMediaUrl() + u"/thumb_"_q;
 }
 [[nodiscard]] QString avatarCdnBase() {
 	return EnvConfig::instance().publicCdnMediaUrl() + u"/thumb_"_q;
@@ -287,8 +288,8 @@ void reapplyPhotoUrls(
 		return;
 	}
 
-	const auto thumbUrl = storageThumbBase() + file.id + u"/S"_q;
-	const auto fullUrl = storageThumbBase() + file.id + u"/XL"_q;
+	const auto thumbUrl = privateCdnThumbBase() + file.id + u"_s.jpg"_q;
+	const auto fullUrl = privateCdnThumbBase() + file.id + u".jpg"_q;
 
 	const auto thumbLocation = ImageLocation(
 		DownloadLocation{ PlainUrlLocation{ thumbUrl } },
@@ -314,8 +315,8 @@ MTPMessageMedia buildPhotoMedia(
 		not_null<Main::Session*> session,
 		const Api::FileData &file,
 		TimeId date) {
-	const auto thumbUrl = storageThumbBase() + file.id + u"/S"_q;
-	const auto fullUrl = storageThumbBase() + file.id + u"/XL"_q;
+	const auto thumbUrl = privateCdnThumbBase() + file.id + u"_s.jpg"_q;
+	const auto fullUrl = privateCdnThumbBase() + file.id + u".jpg"_q;
 
 	const auto photoId = PhotoId(uuidToBareId(file.id));
 
@@ -397,7 +398,7 @@ MTPMessageMedia buildFileMedia(
 		&& (file.mime.startsWith(u"image/"_q)
 			|| file.mime.startsWith(u"video/"_q));
 	if (hasVisualThumb) {
-		const auto thumbUrl = storageThumbBase() + file.id + u"/S"_q;
+		const auto thumbUrl = privateCdnThumbBase() + file.id + u"_s.jpg"_q;
 		thumbnail = ImageWithLocation{
 			.location = ImageLocation(
 				DownloadLocation{ PlainUrlLocation{ thumbUrl } },
@@ -2716,10 +2717,10 @@ bool replacePendingWithReal(
 		if (!realMsg.files.isEmpty()) {
 			const auto &f = realMsg.files.first();
 			if (const auto photo = media->photo()) {
-				const auto thumbUrl = storageThumbBase()
-					+ f.id + u"/S"_q;
-				const auto fullUrl = storageThumbBase()
-					+ f.id + u"/XL"_q;
+				const auto thumbUrl = privateCdnThumbBase()
+					+ f.id + u"_s.jpg"_q;
+				const auto fullUrl = privateCdnThumbBase()
+					+ f.id + u".jpg"_q;
 				const auto w = f.width > 0 ? f.width : 100;
 				const auto h = f.height > 0 ? f.height : 100;
 				photo->clearImages();
@@ -3255,6 +3256,14 @@ void setFileAuthToken(const QString &token) {
 
 QString fileAuthToken() {
 	return FileAuthTokenValue;
+}
+
+void setFileRefreshToken(const QString &token) {
+	FileRefreshTokenValue = token;
+}
+
+QString fileRefreshToken() {
+	return FileRefreshTokenValue;
 }
 
 void setFileAuthCookies(const QList<QNetworkCookie> &cookies) {

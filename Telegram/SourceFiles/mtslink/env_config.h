@@ -23,6 +23,7 @@ public:
 	[[nodiscard]] QString httpsServerUrl() const;
 	[[nodiscard]] QString baseMediaUrl() const;
 	[[nodiscard]] QString publicCdnMediaUrl() const;
+	[[nodiscard]] QString privateCdnMediaUrl() const;
 	[[nodiscard]] QString webinarHost() const;
 
 	[[nodiscard]] bool isLoaded() const;
@@ -43,6 +44,7 @@ private:
 	QString _httpsServerUrl;
 	QString _baseMediaUrl;
 	QString _publicCdnMediaUrl;
+	QString _privateCdnMediaUrl;
 	QString _webinarHost;
 	bool _loaded = false;
 };

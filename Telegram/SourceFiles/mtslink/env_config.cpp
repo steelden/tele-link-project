@@ -72,6 +72,7 @@ void EnvConfig::parse(const QByteArray &data) {
 	_httpsServerUrl = obj.value("HTTPS_SERVER_URL").toString();
 	_baseMediaUrl = obj.value("BASE_MEDIA_URL").toString();
 	_publicCdnMediaUrl = obj.value("PUBLIC_CDN_MEDIA_URL").toString();
+	_privateCdnMediaUrl = obj.value("PRIVATE_CDN_MEDIA_URL").toString();
 	_webinarHost = obj.value("WEBINAR_HOST").toString();
 
 	LOG(("MtsLink EnvConfig: loaded"
@@ -143,6 +144,12 @@ QString EnvConfig::publicCdnMediaUrl() const {
 	return _publicCdnMediaUrl.isEmpty()
 		? u"https://prod-cdn-thumb-public-chat.mts-link.ru"_q
 		: _publicCdnMediaUrl;
+}
+
+QString EnvConfig::privateCdnMediaUrl() const {
+	return _privateCdnMediaUrl.isEmpty()
+		? u"https://prod-cdn-thumb-private-chat.mts-link.ru"_q
+		: _privateCdnMediaUrl;
 }
 
 QString EnvConfig::webinarHost() const {

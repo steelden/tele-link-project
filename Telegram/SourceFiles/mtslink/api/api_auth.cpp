@@ -57,6 +57,9 @@ void Auth::loginByAuthCode(const QString &authCode) {
 			const auto value = response.value("value").toObject();
 			_accessToken = value.value("accessToken").toString();
 			const auto refreshToken = value.value("refreshToken").toString();
+			if (!refreshToken.isEmpty()) {
+				MtsLink::setFileRefreshToken(refreshToken);
+			}
 
 			if (_accessToken.isEmpty()) {
 				Q_EMIT authFailed("No access token in LoginByAuthCode response");

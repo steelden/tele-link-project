@@ -155,6 +155,9 @@ void loadChatListFromCache(
 void setFileAuthToken(const QString &token);
 [[nodiscard]] QString fileAuthToken();
 
+void setFileRefreshToken(const QString &token);
+[[nodiscard]] QString fileRefreshToken();
+
 void setFileAuthCookies(const QList<QNetworkCookie> &cookies);
 [[nodiscard]] QList<QNetworkCookie> fileAuthCookies();
 
