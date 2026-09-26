@@ -3616,6 +3616,11 @@ void ApiWrap::requestHistory(
 		MsgId messageId,
 		SliceType slice) {
 	const auto peer = history->peer;
+
+	if (MtsLink::hasChatId(peer->id)) {
+		return;
+	}
+
 	const auto key = HistoryRequest{
 		peer,
 		messageId,

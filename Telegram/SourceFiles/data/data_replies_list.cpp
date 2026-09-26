@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/history_item_components.h"
 #include "history/history_item_helpers.h"
 #include "main/main_session.h"
 #include "data/data_histories.h"
@@ -653,6 +654,30 @@ void RepliesList::loadAround(MsgId id) {
 					}
 				}
 			}
+			if (!_list.empty()) {
+				auto &data = _history->owner();
+				const auto root = data.message(peerId, _rootId);
+				if (root) {
+					if (const auto views = root->Get<HistoryMessageViews>()) {
+						const auto unread = int(
+							views->commentsMaxId.bare
+							- views->commentsInboxReadTillId.bare);
+						if (unread <= 0) {
+							const auto newest = data.message(
+								peerId, _list.front());
+							if (newest) {
+								_mtsLinkInboxReadDate = newest->date();
+							}
+						} else if (unread < int(_list.size())) {
+							const auto lastRead = data.message(
+								peerId, _list[unread]);
+							if (lastRead) {
+								_mtsLinkInboxReadDate = lastRead->date();
+							}
+						}
+					}
+				}
+			}
 			checkReadTillEnd();
 			_listChanges.fire({});
 		});
@@ -1250,7 +1275,27 @@ void RepliesList::readTill(
 		: (was < now);
 	if (changed || (fast && now == was)) {
 		setInboxReadTill(now, unreadCount);
-		if (!isMtsLink) {
+		if (isMtsLink) {
+			const auto rootFullId = FullMsgId(_history->peer->id, _rootId);
+			if (const auto root = _history->owner().message(rootFullId)) {
+				if (const auto views = root->Get<HistoryMessageViews>()) {
+					const auto threadUnread = views->commentsMaxId.bare
+						- views->commentsInboxReadTillId.bare;
+					root->setCommentsInboxReadTill(views->commentsMaxId);
+					if (threadUnread > 0
+						&& _history->unreadCountKnown()
+						&& _history->unreadCount() > 0) {
+						const auto newCount = std::max(
+							0,
+							_history->unreadCount() - int(threadUnread));
+						_history->setUnreadCount(newCount);
+						if (const auto last = _history->lastMessage()) {
+							last->invalidateChatListEntry();
+						}
+					}
+				}
+			}
+		} else {
 			const auto rootFullId = FullMsgId(_history->peer->id, _rootId);
 			if (const auto root = _history->owner().message(rootFullId)) {
 				if (const auto post = root->lookupDiscussionPostOriginal()) {
@@ -1282,6 +1327,7 @@ void RepliesList::sendReadTillRequest() {
 			const auto mtsId = MtsLink::msgIdToMtsLinkId(
 				_history->peer->id, tillId);
 			if (!chatId.isEmpty() && !mtsId.isEmpty()) {
+				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);
 			}
 		}

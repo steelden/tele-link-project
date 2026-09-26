@@ -992,14 +992,7 @@ void PeerData::clearPaysPerMessage() {
 }
 
 bool PeerData::hideLinks() const {
-	//if (!isUser()) {
-	//	return false;
-	//}
-	if (const auto to = migrateTo()) {
-		return to->hideLinks();
-	}
-	const auto settings = barSettings();
-	return !settings || (*settings & PeerBarSetting::ReportSpam);
+	return false;
 }
 
 QString PeerData::requestChatTitle() const {

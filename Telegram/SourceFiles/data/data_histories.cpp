@@ -771,6 +771,7 @@ void Histories::sendReadRequest(not_null<History*> history, State &state) {
 			const auto mtsId = MtsLink::msgIdToMtsLinkId(
 				history->peer->id, tillId);
 			if (!chatId.isEmpty() && !mtsId.isEmpty()) {
+				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);
 			}
 		}

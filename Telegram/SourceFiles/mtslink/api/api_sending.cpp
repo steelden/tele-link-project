@@ -121,9 +121,9 @@ void Sending::readMessage(
 		const MessageId &messageId) {
 	QJsonObject param;
 	param["chatId"] = chatId;
-	param["messageId"] = messageId;
+	param["lastMessageId"] = messageId;
 	_rpc->call(
-		"Chat.ReadMessage",
+		"Chat.MarkMessagesAsRead",
 		param,
 		[](const QJsonObject &) {});
 }

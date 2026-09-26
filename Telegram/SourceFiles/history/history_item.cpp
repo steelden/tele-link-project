@@ -1425,8 +1425,13 @@ void HistoryItem::setCommentsPossibleMaxId(MsgId possibleMaxId) {
 
 bool HistoryItem::areCommentsUnread() const {
 	const auto views = Get<HistoryMessageViews>();
-	if (!views
-		|| !views->commentsMegagroupId
+	if (!views) {
+		return false;
+	}
+	if (MtsLink::hasChatId(_history->peer->id)) {
+		return views->commentsMaxId > views->commentsInboxReadTillId;
+	}
+	if (!views->commentsMegagroupId
 		|| !checkDiscussionLink(views->commentsMegagroupId)) {
 		return false;
 	}

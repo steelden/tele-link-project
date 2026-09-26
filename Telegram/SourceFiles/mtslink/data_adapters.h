@@ -40,6 +40,8 @@ void connectToSession(
 [[nodiscard]] PeerId chatIdToPeerId(const QString &chatId);
 [[nodiscard]] QString peerIdToChatId(PeerId peerId);
 [[nodiscard]] bool hasChatId(PeerId peerId);
+void markReadRequestSent(const QString &chatId);
+[[nodiscard]] bool consumeReadRequestSent(const QString &chatId);
 [[nodiscard]] ChatType chatTypeForPeer(PeerId peerId);
 [[nodiscard]] PeerId favoritesPeerId();
 
