@@ -165,6 +165,18 @@ MessageData Messages::parseMessage(const QJsonObject &obj) const {
 		}(),
 		.threadChildrenCount = thread.value("childrenCount").toInt(),
 		.threadUnreadCount = thread.value("unreadChildrenCount").toInt(),
+		.forward = [&]() -> std::optional<ForwardInfo> {
+			const auto fwd = obj.value("forward").toObject();
+			if (fwd.isEmpty()) {
+				return std::nullopt;
+			}
+			return ForwardInfo{
+				.authorId = fwd.value("authorId").toString(),
+				.messageId = fwd.value("messageId").toString(),
+				.chatId = fwd.value("chatId").toString(),
+				.createdAt = qint64(fwd.value("createdAt").toDouble()),
+			};
+		}(),
 	};
 }
 

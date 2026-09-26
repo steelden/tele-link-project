@@ -57,6 +57,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_forum_topic.h"
 #include "data/data_changes.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
+#include "mtslink/session.h"
+#include "mtslink/data_adapters.h"
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "styles/style_calls.h"
@@ -1830,6 +1833,33 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 			show->showBox(MakeSendErrorBox(error, result.size() > 1));
 			return;
 		} else if (!checkPaid()) {
+			return;
+		}
+
+		const auto mts = history->session().account().mtsLinkSession();
+		if (mts) {
+			for (const auto &thread : result) {
+				const auto peer = thread->peer();
+				const auto destChatId = MtsLink::peerIdToChatId(peer->id);
+				if (destChatId.isEmpty()) {
+					continue;
+				}
+				for (const auto &item : items) {
+					const auto srcMtsId = MtsLink::msgIdToMtsLinkId(
+						item->history()->peer->id,
+						item->id);
+					if (srcMtsId.isEmpty()) {
+						continue;
+					}
+					mts->sending()->forwardMessage(
+						destChatId,
+						srcMtsId,
+						comment.text);
+				}
+			}
+			if (show->valid()) {
+				show->hideLayer();
+			}
 			return;
 		}
 

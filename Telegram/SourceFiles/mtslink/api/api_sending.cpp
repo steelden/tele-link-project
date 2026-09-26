@@ -6,6 +6,7 @@ based on Telegram Desktop.
 #include "mtslink/rpc.h"
 
 #include <QUuid>
+#include <QTimer>
 
 namespace MtsLink::Api {
 
@@ -162,6 +163,74 @@ void Sending::removeReaction(
 		"Chat.DeleteReactionMessage",
 		param,
 		[](const QJsonObject &) {});
+}
+
+void Sending::forwardMessage(
+		const ChatId &chatId,
+		const MessageId &originalMessageId,
+		const QString &text) {
+	QJsonObject copyParam;
+	copyParam["messageId"] = originalMessageId;
+	_rpc->call(
+		"Chat.CopyMessage",
+		copyParam,
+		[this, chatId, text](const QJsonObject &result) {
+			const auto copyId = result
+				.value("value").toObject()
+				.value("copyMessageId").toString();
+			if (copyId.isEmpty()) {
+				LOG(("MtsLink CopyMessage failed: %1"
+					).arg(QString::fromUtf8(
+						QJsonDocument(result).toJson(
+							QJsonDocument::Compact))));
+				return;
+			}
+			sendForwardWithRetry(chatId, copyId, text, 0);
+		});
+}
+
+void Sending::sendForwardWithRetry(
+		const ChatId &chatId,
+		const QString &copyMessageId,
+		const QString &text,
+		int attempt) {
+	QJsonObject param;
+	param["chatId"] = chatId;
+	param["copyMessageId"] = copyMessageId;
+	param["forwardClientId"] = QUuid::createUuid()
+		.toString(QUuid::WithoutBraces);
+	param["clientId"] = QUuid::createUuid()
+		.toString(QUuid::WithoutBraces);
+	param["text"] = text;
+	_rpc->call(
+		"Chat.ForwardMessage",
+		param,
+		[this, chatId, copyMessageId, text, attempt](
+				const QJsonObject &result) {
+			const auto type = result.value("type").toString();
+			if (type == u"BusinessError"_q) {
+				const auto val = result.value("value").toObject();
+				const auto code = val.value("code").toString();
+				if (code == u"REPEAT_THE_REQUEST_LATER"_q
+					&& attempt < kMaxForwardRetries) {
+					LOG(("MtsLink ForwardMessage retry %1/%2")
+						.arg(attempt + 1)
+						.arg(kMaxForwardRetries));
+					QTimer::singleShot(
+						kForwardRetryDelayMs,
+						this,
+						[this, chatId, copyMessageId, text, attempt] {
+							sendForwardWithRetry(
+								chatId,
+								copyMessageId,
+								text,
+								attempt + 1);
+						});
+					return;
+				}
+			}
+			Q_EMIT messageSent(chatId, result);
+		});
 }
 
 void Sending::pinMessage(

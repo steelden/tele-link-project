@@ -55,7 +55,11 @@ private:
 	[[nodiscard]] QString generateId() const;
 
 	Connection _connection;
-	QHash<QString, DoneHandler> _pending;
+	struct PendingCall {
+		QString method;
+		DoneHandler handler;
+	};
+	QHash<QString, PendingCall> _pending;
 	QHash<QString, EventHandler> _subscriptions;
 };
 

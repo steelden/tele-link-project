@@ -59,6 +59,11 @@ public:
 		const QString &emoji,
 		const QString &emojiId);
 
+	void forwardMessage(
+		const ChatId &chatId,
+		const MessageId &originalMessageId,
+		const QString &text = {});
+
 	void pinMessage(
 		const ChatId &chatId,
 		const MessageId &messageId);
@@ -73,6 +78,15 @@ Q_SIGNALS:
 	void messageEditDone(const ChatId &chatId, const MessageId &messageId);
 
 private:
+	static constexpr int kMaxForwardRetries = 5;
+	static constexpr int kForwardRetryDelayMs = 1000;
+
+	void sendForwardWithRetry(
+		const ChatId &chatId,
+		const QString &copyMessageId,
+		const QString &text,
+		int attempt);
+
 	Rpc *_rpc = nullptr;
 };
 

@@ -46,7 +46,7 @@ void Rpc::call(
 		FailHandler fail) {
 	const auto id = generateId();
 	if (done) {
-		_pending.insert(id, std::move(done));
+		_pending.insert(id, { method, std::move(done) });
 	}
 
 	const auto parts = method.split('.');
@@ -92,9 +92,16 @@ void Rpc::handleMessage(const QJsonObject &message) {
 		const auto resultType = resultObj.value("type").toString();
 		const auto it = _pending.find(id);
 		if (it != _pending.end()) {
-			const auto handler = it.value();
+			const auto pending = it.value();
 			_pending.erase(it);
-			handler(resultObj);
+			if (resultType == u"BusinessError"_q) {
+				const auto val = resultObj.value("value").toObject();
+				LOG(("MtsLink RPC error [%1]: %2 — %3"
+					).arg(pending.method
+					).arg(val.value("code").toString()
+					).arg(val.value("message").toString()));
+			}
+			pending.handler(resultObj);
 		}
 	} else if (type == "event") {
 		const auto name = message.value("name").toString();

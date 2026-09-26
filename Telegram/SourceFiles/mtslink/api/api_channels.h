@@ -30,6 +30,7 @@ struct ChannelData {
 	QString avatarFileId;
 	bool isMuted = false;
 	bool isPinned = false;
+	bool isReadOnly = false;
 	int pinnedMessageCount = 0;
 	QString memberRole;
 	QString interlocutorId;

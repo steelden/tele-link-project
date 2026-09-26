@@ -216,6 +216,7 @@ struct HistoryMessageForwarded
 	QString originalPostAuthor;
 	QString psaType;
 	MsgId originalId = 0;
+	PeerData *originalChatPeer = nullptr;
 	mutable Ui::Text::String text = { 1 };
 
 	PeerData *savedFromPeer = nullptr;

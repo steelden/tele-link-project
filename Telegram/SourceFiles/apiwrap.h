@@ -338,11 +338,14 @@ public:
 		return _sendActions.events();
 	}
 	void sendAction(const SendAction &action);
-	void finishForwarding(const SendAction &action);
+	void finishForwarding(
+		const SendAction &action,
+		const QString &forwardText = {});
 	void forwardMessages(
 		Data::ResolvedForwardDraft &&draft,
 		SendAction action,
-		FnMut<void()> &&successCallback = nullptr);
+		FnMut<void()> &&successCallback = nullptr,
+		const QString &forwardText = {});
 	void shareContact(
 		const QString &phone,
 		const QString &firstName,
