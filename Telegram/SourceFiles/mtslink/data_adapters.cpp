@@ -85,6 +85,26 @@ bool EmojiMapsInitialized = false;
 
 QHash<PeerId, QString> ActiveCallLinks;
 rpl::event_stream<PeerId> ActiveCallChanges;
+QString CachedMyUserId;
+
+QString myUserIdFilePath() {
+	return cWorkingDir() + u"tdata/mtslink_userid.txt"_q;
+}
+
+void saveCachedUserId(const QString &userId) {
+	CachedMyUserId = userId;
+	QFile f(myUserIdFilePath());
+	if (f.open(QIODevice::WriteOnly)) {
+		f.write(userId.toUtf8());
+	}
+}
+
+void loadCachedUserId() {
+	QFile f(myUserIdFilePath());
+	if (f.open(QIODevice::ReadOnly)) {
+		CachedMyUserId = QString::fromUtf8(f.readAll()).trimmed();
+	}
+}
 
 QString emojiMapFilePath() {
 	return cWorkingDir() + u"tdata/mtslink_emoji_map.json"_q;
@@ -936,6 +956,7 @@ void handleNotificationEvent(
 void connectToSession(
 		not_null<Main::Session*> mainSession,
 		not_null<Session*> mtsSession) {
+	loadCachedUserId();
 	loadChatListFromCache(mainSession);
 	QObject::connect(
 		mtsSession,
@@ -943,6 +964,7 @@ void connectToSession(
 		mtsSession->messages(),
 		[mtsSession] {
 			mtsSession->messages()->retryFailedLoads();
+			saveCachedUserId(mtsSession->userId());
 		});
 	QObject::connect(
 		mtsSession->channels(),
@@ -1628,7 +1650,10 @@ HistoryItem *addMessage(
 		? MessageFlags(0)
 		: MessageFlags(MessageFlag::HasFromId);
 	const auto mts = session->account().mtsLinkSession();
-	if (mts && src.authorId == mts->userId()) {
+	const auto myUserId = (mts && !mts->userId().isEmpty())
+		? mts->userId()
+		: CachedMyUserId;
+	if (!myUserId.isEmpty() && src.authorId == myUserId) {
 		flags |= MessageFlag::Outgoing;
 	}
 
@@ -1917,7 +1942,10 @@ bool addOlderMessages(
 			? MessageFlags(0)
 			: MessageFlags(MessageFlag::HasFromId);
 		const auto mts = session->account().mtsLinkSession();
-		if (mts && src.authorId == mts->userId()) {
+		const auto myId = (mts && !mts->userId().isEmpty())
+			? mts->userId()
+			: CachedMyUserId;
+		if (!myId.isEmpty() && src.authorId == myId) {
 			flags |= MessageFlag::Outgoing;
 		}
 		auto fields = HistoryItemCommonFields{
@@ -2027,6 +2055,17 @@ bool addOlderMessages(
 					items.push_back(extra);
 				}
 			}
+		}
+		if (item && src.threadChildrenCount > 0) {
+			auto repliesData = HistoryMessageRepliesData();
+			repliesData.isNull = false;
+			repliesData.repliesCount = src.threadChildrenCount;
+			repliesData.maxId = MsgId(src.threadChildrenCount);
+			repliesData.readMaxId = MsgId(src.threadChildrenCount);
+			item->setReplies(std::move(repliesData));
+		}
+		if (item && src.updatedAt > 0 && src.updatedAt != src.createdAt) {
+			item->setEditDate(TimeId(src.updatedAt / 1000));
 		}
 	}
 
