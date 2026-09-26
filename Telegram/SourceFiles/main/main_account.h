@@ -11,6 +11,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtp_instance.h"
 #include "base/weak_ptr.h"
 
+namespace MtsLink {
+class Session;
+} // namespace MtsLink
+
 namespace Storage {
 class Account;
 class Domain;
@@ -114,6 +118,11 @@ public:
 	void setHandleLoginCode(Fn<void(QString)> callback);
 	void handleLoginCode(const QString &code) const;
 
+	void setMtsLinkMode(bool enabled);
+	[[nodiscard]] bool isMtsLink() const;
+	void startMtsLinkSession(const QString &token);
+	[[nodiscard]] MtsLink::Session *mtsLinkSession() const;
+
 	[[nodiscard]] rpl::lifetime &lifetime() {
 		return _lifetime;
 	}
@@ -166,6 +175,9 @@ private:
 	MTP::AuthKeysList _mtpKeysToDestroy;
 	bool _loggingOut = false;
 	bool _destroyingSession = false;
+
+	bool _isMtsLink = false;
+	std::unique_ptr<MtsLink::Session> _mtsLinkSession;
 
 	rpl::lifetime _lifetime;
 

@@ -277,6 +277,7 @@ base::flat_set<QString> Account::collectGoodNames() const {
 		"map1",
 		"maps",
 		"configs",
+		"mtslink_token",
 	};
 	const auto push = [&](FileKey key) {
 		if (!key) {
@@ -1183,6 +1184,39 @@ void Account::readMtpData() {
 		}
 	}
 	applyReadContext(std::move(context));
+}
+
+void Account::writeMtsLinkToken(const QString &token, quint64 userId) {
+	const auto path = _basePath + u"mtslink_token"_q;
+	QFile file(path);
+	if (token.isEmpty()) {
+		file.remove();
+		return;
+	}
+	if (file.open(QIODevice::WriteOnly)) {
+		file.write(QString::number(userId).toUtf8());
+		file.write("\n");
+		file.write(token.toUtf8());
+	}
+}
+
+Account::MtsLinkData Account::readMtsLinkData() const {
+	const auto path = _basePath + u"mtslink_token"_q;
+	QFile file(path);
+	if (!file.open(QIODevice::ReadOnly)) {
+		return {};
+	}
+	const auto content = QString::fromUtf8(file.readAll()).trimmed();
+	const auto newline = content.indexOf('\n');
+	if (newline < 0) {
+		return { .token = content };
+	}
+	bool ok = false;
+	const auto userId = content.left(newline).trimmed().toULongLong(&ok);
+	return {
+		.token = content.mid(newline + 1).trimmed(),
+		.userId = ok ? userId : 0,
+	};
 }
 
 void Account::writeMtpConfig() {

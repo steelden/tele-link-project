@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 
 #include "apiwrap.h"
+#include "mtslink/data_adapters.h"
 #include "api/api_cloud_password.h"
 #include "api/api_text_entities.h"
 #include "boxes/peers/add_bot_to_chat_box.h"
@@ -1251,6 +1252,18 @@ void SessionNavigation::showRepliesForMessage(
 			showSection(std::move(memento), params);
 			return;
 		}
+	}
+	if (MtsLink::isMtsLinkPeer(history->peer->id)) {
+		using namespace HistoryView;
+		auto memento = std::make_shared<ChatMemento>(
+			ChatViewId{
+				.history = history,
+				.repliesRootId = rootId,
+			},
+			commentId,
+			params.highlight);
+		showSection(std::move(memento), params);
+		return;
 	}
 	if (_showingRepliesRequestId
 		&& _showingRepliesHistory == history.get()

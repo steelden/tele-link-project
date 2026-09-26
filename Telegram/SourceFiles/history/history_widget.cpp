@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_widget.h"
 
+#include "main/main_account.h"
+#include "mtslink/data_adapters.h"
+#include "mtslink/session.h"
 #include "api/api_compose_with_ai.h"
 #include "api/api_editing.h"
 #include "api/api_bot.h"
@@ -2274,6 +2277,11 @@ void HistoryWidget::fieldChanged() {
 	updateSendButtonType();
 	if (!fieldHasSendText()) {
 		_fieldIsEmpty = true;
+		if (_history) {
+			saveFieldToHistoryLocalDraft();
+			_history->clearCloudDraft(MsgId(), PeerId());
+			_history->updateChatListEntry();
+		}
 	} else if (_fieldIsEmpty) {
 		_fieldIsEmpty = false;
 		if (_kbShown && (!_kbReplyTo || !forceReplyPending())) {
@@ -4461,6 +4469,10 @@ void HistoryWidget::newItemAdded(not_null<HistoryItem*> item) {
 	if (_history != item->history()
 		|| !_historyInited
 		|| item->isScheduled()) {
+		LOG(("MtsLink UI: newItemAdded SKIP hist=%1 inited=%2 sched=%3")
+			.arg(_history == item->history())
+			.arg(_historyInited)
+			.arg(item->isScheduled()));
 		return;
 	}
 	if (item->isSponsored()) {
@@ -4480,6 +4492,12 @@ void HistoryWidget::newItemAdded(not_null<HistoryItem*> item) {
 	// - on first message we set unreadcount += 1, firstUnreadMessage.
 	// - on second we get wrong markingMessagesRead() and read both.
 	session().data().sendHistoryChangeNotifications();
+
+	LOG(("MtsLink UI: newItemAdded id=%1 sending=%2 scrollTop=%3 scrollMax=%4")
+		.arg(item->id.bare)
+		.arg(item->isSending())
+		.arg(_scroll->scrollTop())
+		.arg(_scroll->scrollTopMax()));
 
 	if (item->isSending()) {
 		synteticScrollToY(_scroll->scrollTopMax());
@@ -4817,6 +4835,18 @@ void HistoryWidget::firstLoadMessages() {
 		return;
 	}
 
+	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+		const auto chatId = MtsLink::peerIdToChatId(_history->peer->id);
+		if (!chatId.isEmpty()) {
+			if (const auto mts = _history->session().account().mtsLinkSession()) {
+				_history->getReadyFor(_showAtMsgId);
+				mts->messages()->load(chatId);
+				mts->users()->loadChatMembers(chatId);
+			}
+		}
+		return;
+	}
+
 	auto from = _history;
 	auto offsetId = MsgId();
 	auto offset = 0;
@@ -4885,6 +4915,49 @@ void HistoryWidget::firstLoadMessages() {
 
 void HistoryWidget::loadMessages() {
 	if (!_history || _preloadRequest) {
+		return;
+	}
+	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+		if (_history->loadedAtTop()) {
+			return;
+		}
+		const auto peerId = _history->peer->id;
+		const auto chatId = MtsLink::peerIdToChatId(peerId);
+		const auto oldestId = MtsLink::oldestLoadedMessageId(peerId);
+		LOG(("MtsLink Paging: loadMessages peerId=%1 chatId=%2 oldestId=%3")
+			.arg(peerId.value)
+			.arg(chatId)
+			.arg(oldestId));
+		if (chatId.isEmpty() || oldestId.isEmpty()) {
+			return;
+		}
+		if (const auto mts = _history->session().account().mtsLinkSession()) {
+			if (mts->messages()->isLoading(chatId)) {
+				return;
+			}
+			auto conn = std::make_shared<QMetaObject::Connection>();
+			*conn = QObject::connect(
+				mts->messages(),
+				&MtsLink::Api::Messages::olderMessagesLoaded,
+				this,
+				[this, conn](
+						const MtsLink::ChatId &chatId,
+						const QList<MtsLink::Api::MessageData> &messages,
+						const QList<MtsLink::Api::MemberProfile> &profiles,
+						const QString &rawLastId,
+						int rawCount) {
+					QObject::disconnect(*conn);
+					_list->preparePrependAnchor();
+					const auto done = MtsLink::addOlderMessages(
+						&session(), chatId, messages, profiles,
+						rawLastId, rawCount);
+					updateHistoryGeometry();
+					if (!done) {
+						loadMessages();
+					}
+				});
+			mts->messages()->load(chatId, oldestId, 50);
+		}
 		return;
 	}
 
@@ -4979,6 +5052,9 @@ void HistoryWidget::loadMessagesDown() {
 	if (!_history || _preloadDownRequest) {
 		return;
 	}
+	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+		return;
+	}
 
 	if (_history->isEmpty() && _migrated && _migrated->isEmpty()) {
 		return firstLoadMessages();
@@ -5054,6 +5130,17 @@ void HistoryWidget::delayedShowAt(
 
 	clearAllLoadRequests();
 	_delayedShowAtMsgId = showAtMsgId;
+
+	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+		_history->getReadyFor(_delayedShowAtMsgId);
+		_delayedShowAtRequest = 0;
+		if (const auto item = getItemFromHistoryOrMigrated(_delayedShowAtMsgId)) {
+			_delayedShowAtMsgId = -1;
+			setMsgId(item->id);
+			historyLoaded();
+		}
+		return;
+	}
 
 	DEBUG_LOG(("JumpToEnd(%1, %2, %3): Loading delayed around %4."
 		).arg(_history->peer->name()

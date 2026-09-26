@@ -2507,6 +2507,15 @@ void HistoryItem::applyEdition(HistoryMessageEdition &&edition) {
 	finishEdition(keyboardTop);
 }
 
+void HistoryItem::setEditDate(TimeId date) {
+	if (date > 0) {
+		if (!Has<HistoryMessageEdited>()) {
+			AddComponents(HistoryMessageEdited::Bit());
+		}
+		Get<HistoryMessageEdited>()->date = date;
+	}
+}
+
 void HistoryItem::applyChanges(not_null<Data::Story*> story) {
 	Expects(_flags & MessageFlag::StoryItem);
 	Expects(StoryIdFromMsgId(id) == story->id());

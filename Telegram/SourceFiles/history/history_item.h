@@ -397,6 +397,7 @@ public:
 
 	[[nodiscard]] bool isService() const;
 	void applyEdition(HistoryMessageEdition &&edition);
+	void setEditDate(TimeId date);
 	void applyChanges(not_null<Data::Story*> story);
 
 	void applyEdition(const MTPDmessageService &message);

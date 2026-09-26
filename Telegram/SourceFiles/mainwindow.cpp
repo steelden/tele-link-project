@@ -318,7 +318,7 @@ void MainWindow::setupMain(
 		QPixmap oldContentCache) {
 	Expects(account().sessionExists());
 
-	const auto animated = _intro
+	const auto animated = (_intro && !account().isMtsLink())
 		|| (_passcodeLock && !Core::App().passcodeLocked())
 		|| _setupEmailLock;
 	const auto weakAnimatedLayer = (_main
@@ -333,11 +333,14 @@ void MainWindow::setupMain(
 	} else {
 		destroyLayer();
 	}
+	LOG(("MtsLink setupMain: creating MainWidget..."));
 	auto created = object_ptr<MainWidget>(bodyWidget(), sessionController());
+	LOG(("MtsLink setupMain: MainWidget created, clearing old widgets..."));
 	clearWidgets();
 	_main = std::move(created);
 	updateControlsGeometry();
 	Ui::SendPendingMoveResizeEvents(_main);
+	LOG(("MtsLink setupMain: showByInitialId..."));
 	_main->controller()->showByInitialId(
 		Window::SectionShow::Way::ClearStack,
 		singlePeerShowAtMsgId);
@@ -347,12 +350,15 @@ void MainWindow::setupMain(
 		_main->show();
 		updateControlsGeometry();
 		if (animated) {
+			LOG(("MtsLink setupMain: showAnimated"));
 			_main->showAnimated(std::move(oldContentCache));
 		} else {
+			LOG(("MtsLink setupMain: activate (no animation)"));
 			_main->activate();
 		}
 		Core::App().checkStartUrls();
 	}
+	LOG(("MtsLink setupMain: done"));
 	fixOrder();
 	if (const auto strong = weakAnimatedLayer.get()) {
 		strong->hideAllAnimatedRun();

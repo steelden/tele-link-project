@@ -8,9 +8,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_editing.h"
 
 #include "apiwrap.h"
+#include "main/main_account.h"
+#include "mtslink/data_adapters.h"
+#include "mtslink/session.h"
 #include "api/api_media.h"
 #include "api/api_text_entities.h"
 #include "base/random.h"
+#include "base/unixtime.h"
 #include "core/application.h"
 #include "ui/boxes/confirm_box.h"
 #include "data/business/data_shortcut_messages.h"
@@ -32,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "mtproto/mtproto_response.h"
 #include "boxes/abstract_box.h" // Ui::show().
+#include "ui/text/text_entity.h"
 
 namespace Api {
 namespace {
@@ -535,6 +540,37 @@ mtpRequestId EditTextMessage(
 		Fn<void(const QString &error, mtpRequestId requestId)> fail,
 		bool spoilered,
 		VideoCoverEdit videoCover) {
+	if (MtsLink::isMtsLinkPeer(item->history()->peer->id)) {
+		const auto mts = item->history()->session().account().mtsLinkSession();
+		if (mts) {
+			const auto chatId = MtsLink::peerIdToChatId(
+				item->history()->peer->id);
+			const auto mtsId = MtsLink::msgIdToMtsLinkId(
+				item->history()->peer->id, item->id);
+			if (!chatId.isEmpty() && !mtsId.isEmpty()) {
+				const auto tags = TextUtilities::ConvertEntitiesToTextTags(caption.entities);
+				auto textWithTags = TextWithTags{ caption.text, tags };
+				const auto content = MtsLink::convertMentionsForSending(
+					textWithTags,
+					&item->history()->session());
+				mts->sending()->editMessage(
+					chatId,
+					mtsId,
+					content.text,
+					content.blocks,
+					content.mentionsMeta);
+				item->setText(caption);
+				item->setEditDate(base::unixtime::now());
+				item->history()->owner().requestItemViewRefresh(
+					item);
+				item->invalidateChatListEntry();
+			}
+		}
+		if (done) {
+			done(0);
+		}
+		return 0;
+	}
 	if (item->isWelcomeTemplate()) {
 		const auto history = item->history();
 		auto &welcome = history->session().welcomeMessages();

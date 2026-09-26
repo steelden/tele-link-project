@@ -183,6 +183,11 @@ public:
 		not_null<GameData*> game);
 	not_null<HistoryItem*> addNewLocalMessage(not_null<HistoryItem*> item);
 
+	not_null<HistoryItem*> addNewExternalMessage(
+		HistoryItemCommonFields &&fields,
+		const TextWithEntities &text,
+		const MTPMessageMedia &media);
+
 	not_null<HistoryItem*> addSponsoredMessage(
 		MsgId id,
 		Data::SponsoredFrom from,
@@ -200,6 +205,8 @@ public:
 
 	void addOlderSlice(const QVector<MTPMessage> &slice);
 	void addNewerSlice(const QVector<MTPMessage> &slice);
+	void addCreatedOlderSlice(
+		const std::vector<not_null<HistoryItem*>> &items);
 
 	void newItemAdded(not_null<HistoryItem*> item, NewAddType type);
 
@@ -475,6 +482,9 @@ public:
 
 	[[nodiscard]] bool isTopPromoted() const;
 
+	void setIsFavorites(bool favorites);
+	[[nodiscard]] bool isFavorites() const;
+
 	void translateOfferFrom(LanguageId id);
 	[[nodiscard]] LanguageId translateOfferedFrom() const;
 	void translateTo(LanguageId id);
@@ -528,6 +538,7 @@ private:
 		ResolveChatListMessage = (1 << 7),
 		MonoAndForumUnreadInvalidatePending = (1 << 8),
 		HasGuestChatBotMessages = (1 << 9),
+		IsFavorites = (1 << 10),
 	};
 	using Flags = base::flags<Flag>;
 	friend inline constexpr auto is_flag_type(Flag) {
@@ -584,9 +595,6 @@ private:
 	bool isBuildingFrontBlock() const {
 		return _buildingFrontBlock != nullptr;
 	}
-
-	void addCreatedOlderSlice(
-		const std::vector<not_null<HistoryItem*>> &items);
 
 	void checkForLoadedAtTop(not_null<HistoryItem*> added);
 	void mainViewRemoved(

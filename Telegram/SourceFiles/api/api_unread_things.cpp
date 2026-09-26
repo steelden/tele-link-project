@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "history/history_unread_things.h"
 #include "apiwrap.h"
+#include "mtslink/data_adapters.h"
 
 namespace Api {
 namespace {

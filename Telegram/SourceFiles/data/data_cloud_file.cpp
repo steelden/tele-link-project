@@ -253,7 +253,8 @@ void LoadCloudFile(
 			file.loader->increaseLoadSize(loadSize, autoLoading);
 		}
 		return;
-	} else if ((file.flags & CloudFile::Flag::Failed)
+	}
+	if ((file.flags & CloudFile::Flag::Failed)
 		|| !file.location.valid()
 		|| (finalCheck && !finalCheck())) {
 		return;

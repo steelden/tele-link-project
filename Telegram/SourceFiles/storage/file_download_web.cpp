@@ -8,10 +8,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/file_download_web.h"
 
 #include "storage/cache/storage_cache_types.h"
+#include "mtslink/data_adapters.h"
 #include "base/timer.h"
 #include "base/weak_ptr.h"
 
 #include <QtNetwork/QAuthenticator>
+#include <QtNetwork/QNetworkCookie>
+#include <QtNetwork/QNetworkCookieJar>
 
 namespace {
 
@@ -296,7 +299,20 @@ void WebLoadManager::removeSent(int id) {
 }
 
 not_null<QNetworkReply*> WebLoadManager::send(int id, const QString &url) {
-	const auto result = _network->get(QNetworkRequest(url));
+	auto request = QNetworkRequest(url);
+	if (url.contains(u"mts-link.ru"_q)) {
+		request.setRawHeader("Referer", "https://my.mts-link.ru/");
+		const auto token = MtsLink::fileAuthToken();
+		if (!token.isEmpty()) {
+			QNetworkCookie accessCookie("access", token.toUtf8());
+			accessCookie.setDomain(".mts-link.ru");
+			accessCookie.setPath("/");
+			_network->cookieJar()->setCookiesFromUrl(
+				{ accessCookie },
+				QUrl(url));
+		}
+	}
+	const auto result = _network->get(request);
 	const auto handleProgress = [=](qint64 ready, qint64 total) {
 		progress(id, result, ready, total);
 	};
@@ -335,12 +351,12 @@ void WebLoadManager::progress(
 	const auto statusCode = reply->attribute(
 		QNetworkRequest::HttpStatusCodeAttribute);
 	const auto status = statusCode.isValid() ? statusCode.toInt() : 200;
-	if (status == 301 || status == 302) {
+	if (status == 301 || status == 302 || status == 307 || status == 308) {
 		redirect(id, reply);
 	} else if (status != 200 && status != 206 && status != 416) {
 		LOG(("Network Error: "
-			"Bad HTTP status received in WebLoadManager::onProgress() %1"
-			).arg(status));
+			"Bad HTTP status received in WebLoadManager::onProgress() %1 url=%2"
+			).arg(status).arg(reply->url().toString()));
 		failed(id, reply);
 	} else {
 		notify(id, reply, ready, std::max(ready, total));

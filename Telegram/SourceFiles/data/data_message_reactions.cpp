@@ -39,6 +39,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "apiwrap.h"
 #include "styles/style_chat.h"
+#include "main/main_account.h"
+#include "mtslink/data_adapters.h"
+#include "mtslink/session.h"
 
 #include "base/random.h"
 
@@ -1495,7 +1498,40 @@ std::optional<Reaction> Reactions::parse(const MTPAvailableEffect &entry) {
 	});
 }
 
-void Reactions::send(not_null<HistoryItem*> item, bool addToRecent) {
+void Reactions::send(
+		not_null<HistoryItem*> item,
+		bool addToRecent,
+		const ReactionId &removedReaction) {
+	if (MtsLink::isMtsLinkPeer(item->history()->peer->id)) {
+		const auto mts = _owner->session().account().mtsLinkSession();
+		if (mts) {
+			const auto chatId = MtsLink::peerIdToChatId(
+				item->history()->peer->id);
+			const auto mtsId = MtsLink::msgIdToMtsLinkId(
+				item->history()->peer->id, item->id);
+			if (!chatId.isEmpty() && !mtsId.isEmpty()) {
+				if (!removedReaction.empty()
+					&& !removedReaction.emoji().isEmpty()) {
+					const auto eid = MtsLink::emojiToId(
+						removedReaction.emoji());
+					mts->sending()->removeReaction(
+						chatId, mtsId, removedReaction.emoji(), eid);
+				} else {
+					const auto chosen = item->chosenReactions();
+					if (!chosen.empty()) {
+						const auto &last = chosen.back();
+						if (!last.emoji().isEmpty()) {
+							const auto eid = MtsLink::emojiToId(
+								last.emoji());
+							mts->sending()->addReaction(
+								chatId, mtsId, last.emoji(), eid);
+						}
+					}
+				}
+			}
+		}
+		return;
+	}
 	const auto id = item->fullId();
 	auto &api = _owner->session().api();
 	auto i = _sentRequests.find(id);
@@ -2046,7 +2082,7 @@ void MessageReactions::remove(const ReactionId &id) {
 		history->owner().reactions().decrementMyTag(id, sublist);
 	}
 	auto &owner = history->owner();
-	owner.reactions().send(_item, false);
+	owner.reactions().send(_item, false, id);
 	owner.notifyItemDataChange(_item);
 }
 

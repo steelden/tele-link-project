@@ -36,6 +36,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/file_upload.h"
 #include "mainwidget.h"
 #include "apiwrap.h"
+#include "main/main_account.h"
+#include "mtslink/data_adapters.h"
+#include "mtslink/session.h"
+
+#include <QUuid>
+#include <QDateTime>
+
+#include <QtCore/QFile>
 
 namespace Api {
 namespace {
@@ -1295,6 +1303,102 @@ void AddConfirmedLocalPlaceholder(const ConfirmedLocalFile &local) {
 void SendConfirmedFile(
 		not_null<Main::Session*> session,
 		const std::shared_ptr<FilePrepareResult> &file) {
+	if (MtsLink::isMtsLinkPeer(file->to.peer)) {
+		const auto mts = session->account().mtsLinkSession();
+		if (!mts) {
+			return;
+		}
+		const auto chatId = MtsLink::peerIdToChatId(file->to.peer);
+		if (chatId.isEmpty()) {
+			return;
+		}
+
+		auto fileContent = file->content;
+		if (fileContent.isEmpty() && !file->filepath.isEmpty()) {
+			QFile f(file->filepath);
+			if (f.open(QIODevice::ReadOnly)) {
+				fileContent = f.readAll();
+			}
+		}
+		if (fileContent.isEmpty()) {
+			LOG(("MtsLink Files: no content for file '%1'")
+				.arg(file->filename));
+			return;
+		}
+
+		const auto caption = file->caption.text.trimmed();
+		const auto replyMsgId = [&] {
+			if (!file->to.replyTo.messageId) {
+				return QString();
+			}
+			return MtsLink::msgIdToMtsLinkId(
+				file->to.replyTo.messageId.peer,
+				file->to.replyTo.messageId.msg);
+		}();
+
+		const auto tempId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+		const auto peerId = file->to.peer;
+		const auto fileSize = qint64(fileContent.size());
+		{
+			MtsLink::Api::MessageData msg;
+			msg.id = tempId;
+			msg.chatId = chatId;
+			msg.authorId = mts->userId();
+			msg.text = caption;
+			msg.createdAt = QDateTime::currentMSecsSinceEpoch();
+			msg.files.push_back(MtsLink::Api::FileData{
+				.id = tempId,
+				.name = file->filename,
+				.size = fileSize,
+				.mime = file->filemime,
+			});
+			const auto item = MtsLink::addMessage(session, msg);
+			if (item) {
+				if (const auto media = item->media()) {
+					if (const auto doc = media->document()) {
+						doc->uploadingData
+							= std::make_unique<Data::UploadState>(
+								fileSize);
+					}
+				}
+			}
+		}
+		const auto tempMsgId = MsgId(
+			MtsLink::uuidToBareId(tempId) & 0x7FFFFFFFLL);
+		MtsLink::setPendingTempMessage(peerId, tempMsgId);
+
+		mts->files()->uploadFile(
+			file->filename,
+			fileContent,
+			file->filemime,
+			[=](const MtsLink::Api::UploadResult &result) {
+				mts->sending()->sendMessage(
+					chatId,
+					caption,
+					QJsonArray(),
+					QJsonArray(),
+					replyMsgId,
+					QStringList{ result.id });
+			},
+			[=](const QString &error) {
+				LOG(("MtsLink Files: upload failed for '%1': %2")
+					.arg(file->filename, error));
+				MtsLink::clearPendingTempMessage(session, peerId);
+			},
+			[=](qint64 sent, qint64 total) {
+				const auto item = session->data().message(
+					peerId, tempMsgId);
+				if (!item) return;
+				const auto media = item->media();
+				if (!media) return;
+				const auto doc = media->document();
+				if (!doc || !doc->uploadingData) return;
+				doc->uploadingData->offset = sent;
+				session->data().requestDocumentViewRepaint(doc);
+			});
+		return;
+	}
+
 	const auto welcomeTemplate = file->to.options.welcomeTemplate;
 	if (welcomeTemplate && file->to.replaceMediaOf) {
 		return;

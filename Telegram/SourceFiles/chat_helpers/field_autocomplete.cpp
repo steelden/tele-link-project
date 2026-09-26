@@ -33,6 +33,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_values.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "data/stickers/data_stickers.h"
+#include "menu/menu_send.h" // SendMenu::FillSendMenu
+#include "chat_helpers/stickers_lottie.h"
+#include "chat_helpers/message_field.h" // PrepareMentionTag.
+#include "chat_helpers/tabbed_selector.h" // ChatHelpers::FileChosen.
+#include "mainwindow.h"
+#include "apiwrap.h"
+#include "api/api_chat_participants.h"
+#include "main/main_session.h"
+#include "mtslink/data_adapters.h"
+#include "storage/storage_account.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "lang/lang_keys.h"
 #include "lottie/lottie_single_player.h"
 #include "main/main_session.h"
@@ -506,8 +519,16 @@ void FieldAutocomplete::updateFiltered(bool resetScroll) {
 			+ (_addInlineBots
 				? int(_session->recentInlineBots().list().size())
 				: 0);
-		if (_chat) {
-			maxListSize += chatMembers;
+		const auto mtsLinkPeerId = _channel
+			? _channel->id
+			: _user
+				? _user->id
+				: PeerId(0);
+		if (mtsLinkPeerId && MtsLink::isMtsLinkPeer(mtsLinkPeerId)) {
+			maxListSize += int(MtsLink::chatMtsLinkUsers(
+				&_session->data().session(), mtsLinkPeerId).size());
+		} else if (_chat) {
+			maxListSize += (_chat->participants.empty() ? _chat->lastAuthors.size() : _chat->participants.size());
 		} else if (_channel && _channel->isMegagroup()) {
 			if (!_channel->canViewMembers()) {
 				maxListSize += _channel->mgInfo->admins.size();
@@ -594,7 +615,17 @@ void FieldAutocomplete::updateFiltered(bool resetScroll) {
 			return user->isInaccessible()
 				|| (!listAllSuggestions && filterNotPassedByName(user));
 		};
-		if (_chat) {
+		if (mtsLinkPeerId && MtsLink::isMtsLinkPeer(mtsLinkPeerId)) {
+			const auto users = MtsLink::chatMtsLinkUsers(
+				&_session->data().session(), mtsLinkPeerId);
+			mrows.reserve(mrows.size() + users.size());
+			for (const auto &user : users) {
+				if (user->isInaccessible()) continue;
+				if (!listAllSuggestions && filterNotPassedByName(user)) continue;
+				if (markMentionCandidateIfExists(user)) continue;
+				pushMentionRow(user, MentionRow::Source::MentionCandidate);
+			}
+		} else if (_chat) {
 			auto sorted = base::flat_multi_map<TimeId, not_null<UserData*>>();
 			const auto byOnline = [&](not_null<UserData*> user) {
 				return Data::SortByOnlineValue(user, now);

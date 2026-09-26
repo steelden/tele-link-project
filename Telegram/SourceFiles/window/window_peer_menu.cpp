@@ -135,6 +135,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_window.h" // st::windowMinWidth
 #include "styles/style_menu_icons.h"
 #include "styles/style_premium.h"
+#include "mtslink/data_adapters.h"
+#include "mtslink/session.h"
+#include "main/main_account.h"
 
 #include <QAction>
 #include <QtWidgets/QApplication>
@@ -4090,6 +4093,18 @@ void ToggleMessagePinned(
 		const auto session = &peer->session();
 		const auto callback = crl::guard(session, [=](Fn<void()> &&close) {
 			close();
+			if (MtsLink::isMtsLinkPeer(peer->id)) {
+				const auto mts = session->account().mtsLinkSession();
+				if (mts) {
+					const auto chatId = MtsLink::peerIdToChatId(peer->id);
+					const auto mtsId = MtsLink::msgIdToMtsLinkId(
+						peer->id, itemId.msg);
+					if (!chatId.isEmpty() && !mtsId.isEmpty()) {
+						mts->sending()->unpinMessage(chatId, mtsId);
+					}
+				}
+				return;
+			}
 			session->api().request(MTPmessages_UpdatePinnedMessage(
 				MTP_flags(MTPmessages_UpdatePinnedMessage::Flag::f_unpin),
 				peer->input(),
@@ -4132,26 +4147,50 @@ void UnpinMessages(
 	const auto session = &navigation->session();
 	const auto callback = crl::guard(session, [=](Fn<void()> &&close) {
 		close();
-		const auto api = &session->api();
-		const auto sendRequest = [=](auto self, int index) -> void {
-			while (index < count) {
-				const auto item = session->data().message(items[index]);
-				if (!item || !item->canPin() || !item->isPinned()) {
-					++index;
-					continue;
-				}
-				api->request(MTPmessages_UpdatePinnedMessage(
-					MTP_flags(MTPmessages_UpdatePinnedMessage::Flag::f_unpin),
-					item->history()->peer->input(),
-					MTP_int(item->id)
-				)).done([=](const MTPUpdates &result) {
-					session->api().applyUpdates(result);
-					self(self, index + 1);
-				}).send();
-				return;
+		// Try MTS Link unpin for each item first.
+		bool anyMtsLink = false;
+		for (int i = 0; i < count; ++i) {
+			const auto item = session->data().message(items[i]);
+			if (!item || !item->canPin() || !item->isPinned()) {
+				continue;
 			}
-		};
-		sendRequest(sendRequest, 0);
+			const auto peer = item->history()->peer;
+			if (MtsLink::isMtsLinkPeer(peer->id)) {
+				anyMtsLink = true;
+				const auto mts = session->account().mtsLinkSession();
+				if (mts) {
+					const auto chatId = MtsLink::peerIdToChatId(peer->id);
+					const auto mtsId = MtsLink::msgIdToMtsLinkId(
+						peer->id, item->id);
+					if (!chatId.isEmpty() && !mtsId.isEmpty()) {
+						mts->sending()->unpinMessage(chatId, mtsId);
+					}
+				}
+			}
+		}
+		if (!anyMtsLink) {
+			const auto api = &session->api();
+			const auto sendRequest = [=](auto self, int index) -> void {
+				while (index < count) {
+					const auto item = session->data().message(items[index]);
+					if (!item || !item->canPin() || !item->isPinned()) {
+						++index;
+						continue;
+					}
+					api->request(MTPmessages_UpdatePinnedMessage(
+						MTP_flags(
+							MTPmessages_UpdatePinnedMessage::Flag::f_unpin),
+						item->history()->peer->input(),
+						MTP_int(item->id)
+					)).done([=](const MTPUpdates &result) {
+						session->api().applyUpdates(result);
+						self(self, index + 1);
+					}).send();
+					return;
+				}
+			};
+			sendRequest(sendRequest, 0);
+		}
 		if (onConfirmed) {
 			onConfirmed();
 		}

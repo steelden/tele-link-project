@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "base/unixtime.h"
 #include "base/weak_ptr.h"
+#include "mtslink/data_adapters.h"
 #include "ui/controls/who_reacted_context_action.h"
 #include "apiwrap.h"
 #include "styles/style_chat_helpers.h"
@@ -282,6 +283,12 @@ struct State {
 		if (!weak) {
 			return rpl::lifetime();
 		}
+		if (MtsLink::isMtsLinkPeer(item->history()->peer->id)) {
+			const auto context = PreparedContextAt(weak.get(), session);
+			auto &entry = context->cacheRead(item);
+			entry.data = Peers{ .state = WhoReadState::Empty };
+			return entry.data.value().start_existing(consumer);
+		}
 		const auto context = PreparedContextAt(weak.get(), session);
 		auto &entry = context->cacheRead(item);
 		if (entry.requestId) {
@@ -366,6 +373,14 @@ struct State {
 	return [=](auto consumer) {
 		if (!weak) {
 			return rpl::lifetime();
+		}
+		if (MtsLink::isMtsLinkPeer(item->history()->peer->id)) {
+			const auto context = PreparedContextAt(weak.get(), session);
+			auto &entry = context->cacheReacted(item, reaction);
+			entry.data = PeersWithReactions{
+				.state = WhoReadState::Empty,
+			};
+			return entry.data.value().start_existing(consumer);
 		}
 		const auto context = PreparedContextAt(weak.get(), session);
 		auto &entry = context->cacheReacted(item, reaction);

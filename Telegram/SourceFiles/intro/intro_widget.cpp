@@ -13,6 +13,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "intro/intro_code.h"
 #include "intro/intro_signup.h"
 #include "intro/intro_password_check.h"
+#include "mtslink/auth_widget.h"
+#include "mtslink/data_adapters.h"
+#include "main/main_session_settings.h"
 #include "lang/lang_keys.h"
 #include "lang/lang_instance.h"
 #include "lang/lang_cloud_manager.h"
@@ -47,6 +50,41 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 #include "styles/style_intro.h"
 #include "base/qt/qt_common_adapters.h"
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
+
+namespace {
+
+LONG WINAPI MtsLinkCrashHandler(EXCEPTION_POINTERS *ep) {
+	const auto code = ep->ExceptionRecord->ExceptionCode;
+	const auto addr = ep->ExceptionRecord->ExceptionAddress;
+	const auto msg = QString("CRASH: code=0x%1 addr=0x%2")
+		.arg(code, 8, 16, QChar('0'))
+		.arg(reinterpret_cast<quintptr>(addr), 16, 16, QChar('0'));
+	LOG(("MtsLink %1").arg(msg));
+
+	// Write minidump
+	const auto path = L"D:\\TBuild\\crashes\\telelink.dmp";
+	auto hFile = CreateFileW(path, GENERIC_WRITE, 0, nullptr,
+		CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (hFile != INVALID_HANDLE_VALUE) {
+		MINIDUMP_EXCEPTION_INFORMATION mei;
+		mei.ThreadId = GetCurrentThreadId();
+		mei.ExceptionPointers = ep;
+		mei.ClientPointers = FALSE;
+		MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(),
+			hFile, MiniDumpWithDataSegs, &mei, nullptr, nullptr);
+		CloseHandle(hFile);
+		LOG(("MtsLink: minidump written to D:\\TBuild\\crashes\\telelink.dmp"));
+	}
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+
+} // namespace
+#endif // Q_OS_WIN
 
 namespace Intro {
 namespace {
@@ -107,22 +145,53 @@ Widget::Widget(
 		crl::on_main(this, [=] { createLanguageLink(); });
 	}, lifetime());
 
-	switch (point) {
-	case EnterPoint::Start:
-		getNearestDC();
-		appendStep(new StartWidget(this, _account, getData()));
-		break;
-	case EnterPoint::Phone:
-		appendStep(new PhoneWidget(this, _account, getData()));
-		break;
-	case EnterPoint::Qr:
-		appendStep(new QrWidget(this, _account, getData()));
-		break;
-	default: Unexpected("Enter point in Intro::Widget::Widget.");
+	// MTS Link: SSO auth instead of Telegram phone/QR flow.
+	// Force normal (non-maximized) state for the login window.
+	if (const auto window = Core::App().activeWindow()) {
+		if (window->widget()->windowState() & Qt::WindowMaximized) {
+			window->widget()->showNormal();
+		}
 	}
+	_mtsLinkAuth = new MtsLink::AuthWidget(this);
+	_mtsLinkAuth->show();
+	_mtsLinkAuth->startAuth();
 
-	setupStep();
-	fixOrder();
+	QObject::connect(
+		_mtsLinkAuth,
+		&MtsLink::AuthWidget::authCompleted,
+		this,
+		[this](const MtsLink::Api::AuthResult &result) {
+			const auto account = _account;
+			const auto token = result.accessToken;
+			const auto bareId = MtsLink::uuidToBareId(result.userId);
+			LOG(("MtsLink: auth done, bareId=%1").arg(bareId));
+			account->setSessionUserId(UserId(bareId));
+			account->setMtsLinkMode(true);
+			// Defer to next event loop tick: createSession()
+			// destroys this widget (via rpl -> setupMain ->
+			// clearWidgets), so we must not be inside a signal
+			// handler of a child widget when that happens.
+			crl::on_main([=] {
+				account->createSession(
+					UserId(bareId),
+					QByteArray(),
+					0,
+					std::make_unique<Main::SessionSettings>());
+				account->startMtsLinkSession(token);
+				if (const auto window = Core::App().activeWindow()) {
+					const auto pos = Core::App().settings().windowPosition();
+					if (pos.maximized) {
+						window->widget()->setWindowState(Qt::WindowMaximized);
+					}
+					window->widget()->raise();
+					window->widget()->activateWindow();
+				}
+			});
+		});
+
+	_back->hide(anim::type::instant);
+	_next->hide(anim::type::instant);
+	_settings->hide(anim::type::instant);
 
 	if (_account->mtp().isTestMode()) {
 		_testModeLabel.create(
@@ -161,7 +230,9 @@ Widget::Widget(
 
 	show();
 	showControls();
-	getStep()->showFast();
+	if (!_mtsLinkAuth) {
+		getStep()->showFast();
+	}
 	setInnerFocus();
 
 	cSetPasswordRecovered(false);
@@ -342,6 +413,10 @@ void Widget::checkUpdateStatus() {
 }
 
 void Widget::setInnerFocus() {
+	if (_mtsLinkAuth) {
+		_mtsLinkAuth->setFocus();
+		return;
+	}
 	if (getStep()->animating()) {
 		setFocus();
 	} else {
@@ -707,6 +782,7 @@ void Widget::showTerms(Fn<void()> callback) {
 }
 
 void Widget::showControls() {
+	if (_mtsLinkAuth) return;
 	getStep()->show();
 	setupNextButton();
 	_next->toggle(_nextShown, anim::type::instant);
@@ -760,6 +836,7 @@ void Widget::setupNextButton() {
 }
 
 void Widget::hideControls() {
+	if (_mtsLinkAuth) return;
 	getStep()->hide();
 	_next->hide(anim::type::instant);
 	_connecting->setForceHidden(true);
@@ -794,6 +871,9 @@ void Widget::showAnimated(QPixmap oldContentCache, bool back) {
 
 void Widget::showFinished() {
 	_showAnimation = nullptr;
+	if (_mtsLinkAuth) {
+		return;
+	}
 
 	showControls();
 	getStep()->activate();
@@ -815,6 +895,10 @@ void Widget::paintEvent(QPaintEvent *e) {
 }
 
 void Widget::resizeEvent(QResizeEvent *e) {
+	if (_mtsLinkAuth) {
+		updateControlsGeometry();
+		return;
+	}
 	if (_stepHistory.empty()) {
 		return;
 	}
@@ -827,6 +911,11 @@ void Widget::resizeEvent(QResizeEvent *e) {
 }
 
 void Widget::updateControlsGeometry() {
+	if (_mtsLinkAuth) {
+		_mtsLinkAuth->setGeometry(rect());
+		return;
+	}
+
 	const auto skip = st::introSettingsSkip;
 	const auto shown = _coverShownAnimation.value(1.);
 
@@ -878,7 +967,8 @@ void Widget::updateControlsGeometry() {
 }
 
 void Widget::keyPressEvent(QKeyEvent *e) {
-	if (_showAnimation || getStep()->animating()) return;
+	if (_mtsLinkAuth || _showAnimation) return;
+	if (getStep()->animating()) return;
 
 	if (e->key() == Qt::Key_Escape || e->key() == Qt::Key_Back) {
 		if (getStep()->hasBack()) {

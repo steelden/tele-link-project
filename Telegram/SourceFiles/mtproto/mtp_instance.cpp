@@ -2111,6 +2111,14 @@ void Instance::keyDestroyedOnServer(ShiftedDcId shiftedDcId, uint64 keyId) {
 	_private->keyDestroyedOnServer(shiftedDcId, keyId);
 }
 
+void Instance::setSuppressed(bool suppressed) {
+	_suppressed = suppressed;
+}
+
+bool Instance::isSuppressed() const {
+	return _suppressed;
+}
+
 void Instance::sendRequest(
 		mtpRequestId requestId,
 		SerializedRequest &&request,
@@ -2119,6 +2127,9 @@ void Instance::sendRequest(
 		crl::time msCanWait,
 		bool needsLayer,
 		mtpRequestId afterRequestId) {
+	if (_suppressed) {
+		return;
+	}
 	return _private->sendRequest(
 		requestId,
 		std::move(request),
@@ -2130,6 +2141,9 @@ void Instance::sendRequest(
 }
 
 void Instance::sendAnything(ShiftedDcId shiftedDcId, crl::time msCanWait) {
+	if (_suppressed) {
+		return;
+	}
 	_private->getSession(shiftedDcId)->sendAnything(msCanWait);
 }
 

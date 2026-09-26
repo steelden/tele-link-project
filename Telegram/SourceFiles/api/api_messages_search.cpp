@@ -16,6 +16,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
+#include "mtslink/data_adapters.h"
+#include "mtslink/session.h"
 
 namespace Api {
 namespace {
@@ -101,6 +104,61 @@ void MessagesSearch::searchMore() {
 
 void MessagesSearch::searchRequest() {
 	const auto nextToken = RequestToToken(_request);
+	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+		const auto mts = _history->session().account().mtsLinkSession();
+		if (!mts) {
+			return;
+		}
+		const auto chatId = MtsLink::peerIdToChatId(
+			_history->peer->id);
+		if (chatId.isEmpty()) {
+			return;
+		}
+		const auto conn = std::make_shared<QMetaObject::Connection>();
+		const auto isPinnedSearch = (_request.filter == SearchFilter::Pinned);
+		const auto handler = [this, conn, nextToken, isPinnedSearch](
+				const MtsLink::ChatId &,
+				const QList<MtsLink::Api::MessageData> &messages,
+				const QList<MtsLink::Api::MemberProfile> &profiles,
+				int total) {
+			QObject::disconnect(*conn);
+			auto &session = _history->session();
+			for (const auto &p : profiles) {
+				MtsLink::applyUserData(&session, p);
+			}
+			MessageIdsList ids;
+			ids.reserve(messages.size());
+			for (const auto &src : messages) {
+				const auto item = MtsLink::addMessage(&session, src);
+				if (item) {
+					if (isPinnedSearch) {
+						item->setIsPinned(true);
+					}
+					ids.push_back(item->fullId());
+				}
+			}
+			_requestId = 0;
+			_messagesFounds.fire({
+				total,
+				std::move(ids),
+				nextToken,
+			});
+		};
+		if (isPinnedSearch) {
+			*conn = QObject::connect(
+				mts->messages(),
+				&MtsLink::Api::Messages::pinnedMessagesLoaded,
+				handler);
+			mts->messages()->loadPinned(chatId);
+		} else {
+			*conn = QObject::connect(
+				mts->messages(),
+				&MtsLink::Api::Messages::searchCompleted,
+				handler);
+			mts->messages()->search(chatId, _request.query);
+		}
+		return;
+	}
 	if (!_offsetId) {
 		const auto it = _cacheOfStartByToken.find(nextToken);
 		if (it != end(_cacheOfStartByToken)) {
