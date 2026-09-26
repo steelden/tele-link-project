@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/weak_ptr.h"
 
+#include <QtCore/QTimer>
 #include <QtNetwork/QAuthenticator>
 #include <QtNetwork/QNetworkCookie>
 #include <QtNetwork/QNetworkCookieJar>
@@ -93,6 +94,7 @@ private:
 		int64 ready = 0;
 		int64 total = 0;
 		int redirectsLeft = kMaxHttpRedirects;
+		int retriesLeft = 3;
 	};
 
 	// Constructor.
@@ -353,6 +355,8 @@ void WebLoadManager::progress(
 	const auto status = statusCode.isValid() ? statusCode.toInt() : 200;
 	if (status == 301 || status == 302 || status == 307 || status == 308) {
 		redirect(id, reply);
+	} else if (status == 425) {
+		// Handled by errorOccurred with retry logic.
 	} else if (status != 200 && status != 206 && status != 416) {
 		LOG(("Network Error: "
 			"Bad HTTP status received in WebLoadManager::onProgress() %1 url=%2"
@@ -456,6 +460,26 @@ void WebLoadManager::failed(
 		not_null<QNetworkReply*> reply,
 		QNetworkReply::NetworkError error) {
 	if (const auto sent = findSent(id, reply)) {
+		const auto statusCode = reply->attribute(
+			QNetworkRequest::HttpStatusCodeAttribute);
+		const auto status = statusCode.isValid() ? statusCode.toInt() : 0;
+		if (status == 425 && sent->retriesLeft > 0) {
+			--sent->retriesLeft;
+			const auto url = sent->url;
+			LOG(("Network: HTTP 425 Too Early for '%1', retrying in 2s (%2 left)")
+				.arg(url).arg(sent->retriesLeft));
+			deleteDeferred(reply);
+			QTimer::singleShot(2000, _network.get(), [=] {
+				const auto it = _sent.find(id);
+				if (it != _sent.end()) {
+					it->second.data.clear();
+					it->second.ready = 0;
+					it->second.total = 0;
+					it->second.reply = send(id, url);
+				}
+			});
+			return;
+		}
 		LOG(("Network Error: "
 			"Failed to request '%1', error %2 (%3)"
 			).arg(sent->url

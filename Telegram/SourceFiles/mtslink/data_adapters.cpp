@@ -53,6 +53,9 @@ based on Telegram Desktop.
 #include <QtNetwork/QNetworkCookie>
 
 namespace MtsLink {
+
+constexpr auto kMtsLinkMsgCacheTag = uint64(0xBC01'0000'0000'0000ULL);
+
 namespace {
 
 QHash<PeerId, QString> PeerToChatMap;
@@ -62,7 +65,7 @@ QHash<quint64, QString> MsgIdToMtsLinkIdMap;
 QHash<PeerId, QString> OldestLoadedMsgMap;
 QHash<uint64, QString> UserBareIdToUuidMap;
 QHash<PeerId, std::vector<uint64>> ChatMembersMap;
-QHash<PeerId, MsgId> PendingTempMessages;
+QHash<PeerId, QVector<MsgId>> PendingTempMessages;
 QHash<QString, QPair<PeerId, MsgId>> MtsLinkIdToMsgMap;
 QSet<QString> PinnedMessagesLoadedChats;
 QSet<QString> ChatInfoLoadedChats;
@@ -2411,6 +2414,12 @@ void deleteMessage(
 	const auto item = session->data().message(chatPeerId, msgId);
 	if (item) {
 		item->destroy();
+		const auto hash = QCryptographicHash::hash(
+			chatId.toUtf8(), QCryptographicHash::Md5);
+		uint64 low = 0;
+		memcpy(&low, hash.constData(), sizeof(low));
+		session->data().cache().remove(
+			Storage::Cache::Key{ kMtsLinkMsgCacheTag, low });
 	}
 }
 
@@ -2433,7 +2442,9 @@ void registerMessageId(PeerId peerId, MsgId msgId, const QString &mtsLinkId) {
 }
 
 void setPendingTempMessage(PeerId peerId, MsgId msgId) {
-	PendingTempMessages[peerId] = msgId;
+	LOG(("MtsLink Pending: SET peerId=%1 tempMsgId=%2")
+		.arg(peerId.value).arg(msgId.bare));
+	PendingTempMessages[peerId].push_back(msgId);
 }
 
 void addPendingThreadSend(const QString &clientId) {
@@ -2451,10 +2462,12 @@ void clearPendingTempMessage(
 	if (it == PendingTempMessages.end()) {
 		return;
 	}
-	const auto tempMsgId = it.value();
+	const auto ids = it.value();
 	PendingTempMessages.erase(it);
-	if (const auto item = session->data().message(peerId, tempMsgId)) {
-		item->destroy();
+	for (const auto &tempMsgId : ids) {
+		if (const auto item = session->data().message(peerId, tempMsgId)) {
+			item->destroy();
+		}
 	}
 }
 
@@ -2463,20 +2476,52 @@ bool replacePendingWithReal(
 		PeerId peerId,
 		const Api::MessageData &realMsg) {
 	const auto it = PendingTempMessages.find(peerId);
-	if (it == PendingTempMessages.end()) {
+	if (it == PendingTempMessages.end() || it->isEmpty()) {
+		LOG(("MtsLink Pending: NOT FOUND for peerId=%1 realId='%2'")
+			.arg(peerId.value).arg(realMsg.id));
 		return false;
 	}
-	const auto tempMsgId = it.value();
-	PendingTempMessages.erase(it);
+	const auto tempMsgId = it->takeFirst();
+	LOG(("MtsLink Pending: FOUND peerId=%1 tempMsgId=%2 realId='%3'")
+		.arg(peerId.value).arg(tempMsgId.bare).arg(realMsg.id));
+	if (it->isEmpty()) {
+		PendingTempMessages.erase(it);
+	}
 	const auto item = session->data().message(peerId, tempMsgId);
 	if (!item) {
 		return false;
 	}
 	if (const auto media = item->media()) {
-		if (const auto doc = media->document()) {
-			doc->uploadingData = nullptr;
-			if (!realMsg.files.isEmpty()) {
-				const auto &f = realMsg.files.first();
+		if (!realMsg.files.isEmpty()) {
+			const auto &f = realMsg.files.first();
+			if (const auto photo = media->photo()) {
+				const auto thumbUrl = storageThumbBase()
+					+ f.id + u"/S"_q;
+				const auto fullUrl = storageThumbBase()
+					+ f.id + u"/XL"_q;
+				const auto w = f.width > 0 ? f.width : 100;
+				const auto h = f.height > 0 ? f.height : 100;
+				photo->clearImages();
+				photo->updateImages(
+					QByteArray(),
+					ImageWithLocation{},
+					ImageWithLocation{
+						.location = ImageLocation(
+							DownloadLocation{
+								PlainUrlLocation{ thumbUrl } },
+							w, h),
+					},
+					ImageWithLocation{
+						.location = ImageLocation(
+							DownloadLocation{
+								PlainUrlLocation{ fullUrl } },
+							w, h),
+					},
+					ImageWithLocation{},
+					ImageWithLocation{},
+					crl::time(0));
+			} else if (const auto doc = media->document()) {
+				doc->uploadingData = nullptr;
 				doc->setContentUrl(
 					fileDownloadBase() + f.id + u"/download"_q);
 			}
@@ -2579,8 +2624,6 @@ QString oldestLoadedMessageId(PeerId peerId) {
 }
 
 namespace {
-
-constexpr auto kMtsLinkMsgCacheTag = uint64(0xBC01'0000'0000'0000ULL);
 
 Storage::Cache::Key messageCacheKey(const QString &chatId) {
 	const auto hash = QCryptographicHash::hash(

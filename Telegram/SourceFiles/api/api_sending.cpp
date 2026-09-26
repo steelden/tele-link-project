@@ -13,6 +13,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/business/data_shortcut_messages.h"
 #include "data/data_document.h"
 #include "data/data_photo.h"
+#include "data/data_photo_media.h"
+
+#include <QtCore/QBuffer>
 #include "data/data_channel.h" // ChannelData::addsSignature.
 #include "data/data_user.h" // UserData::name
 #include "data/data_session.h"
@@ -1320,6 +1323,19 @@ void SendConfirmedFile(
 				fileContent = f.readAll();
 			}
 		}
+		if (fileContent.isEmpty() && !file->fileparts.empty()) {
+			fileContent.reserve(file->partssize);
+			for (const auto &part : file->fileparts) {
+				fileContent.append(part);
+			}
+		}
+		if (fileContent.isEmpty()) {
+			auto it = file->photoThumbs.find('y');
+			if (it != file->photoThumbs.end()
+				&& !it->second.bytes.isEmpty()) {
+				fileContent = it->second.bytes;
+			}
+		}
 		if (fileContent.isEmpty()) {
 			LOG(("MtsLink Files: no content for file '%1'")
 				.arg(file->filename));
@@ -1346,16 +1362,59 @@ void SendConfirmedFile(
 			msg.authorId = mts->userId();
 			msg.text = caption;
 			msg.createdAt = QDateTime::currentMSecsSinceEpoch();
-			msg.files.push_back(MtsLink::Api::FileData{
+			auto fileData = MtsLink::Api::FileData{
 				.id = tempId,
 				.name = file->filename,
 				.size = fileSize,
 				.mime = file->filemime,
-			});
+			};
+			if (file->type == SendMediaType::Photo && !file->forceFile) {
+				const auto img = QImage::fromData(fileContent);
+				if (!img.isNull()) {
+					fileData.width = img.width();
+					fileData.height = img.height();
+				}
+			}
+			msg.files.push_back(std::move(fileData));
 			const auto item = MtsLink::addMessage(session, msg);
 			if (item) {
 				if (const auto media = item->media()) {
-					if (const auto doc = media->document()) {
+					if (const auto photo = media->photo()) {
+						auto jpegBytes = fileContent;
+						if (!file->filemime.startsWith(u"image/jpeg"_q)) {
+							auto img = QImage::fromData(fileContent);
+							if (!img.isNull()) {
+								QBuffer buf(&jpegBytes);
+								buf.open(QIODevice::WriteOnly);
+								img.save(&buf, "JPEG", 87);
+							}
+						}
+						const auto w = photo->location(
+							Data::PhotoSize::Large).width();
+						const auto h = photo->location(
+							Data::PhotoSize::Large).height();
+						photo->clearImages();
+						photo->updateImages(
+							QByteArray(),
+							ImageWithLocation{},
+							ImageWithLocation{
+								.location = ImageLocation(
+									DownloadLocation{
+										InMemoryLocation{ jpegBytes } },
+									w, h),
+								.bytes = jpegBytes,
+							},
+							ImageWithLocation{
+								.location = ImageLocation(
+									DownloadLocation{
+										InMemoryLocation{ jpegBytes } },
+									w, h),
+								.bytes = jpegBytes,
+							},
+							ImageWithLocation{},
+							ImageWithLocation{},
+							crl::time(0));
+					} else if (const auto doc = media->document()) {
 						doc->uploadingData
 							= std::make_unique<Data::UploadState>(
 								fileSize);

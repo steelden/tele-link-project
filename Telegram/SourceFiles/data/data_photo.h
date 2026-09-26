@@ -117,6 +117,11 @@ public:
 	void clearInlineThumbnailBytes() {
 		_inlineThumbnailBytes = QByteArray();
 	}
+	void clearImages() {
+		for (auto &img : _images) {
+			img.clear();
+		}
+	}
 
 	void load(
 		Data::FileOrigin origin,
