@@ -22,6 +22,7 @@ class HistoryTranslation;
 class HistoryItem;
 struct HistoryItemCommonFields;
 struct HistoryMessageMarkupData;
+struct PreparedServiceText;
 class HistoryMainElementDelegateMixin;
 class HistoryStreamedDrafts;
 struct LanguageId;
@@ -187,6 +188,10 @@ public:
 		HistoryItemCommonFields &&fields,
 		const TextWithEntities &text,
 		const MTPMessageMedia &media);
+	not_null<HistoryItem*> addNewExternalServiceMessage(
+		HistoryItemCommonFields &&fields,
+		PreparedServiceText &&message,
+		PhotoData *photo = nullptr);
 	void reattachToBlock(not_null<HistoryItem*> item);
 	void clearFirstUnreadMessage();
 

@@ -14,6 +14,10 @@ Bridges MTS Link API data into tdesktop's data model
 
 #include <QtNetwork/QNetworkCookie>
 
+namespace Ui {
+struct GroupCallBarContent;
+} // namespace Ui
+
 namespace Main {
 class Session;
 } // namespace Main
@@ -179,5 +183,13 @@ void setEmojiIdMapping(const QString &emojiId, const QString &emoji);
 void handleMtsLinkUrl(
 	const QString &url,
 	const QVariant &context);
+
+void setActiveCall(
+	not_null<Main::Session*> session,
+	PeerId peerId,
+	const QString &joinLink);
+[[nodiscard]] QString activeCallJoinLink(PeerId peerId);
+[[nodiscard]] rpl::producer<Ui::GroupCallBarContent> activeCallBarContent(
+	PeerId peerId);
 
 } // namespace MtsLink

@@ -203,6 +203,8 @@ public:
 
 	void updateServiceText(PreparedServiceText &&text);
 	void updateStoryMentionText();
+	void setOngoingCallLink(ClickHandlerPtr link);
+	void clearOngoingCallLink();
 
 	[[nodiscard]] UserData *viaBot() const;
 	[[nodiscard]] bool isGuestChatBotMessage() const;

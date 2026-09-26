@@ -22,7 +22,9 @@ based on Telegram Desktop.
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
+#include "history/history_item_helpers.h"
 #include "history/history_item_reply_markup.h"
+#include "lang/lang_keys.h"
 #include "history/view/history_view_send_action.h"
 #include "dialogs/dialogs_main_list.h"
 #include "data/data_lastseen_status.h"
@@ -35,6 +37,8 @@ based on Telegram Desktop.
 #include "base/random.h"
 #include "ui/image/image_location.h"
 #include "ui/text/text_entity.h"
+#include "ui/chat/group_call_bar.h"
+#include "ui/chat/group_call_userpics.h"
 #include "storage/cache/storage_cache_database.h"
 #include "storage/storage_shared_media.h"
 
@@ -78,6 +82,9 @@ QList<QNetworkCookie> FileAuthCookies;
 QHash<QString, QString> EmojiToIdMap;
 QHash<QString, QString> IdToEmojiMap;
 bool EmojiMapsInitialized = false;
+
+QHash<PeerId, QString> ActiveCallLinks;
+rpl::event_stream<PeerId> ActiveCallChanges;
 
 QString emojiMapFilePath() {
 	return cWorkingDir() + u"tdata/mtslink_emoji_map.json"_q;
@@ -892,6 +899,34 @@ QString markdownFromBlocks(const QJsonArray &blocks) {
 	return md;
 }
 
+PreparedServiceText buildCallServiceText(
+		const QString &status,
+		int durationSec) {
+	auto result = PreparedServiceText();
+	if (status == "Ended" && durationSec > 0) {
+		const auto days = durationSec / 86400;
+		const auto hours = durationSec / 3600;
+		const auto minutes = durationSec / 60;
+		auto text = (days > 1)
+			? tr::lng_days(tr::now, lt_count, days)
+			: (hours > 1)
+			? tr::lng_hours(tr::now, lt_count, hours)
+			: (minutes > 1)
+			? tr::lng_minutes(tr::now, lt_count, minutes)
+			: tr::lng_seconds(tr::now, lt_count, durationSec);
+		result.text = tr::lng_action_group_call_finished(
+			tr::now,
+			lt_duration,
+			{ .text = text },
+			tr::marked);
+	} else {
+		result.text = tr::lng_action_group_call_started_channel(
+			tr::now,
+			tr::marked);
+	}
+	return result;
+}
+
 } // namespace
 
 void handleNotificationEvent(
@@ -985,6 +1020,20 @@ void connectToSession(
 					hasCachedMessages ? &newerItems : nullptr);
 				if (item) {
 					++addedCount;
+				}
+			}
+			// Set active call state from the newest Call message only.
+			// messages[0] is the newest (server returns newest-first).
+			for (int ci = 0; ci < messages.size(); ++ci) {
+				const auto &cm = messages[ci];
+				if (cm.type == MessageType::Call && cm.callMeta) {
+					if (cm.callMeta->status == "Started"
+						&& !cm.callMeta->joinLink.isEmpty()) {
+						setActiveCall(mainSession, peerId, cm.callMeta->joinLink);
+					} else {
+						setActiveCall(mainSession, peerId, QString());
+					}
+					break;
 				}
 			}
 			if (!newerItems.empty()) {
@@ -1449,6 +1498,7 @@ void applyChannelData(
 	if (src.memberCount > 0) {
 		channel->setMembersCount(src.memberCount);
 	}
+	channel->setLoadedStatus(PeerData::LoadedStatus::Normal);
 	channel->setAllowedReactions({
 		.maxCount = 100,
 		.type = Data::AllowedReactionsType::All,
@@ -1552,6 +1602,9 @@ HistoryItem *addMessage(
 	if (src.isDeleted) {
 		return nullptr;
 	}
+	if (src.type == MessageType::Call && !src.callMeta) {
+		return nullptr;
+	}
 	const auto chatPeerId = chatIdToPeerId(src.chatId);
 
 	const auto history = session->data().history(chatPeerId);
@@ -1571,7 +1624,9 @@ HistoryItem *addMessage(
 		members.push_back(fromBareId);
 	}
 
-	auto flags = MessageFlags(MessageFlag::HasFromId);
+	auto flags = (src.type == MessageType::Call)
+		? MessageFlags(0)
+		: MessageFlags(MessageFlag::HasFromId);
 	const auto mts = session->account().mtsLinkSession();
 	if (mts && src.authorId == mts->userId()) {
 		flags |= MessageFlag::Outgoing;
@@ -1652,13 +1707,6 @@ HistoryItem *addMessage(
 
 	const auto existing = session->data().message(chatPeerId, msgId);
 	if (existing) {
-		LOG(("MtsLink addMessage: EXISTING id=%1 msgId=%2 date=%3")
-			.arg(src.id).arg(msgId.bare).arg(date));
-	} else {
-		LOG(("MtsLink addMessage: NEW id=%1 msgId=%2 date=%3")
-			.arg(src.id).arg(msgId.bare).arg(date));
-	}
-	if (existing) {
 		if (!src.mentions.isEmpty()) {
 			existing->setText(text);
 			session->data().requestItemTextRefresh(existing);
@@ -1693,6 +1741,36 @@ HistoryItem *addMessage(
 			}
 		}
 		return existing;
+	}
+
+	if (src.type == MessageType::Call && src.callMeta) {
+		auto serviceText = buildCallServiceText(
+			src.callMeta->status, src.callMeta->duration);
+		const auto item = (threadOnly || batchItems)
+			? history->makeMessage(
+				std::move(fields),
+				std::move(serviceText))
+			: history->addNewExternalServiceMessage(
+				std::move(fields),
+				std::move(serviceText));
+		if (item && batchItems) {
+			batchItems->push_back(item);
+		}
+		if (item && src.callMeta->status == "Started"
+			&& !src.callMeta->joinLink.isEmpty()) {
+			const auto joinUrl = src.callMeta->joinLink;
+			item->setOngoingCallLink(
+				std::make_shared<LambdaClickHandler>([joinUrl] {
+					File::OpenUrl(joinUrl);
+				}));
+			setActiveCall(session, chatPeerId, src.callMeta->joinLink);
+		}
+		if (item && threadOnly) {
+			session->changes().messageUpdated(
+				item,
+				Data::MessageUpdate::Flag::NewMaybeAdded);
+		}
+		return item;
 	}
 
 	const auto multiFile = (src.files.size() > 1);
@@ -1814,6 +1892,9 @@ bool addOlderMessages(
 		if (src.isDeleted) {
 			continue;
 		}
+		if (src.type == MessageType::Call && !src.callMeta) {
+			continue;
+		}
 		const auto msgBareId = uuidToBareId(src.id);
 		const auto msgId = MsgId(msgBareId & 0x7FFFFFFFLL);
 
@@ -1832,7 +1913,9 @@ bool addOlderMessages(
 			members.push_back(fromBareId);
 		}
 
-		auto flags = MessageFlags(MessageFlag::HasFromId);
+		auto flags = (src.type == MessageType::Call)
+			? MessageFlags(0)
+			: MessageFlags(MessageFlag::HasFromId);
 		const auto mts = session->account().mtsLinkSession();
 		if (mts && src.authorId == mts->userId()) {
 			flags |= MessageFlag::Outgoing;
@@ -1885,6 +1968,24 @@ bool addOlderMessages(
 
 		registerMessageId(chatPeerId, msgId, src.id);
 
+		if (src.type == MessageType::Call && src.callMeta) {
+			auto serviceText = buildCallServiceText(
+				src.callMeta->status, src.callMeta->duration);
+			const auto callItem = history->makeMessage(
+				std::move(fields),
+				std::move(serviceText));
+			if (callItem && src.callMeta->status == "Started"
+				&& !src.callMeta->joinLink.isEmpty()) {
+				const auto joinUrl = src.callMeta->joinLink;
+				callItem->setOngoingCallLink(
+					std::make_shared<LambdaClickHandler>([joinUrl] {
+						File::OpenUrl(joinUrl);
+					}));
+			}
+			items.push_back(callItem);
+			continue;
+		}
+
 		const auto multiFile = (src.files.size() > 1);
 		if (multiFile) {
 			fields.groupedId = msgBareId;
@@ -1926,6 +2027,20 @@ bool addOlderMessages(
 					items.push_back(extra);
 				}
 			}
+		}
+	}
+
+	// Set active call state from the newest Call message only.
+	// messages[0] is the newest (server/cache sends newest-first).
+	for (const auto &cm : messages) {
+		if (cm.type == MessageType::Call && cm.callMeta) {
+			if (cm.callMeta->status == "Started"
+				&& !cm.callMeta->joinLink.isEmpty()) {
+				setActiveCall(session, chatPeerId, cm.callMeta->joinLink);
+			} else {
+				setActiveCall(session, chatPeerId, QString());
+			}
+			break;
 		}
 	}
 
@@ -2089,6 +2204,17 @@ void handleChatEvent(
 				};
 			}
 		}
+		if (msg.type == MessageType::Call) {
+			const auto metaObj = m.value("metadata").toObject();
+			if (metaObj.value("type").toString() == "CallMetadata") {
+				const auto mv = metaObj.value("value").toObject();
+				msg.callMeta = Api::CallMetadata{
+					.status = mv.value("status").toString(),
+					.joinLink = mv.value("joinLink").toString(),
+					.duration = int(mv.value("duration").toDouble() / 1000),
+				};
+			}
+		}
 		{
 			auto mentionsArr = m.value("metadata").toObject()
 				.value("value").toObject()
@@ -2120,6 +2246,17 @@ void handleChatEvent(
 				.width = meta.value("width").toInt(),
 				.height = meta.value("height").toInt(),
 			});
+		}
+		if (msg.type == MessageType::Call) {
+			const auto meta = m.value("metadata").toObject();
+			if (meta.value("type").toString() == "CallMetadata") {
+				const auto v = meta.value("value").toObject();
+				msg.callMeta = Api::CallMetadata{
+					.status = v.value("status").toString(),
+					.joinLink = v.value("joinLink").toString(),
+					.duration = int(v.value("duration").toDouble() / 1000),
+				};
+			}
 		}
 		const auto clientId = m.value("clientId").toString();
 		const auto isThreadReply = takePendingThreadSend(clientId);
@@ -2370,6 +2507,75 @@ void handleChatEvent(
 			if (isNew) {
 				saveEmojiMaps();
 			}
+		}
+	} else if (type == "MessageUpdatedEvent") {
+		const auto updated = value.value("updated").toObject();
+		if (updated.value("type").toString() == "Call") {
+			const auto messageId = updated.value("id").toString();
+			if (messageId.isEmpty()) {
+				return;
+			}
+			const auto meta = updated.value("metadata").toObject();
+			if (meta.value("type").toString() != "CallMetadata") {
+				return;
+			}
+			const auto mv = meta.value("value").toObject();
+			const auto status = mv.value("status").toString();
+			const auto duration = int(mv.value("duration").toDouble() / 1000);
+			const auto joinLink = mv.value("joinLink").toString();
+			const auto chatPeerId = chatIdToPeerId(chatId);
+			const auto msgBareId = uuidToBareId(messageId);
+			const auto msgId = MsgId(msgBareId & 0x7FFFFFFFLL);
+			const auto item = session->data().message(chatPeerId, msgId);
+			if (status == "Ended") {
+				setActiveCall(session, chatPeerId, QString());
+			} else if (status == "Started"
+				&& !joinLink.isEmpty()) {
+				setActiveCall(session, chatPeerId, joinLink);
+			}
+			if (item) {
+				item->updateServiceText(
+					buildCallServiceText(status, duration));
+				if (status == "Ended") {
+					item->clearOngoingCallLink();
+				} else if (status == "Started"
+					&& !joinLink.isEmpty()) {
+					item->setOngoingCallLink(
+						std::make_shared<LambdaClickHandler>(
+							[joinLink] { File::OpenUrl(joinLink); }));
+				}
+				session->data().requestItemViewRefresh(item);
+			}
+		}
+	} else if (type == "CallStatusUpdatedEvent") {
+		const auto messageId = value.value("messageId").toString();
+		if (messageId.isEmpty()) {
+			return;
+		}
+		const auto meta = value.value("metadata").toObject();
+		const auto status = meta.value("status").toString();
+		const auto duration = int(meta.value("duration").toDouble() / 1000);
+		const auto joinLink = meta.value("joinLink").toString();
+		const auto chatPeerId = chatIdToPeerId(chatId);
+		if (status == "Ended") {
+			setActiveCall(session, chatPeerId, QString());
+		} else if (status == "Started" && !joinLink.isEmpty()) {
+			setActiveCall(session, chatPeerId, joinLink);
+		}
+		const auto msgBareId = uuidToBareId(messageId);
+		const auto msgId = MsgId(msgBareId & 0x7FFFFFFFLL);
+		const auto item = session->data().message(chatPeerId, msgId);
+		if (item) {
+			item->updateServiceText(
+				buildCallServiceText(status, duration));
+			if (status == "Ended") {
+				item->clearOngoingCallLink();
+			} else if (status == "Started" && !joinLink.isEmpty()) {
+				item->setOngoingCallLink(
+					std::make_shared<LambdaClickHandler>(
+						[joinLink] { File::OpenUrl(joinLink); }));
+			}
+			session->data().requestItemViewRefresh(item);
 		}
 	}
 }
@@ -2688,9 +2894,23 @@ QByteArray serializeMessages(
 	QDataStream s(&result, QIODevice::WriteOnly);
 	s.setVersion(QDataStream::Qt_5_1);
 
-	s << qint32(1); // format version
-	s << qint32(messages.size());
+	s << qint32(2); // format version
+	qint32 msgCount = 0;
 	for (const auto &m : messages) {
+		if (m.type == MessageType::Call
+			&& m.callMeta
+			&& m.callMeta->status == "Started") {
+			continue;
+		}
+		++msgCount;
+	}
+	s << msgCount;
+	for (const auto &m : messages) {
+		if (m.type == MessageType::Call
+			&& m.callMeta
+			&& m.callMeta->status == "Started") {
+			continue;
+		}
 		s << m.id << m.chatId << m.authorId
 			<< m.text << m.markdown
 			<< qint32(int(m.type))
@@ -2716,6 +2936,11 @@ QByteArray serializeMessages(
 		if (m.forward) {
 			s << m.forward->authorId << m.forward->messageId
 				<< m.forward->chatId << m.forward->createdAt;
+		}
+		s << m.callMeta.has_value();
+		if (m.callMeta) {
+			s << m.callMeta->status << m.callMeta->joinLink
+				<< qint32(m.callMeta->duration);
 		}
 	}
 	s << qint32(profiles.size());
@@ -2743,7 +2968,8 @@ std::optional<CachedMessages> deserializeMessages(const QByteArray &data) {
 
 	qint32 version = 0;
 	s >> version;
-	if (version != 1) {
+	// version 2 adds callMeta
+	if (version < 1 || version > 2) {
 		return std::nullopt;
 	}
 
@@ -2802,6 +3028,17 @@ std::optional<CachedMessages> deserializeMessages(const QByteArray &data) {
 			s >> fwd.authorId >> fwd.messageId
 				>> fwd.chatId >> fwd.createdAt;
 			m.forward = std::move(fwd);
+		}
+		if (version >= 2) {
+			bool hasCallMeta = false;
+			s >> hasCallMeta;
+			if (hasCallMeta) {
+				Api::CallMetadata cm;
+				qint32 dur = 0;
+				s >> cm.status >> cm.joinLink >> dur;
+				cm.duration = dur;
+				m.callMeta = std::move(cm);
+			}
 		}
 		if (s.status() != QDataStream::Ok) {
 			return std::nullopt;
@@ -3455,6 +3692,64 @@ void handleMtsLinkUrl(
 		[url](const QString &) {
 			File::OpenUrl(url);
 		});
+}
+
+void setActiveCall(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		const QString &joinLink) {
+	if (joinLink.isEmpty()) {
+		if (ActiveCallLinks.remove(peerId)) {
+			ActiveCallChanges.fire_copy(peerId);
+			if (peerIsChannel(peerId)) {
+				if (const auto channel = session->data().channelLoaded(
+						peerToChannel(peerId))) {
+					using Flag = ChannelDataFlag;
+					channel->removeFlags(
+						Flag::CallActive | Flag::CallNotEmpty);
+					session->changes().peerUpdated(
+						channel,
+						Data::PeerUpdate::Flag::GroupCall);
+				}
+			}
+		}
+	} else {
+		auto &existing = ActiveCallLinks[peerId];
+		if (existing != joinLink) {
+			existing = joinLink;
+			ActiveCallChanges.fire_copy(peerId);
+			if (peerIsChannel(peerId)) {
+				const auto channel = session->data().channelLoaded(
+						peerToChannel(peerId));
+				if (channel) {
+					using Flag = ChannelDataFlag;
+					channel->addFlags(
+						Flag::CallActive | Flag::CallNotEmpty);
+					session->changes().peerUpdated(
+						channel,
+						Data::PeerUpdate::Flag::GroupCall);
+				}
+			}
+		}
+	}
+}
+
+QString activeCallJoinLink(PeerId peerId) {
+	return ActiveCallLinks.value(peerId);
+}
+
+rpl::producer<Ui::GroupCallBarContent> activeCallBarContent(PeerId peerId) {
+	return ActiveCallChanges.events_starting_with_copy(
+		peerId
+	) | rpl::filter([=](PeerId id) {
+		return id == peerId;
+	}) | rpl::map([=] {
+		const auto hasCall = ActiveCallLinks.contains(peerId);
+		return Ui::GroupCallBarContent{
+			.count = hasCall ? 1 : 0,
+			.shown = hasCall,
+		};
+	});
 }
 
 } // namespace MtsLink

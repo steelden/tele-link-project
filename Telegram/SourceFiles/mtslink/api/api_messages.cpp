@@ -130,19 +130,37 @@ MessageData Messages::parseMessage(const QJsonObject &obj) const {
 		});
 	}
 
+	const auto msgType = [&] {
+		const auto t = obj.value("type").toString();
+		if (t == "Call") return MessageType::Call;
+		if (t == "System") return MessageType::System;
+		if (t == "Forward") return MessageType::Forward;
+		return MessageType::Text;
+	}();
+
+	auto callMeta = [&]() -> std::optional<CallMetadata> {
+		if (msgType != MessageType::Call) {
+			return std::nullopt;
+		}
+		const auto meta = obj.value("metadata").toObject();
+		if (meta.value("type").toString() != "CallMetadata") {
+			return std::nullopt;
+		}
+		const auto v = meta.value("value").toObject();
+		return CallMetadata{
+			.status = v.value("status").toString(),
+			.joinLink = v.value("joinLink").toString(),
+			.duration = int(v.value("duration").toDouble() / 1000),
+		};
+	}();
+
 	return {
 		.id = obj.value("id").toString(),
 		.chatId = obj.value("chatId").toString(),
 		.authorId = obj.value("authorId").toString(),
 		.text = obj.value("text").toString(),
 		.markdown = obj.value("markdown").toString(),
-		.type = [&] {
-			const auto t = obj.value("type").toString();
-			if (t == "Call") return MessageType::Call;
-			if (t == "System") return MessageType::System;
-			if (t == "Forward") return MessageType::Forward;
-			return MessageType::Text;
-		}(),
+		.type = msgType,
 		.blocks = obj.value("blocks").toArray(),
 		.files = files,
 		.mentions = mentions,
@@ -170,6 +188,7 @@ MessageData Messages::parseMessage(const QJsonObject &obj) const {
 				.createdAt = qint64(fwd.value("createdAt").toDouble()),
 			};
 		}(),
+		.callMeta = std::move(callMeta),
 	};
 }
 

@@ -812,8 +812,7 @@ TextState Service::textState(QPoint point, StateRequest request) const {
 			} else if (const auto payment = item->Get<HistoryServicePayment>()) {
 				result.link = payment->invoiceLink;
 			} else if (const auto call = item->Get<HistoryServiceOngoingCall>()) {
-				const auto peer = history()->peer;
-				if (PeerHasThisCall(peer, call->id).value_or(false)) {
+				if (call->link) {
 					result.link = call->link;
 				}
 			} else if (const auto theme = item->Get<HistoryServiceChatThemeChange>()) {

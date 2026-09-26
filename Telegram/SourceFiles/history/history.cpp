@@ -942,6 +942,15 @@ not_null<HistoryItem*> History::addNewExternalMessage(
 		true);
 }
 
+not_null<HistoryItem*> History::addNewExternalServiceMessage(
+		HistoryItemCommonFields &&fields,
+		PreparedServiceText &&message,
+		PhotoData *photo) {
+	return addNewItem(
+		makeMessage(std::move(fields), std::move(message), photo),
+		true);
+}
+
 void History::clearFirstUnreadMessage() {
 	_firstUnreadView = nullptr;
 }

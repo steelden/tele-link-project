@@ -1493,6 +1493,16 @@ void HistoryItem::updateServiceText(PreparedServiceText &&text) {
 	_history->owner().updateDependentMessages(this);
 }
 
+void HistoryItem::setOngoingCallLink(ClickHandlerPtr link) {
+	AddComponents(HistoryServiceOngoingCall::Bit());
+	const auto call = Get<HistoryServiceOngoingCall>();
+	call->link = std::move(link);
+}
+
+void HistoryItem::clearOngoingCallLink() {
+	RemoveComponents(HistoryServiceOngoingCall::Bit());
+}
+
 void HistoryItem::updateStoryMentionText() {
 	setServiceText(prepareStoryMentionText());
 }

@@ -9933,16 +9933,9 @@ void HistoryWidget::setupGroupCallBar() {
 	Expects(_history != nullptr);
 
 	const auto peer = _history->peer;
-	if (!peer->isChannel() && !peer->isChat()) {
-		_groupCallBar = nullptr;
-		return;
-	}
 	_groupCallBar = std::make_unique<Ui::GroupCallBar>(
 		_topBars.get(),
-		HistoryView::GroupCallBarContentByPeer(
-			peer,
-			st::historyGroupCallUserpics.size,
-			false),
+		MtsLink::activeCallBarContent(peer->id),
 		Core::App().appDeactivatedValue());
 
 	controller()->adaptive().oneColumnValue(
@@ -9959,9 +9952,9 @@ void HistoryWidget::setupGroupCallBar() {
 		_groupCallBar->barClicks(),
 		_groupCallBar->joinClicks()
 	) | rpl::on_next([=] {
-		const auto peer = _history->peer;
-		if (peer->groupCall()) {
-			controller()->startOrJoinGroupCall(peer, {});
+		const auto link = MtsLink::activeCallJoinLink(peer->id);
+		if (!link.isEmpty()) {
+			File::OpenUrl(link);
 		}
 	}, _groupCallBar->lifetime());
 

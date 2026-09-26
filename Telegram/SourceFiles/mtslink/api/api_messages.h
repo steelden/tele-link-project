@@ -62,6 +62,12 @@ struct ForwardInfo {
 	qint64 createdAt = 0;
 };
 
+struct CallMetadata {
+	QString status;
+	QString joinLink;
+	int duration = 0;
+};
+
 struct MessageData {
 	MessageId id;
 	ChatId chatId;
@@ -81,6 +87,7 @@ struct MessageData {
 	int threadChildrenCount = 0;
 	int threadUnreadCount = 0;
 	std::optional<ForwardInfo> forward;
+	std::optional<CallMetadata> callMeta;
 };
 
 class Messages final : public QObject {

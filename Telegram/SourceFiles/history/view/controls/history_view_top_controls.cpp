@@ -48,6 +48,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/popup_menu.h"
 #include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
+#include "core/file_utilities.h"
+#include "mtslink/data_adapters.h"
 
 namespace HistoryView {
 namespace {
@@ -467,15 +469,10 @@ void TopControls::setupTranslateBar() {
 
 void TopControls::setupGroupCallBar() {
 	const auto peer = _history->peer;
-	if (!peer->isChannel() && !peer->isChat()) {
-		return;
-	}
+	LOG(("MtsLink Call: setupGroupCallBar for peer=%1").arg(peer->id.value));
 	_groupCallBar = std::make_unique<Ui::GroupCallBar>(
 		_topBars.get(),
-		GroupCallBarContentByPeer(
-			peer,
-			st::historyGroupCallUserpics.size,
-			showInForum()),
+		MtsLink::activeCallBarContent(peer->id),
 		Core::App().appDeactivatedValue());
 
 	_controller->adaptive().oneColumnValue(
@@ -492,8 +489,9 @@ void TopControls::setupGroupCallBar() {
 		_groupCallBar->barClicks(),
 		_groupCallBar->joinClicks()
 	) | rpl::on_next([=] {
-		if (const auto peer = _history->peer; peer->groupCall()) {
-			_controller->startOrJoinGroupCall(peer, {});
+		const auto link = MtsLink::activeCallJoinLink(peer->id);
+		if (!link.isEmpty()) {
+			File::OpenUrl(link);
 		}
 	}, _groupCallBar->lifetime());
 
