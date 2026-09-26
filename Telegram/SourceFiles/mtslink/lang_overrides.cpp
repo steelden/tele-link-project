@@ -6,32 +6,33 @@ a desktop application based on Telegram Desktop.
 
 #include "lang/lang_instance.h"
 
+#include <QtCore/QFile>
+
 namespace MtsLink {
-namespace {
-
-struct LangOverride {
-	const char *lang;
-	const char *key;
-	const char *value;
-};
-
-const LangOverride kOverrides[] = {
-	{ "ru", "lng_saved_messages", "\xd0\x98\xd0\xb7\xd0\xb1\xd1\x80\xd0\xb0\xd0\xbd\xd0\xbd\xd0\xbe\xd0\xb5" },
-};
-
-} // namespace
 
 void applyLangOverrides() {
 	auto &instance = Lang::GetInstance();
 	const auto langId = instance.id();
+	LOG(("MtsLink Lang: id='%1'").arg(langId));
 
-	for (const auto &o : kOverrides) {
-		if (langId.startsWith(QLatin1String(o.lang))) {
-			instance.overrideValue(
-				QByteArray(o.key),
-				QByteArray(o.value));
-		}
+	if (!langId.startsWith(u"ru"_q)) {
+		return;
 	}
+
+	QFile file(u":/langs/ru.strings"_q);
+	if (!file.open(QIODevice::ReadOnly)) {
+		LOG(("MtsLink: ru.strings resource not found"));
+		return;
+	}
+	const auto content = file.readAll();
+	if (content.isEmpty()) {
+		return;
+	}
+
+	instance.loadFromContent(content);
+	instance.notifyUpdated();
+	LOG(("MtsLink: Applied Russian localization (%1 bytes)")
+		.arg(content.size()));
 }
 
 } // namespace MtsLink

@@ -94,6 +94,8 @@ public:
 	}
 	QString getNonDefaultValue(const QByteArray &key) const;
 	void overrideValue(const QByteArray &key, const QByteArray &value);
+	void loadFromContent(const QByteArray &content);
+	void notifyUpdated();
 	bool isNonDefaultPlural(ushort key) const {
 		Expects(key + 5 < _nonDefaultSet.size());
 
@@ -118,7 +120,6 @@ private:
 		const QString &relativePath,
 		const QByteArray &content);
 	bool loadFromCustomFile(const QString &filePath);
-	void loadFromContent(const QByteArray &content);
 	void loadFromCustomContent(
 		const QString &absolutePath,
 		const QString &relativePath,

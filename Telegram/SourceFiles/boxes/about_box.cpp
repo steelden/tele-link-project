@@ -38,7 +38,7 @@ namespace {
 rpl::producer<TextWithEntities> Text1() {
 	return tr::lng_about_text1(
 		lt_api_link,
-		tr::lng_about_text1_api(tr::url(u"https://github.com/steelden/tele-link-project"_q)),
+		tr::lng_about_text1_api(tr::url(u"https://mts-link.ru"_q)),
 		tr::marked);
 }
 
@@ -98,7 +98,6 @@ void AboutBox(not_null<Ui::GenericBox*> box) {
 
 	addText(Text1());
 	addText(Text2());
-	addText(Text3());
 
 	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 
