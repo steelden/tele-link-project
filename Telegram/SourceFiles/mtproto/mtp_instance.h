@@ -221,9 +221,6 @@ public:
 			afterRequestId);
 	}
 
-	void setSuppressed(bool suppressed);
-	[[nodiscard]] bool isSuppressed() const;
-
 	[[nodiscard]] rpl::lifetime &lifetime();
 
 Q_SIGNALS:
@@ -244,7 +241,6 @@ private:
 
 	class Private;
 	const std::unique_ptr<Private> _private;
-	bool _suppressed = false;
 
 };
 
