@@ -386,7 +386,7 @@ MainMenu::MainMenu(
 
 	_telegram->setMarkedText(tr::link(
 		u"TeleLink"_q,
-		u"https://desktop.telegram.org"_q));
+		u"https://github.com/steelden/tele-link-project"_q));
 	_telegram->setLinksTrusted();
 	// The canary version is too long for the "Version {version}" form.
 	_version->setMarkedText(
