@@ -78,9 +78,11 @@ bool DarkTasbarValueValid/* = false*/;
 	static auto ColoredDark = QImage();
 	auto &use = darkMode ? ColoredDark : Colored;
 	if (use.size() != Mask.size()) {
-		const auto color = darkMode ? 255 : 0;
-		const auto alpha = darkMode ? 255 : 228;
-		use = style::colorizeImage(Mask, { color, color, color, alpha });
+		if (darkMode) {
+			use = style::colorizeImage(Mask, { 255, 60, 80, 255 });
+		} else {
+			use = style::colorizeImage(Mask, { 220, 0, 40, 228 });
+		}
 	}
 	return use;
 }
