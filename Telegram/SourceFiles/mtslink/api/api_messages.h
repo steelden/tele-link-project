@@ -103,6 +103,7 @@ public:
 		int limit = 50);
 
 	void loadPinned(const ChatId &chatId, int limit = 50);
+	void reloadPinned(const ChatId &chatId);
 
 	void loadThread(
 		const ChatId &chatId,
@@ -157,6 +158,7 @@ private:
 	Rpc *_rpc = nullptr;
 	QSet<ChatId> _loadingChats;
 	QSet<ChatId> _failedChats;
+	QSet<ChatId> _loadingPinnedChats;
 };
 
 } // namespace MtsLink::Api

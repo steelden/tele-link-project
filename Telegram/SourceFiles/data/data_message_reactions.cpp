@@ -114,11 +114,7 @@ constexpr auto kPaidAccumulatePeriod = 5 * crl::time(1000) + 500;
 }
 
 [[nodiscard]] int SentReactionsLimit(not_null<HistoryItem*> item) {
-	const auto session = &item->history()->session();
-	const auto config = &session->appConfig();
-	return session->premium()
-		? config->get<int>("reactions_user_max_premium", 3)
-		: config->get<int>("reactions_user_max_default", 1);
+	return 11;
 }
 
 [[nodiscard]] bool IsMyRecent(
@@ -755,7 +751,10 @@ void Reactions::preloadImageFor(const ReactionId &id) {
 			preloadEffect(*i);
 		}
 	} else if (!set.effect && !id.emoji().isEmpty()) {
-		const auto e = Ui::Emoji::Find(id.emoji());
+		auto e = Ui::Emoji::Find(id.emoji());
+		if (!e && id.emoji().startsWith(u"1ee90646-"_q)) {
+			e = Ui::Emoji::Find(QString::fromUtf8("\xe2\x9d\x93"));
+		}
 		if (e) {
 			const auto large = Ui::Emoji::GetSizeLarge();
 			const auto factor = style::DevicePixelRatio();
@@ -1573,6 +1572,7 @@ void Reactions::send(
 			const auto mtsId = MtsLink::msgIdToMtsLinkId(
 				item->history()->peer->id, item->id);
 			if (!chatId.isEmpty() && !mtsId.isEmpty()) {
+				_mtsLinkSending.emplace(item->fullId());
 				if (!removedReaction.empty()
 					&& !removedReaction.emoji().isEmpty()) {
 					const auto eid = MtsLink::emojiToId(
@@ -1846,7 +1846,12 @@ void Reactions::pollCollected() {
 
 bool Reactions::sending(not_null<HistoryItem*> item) const {
 	return _sentRequests.contains(item->fullId())
+		|| _mtsLinkSending.contains(item->fullId())
 		|| _sendingPaid.contains(item);
+}
+
+void Reactions::clearMtsLinkSending(not_null<HistoryItem*> item) {
+	_mtsLinkSending.remove(item->fullId());
 }
 
 bool Reactions::HasUnread(const MTPMessageReactions &data) {
