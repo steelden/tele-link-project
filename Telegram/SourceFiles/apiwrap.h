@@ -184,9 +184,7 @@ public:
 	void requestMessageData(PeerData *peer, MsgId msgId, Fn<void()> done);
 	QString exportDirectMessageLink(
 		not_null<HistoryItem*> item,
-		bool inRepliesContext,
-		bool forceNonPublicLink = false,
-		std::optional<TimeId> videoTimestamp = {});
+		bool inRepliesContext = false);
 	QString exportDirectStoryLink(not_null<Data::Story*> item);
 
 	void requestContacts();

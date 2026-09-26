@@ -311,6 +311,7 @@ private:
 	void addStoryArchive();
 	void addNewWindow(bool addSeparator = true);
 	void addUngroup();
+	void addCopyLink();
 	void addToggleFolder();
 	void addToggleUnreadMark();
 	void addToggleArchive();
@@ -1234,6 +1235,26 @@ void Filler::addDeleteTopic() {
 	});
 }
 
+void Filler::addCopyLink() {
+	if (!_peer) {
+		return;
+	}
+	const auto peerId = _peer->id;
+	const auto link = MtsLink::buildChatLink(peerId);
+	if (link.isEmpty()) {
+		return;
+	}
+	const auto controller = _controller;
+	_addAction(tr::lng_context_copy_link(tr::now), [=] {
+		MtsLink::shortenAndCopy(&controller->session(), link);
+		controller->showToast({
+			.text = { tr::lng_channel_public_link_copied(tr::now) },
+			.iconLottie = u"toast/voip_invite"_q,
+			.iconLottieSize = st::toastLottieIconSize,
+		});
+	}, &st::menuIconLink);
+}
+
 void Filler::addTopicLink() {
 	if (!_topic || _topic->creating()) {
 		return;
@@ -1899,6 +1920,7 @@ void Filler::addVideoChat() {
 
 void Filler::fillContextMenuActions() {
 	addNewWindow();
+	addCopyLink();
 	addUngroup();
 	addHidePromotion();
 	addToggleArchive();

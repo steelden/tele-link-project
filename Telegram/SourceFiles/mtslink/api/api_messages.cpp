@@ -25,10 +25,6 @@ void Messages::load(
 		param["direction"] = QStringLiteral("Before");
 	}
 
-	LOG(("MtsLink Paging: RPC params=%1")
-		.arg(QString::fromUtf8(
-			QJsonDocument(param).toJson(QJsonDocument::Compact))));
-
 	const auto isOlder = !fromMessageId.isEmpty();
 	_loadingChats.insert(chatId);
 	auto *timer = new QTimer(this);
@@ -45,21 +41,8 @@ void Messages::load(
 			timer->stop();
 			timer->deleteLater();
 			_loadingChats.remove(chatId);
-			LOG(("MtsLink Paging: result type=%1, keys=%2")
-				.arg(result.value("type").toString())
-				.arg(result.keys().join(",")));
 			const auto value = result.value("value").toObject();
 			const auto msgArray = value.value("messages").toArray();
-			if (!msgArray.isEmpty()) {
-				const auto first = msgArray.first().toObject();
-				const auto last = msgArray.last().toObject();
-				LOG(("MtsLink Paging: msgs=%1, first.id=%2 t=%3, last.id=%4 t=%5")
-					.arg(msgArray.size())
-					.arg(first.value("id").toString())
-					.arg(qint64(first.value("createdAt").toDouble()))
-					.arg(last.value("id").toString())
-					.arg(qint64(last.value("createdAt").toDouble())));
-			}
 			const auto profilesArray =
 				value.value("memberProfiles").toArray();
 
