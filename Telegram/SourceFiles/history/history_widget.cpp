@@ -5130,7 +5130,6 @@ void HistoryWidget::delayedShowAt(
 	_delayedShowAtMsgId = showAtMsgId;
 
 	if (MtsLink::hasChatId(_history->peer->id)) {
-		_history->getReadyFor(_delayedShowAtMsgId);
 		_delayedShowAtRequest = 0;
 		if (const auto item = getItemFromHistoryOrMigrated(_delayedShowAtMsgId)) {
 			_delayedShowAtMsgId = -1;

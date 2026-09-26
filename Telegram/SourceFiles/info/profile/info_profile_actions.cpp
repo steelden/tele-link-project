@@ -3176,24 +3176,6 @@ void ActionsFiller::addJoinChannelAction(
 }
 
 void ActionsFiller::fillUserActions(not_null<UserData*> user) {
-	if (user->isBot()) {
-		addAffiliateProgram(user);
-		addBalanceActions(user);
-		addInviteToGroupAction(user);
-	}
-	addShareContactAction(user);
-	if (!user->isSelf()) {
-		addEditContactAction(user);
-		addDeleteContactAction(user);
-	}
-	if (CanReportBot(user)) {
-		addBotCommandActions(user);
-		_wrap->add(CreateSkipWidget(_wrap, st::infoBlockButtonSkip));
-		addReportAction();
-	}
-	if (!user->isSelf() && !user->isSupport() && !user->isVerifyCodes()) {
-		addBlockAction(user);
-	}
 }
 
 void ActionsFiller::fillChannelActions(

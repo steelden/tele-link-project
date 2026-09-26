@@ -311,12 +311,6 @@ object_ptr<Ui::RpWidget> InnerWidget::setupContent(
 		if (_savedMessages) {
 			tabs.push_back(MakeChatsTabDescriptor());
 		}
-		if (!_topic && !_savedMessages) {
-			tabs.push_back(MakeStoriesTabDescriptor(tabsPeer));
-			if (!_sublist) {
-				tabs.push_back(MakeGiftsTabDescriptor(_peer));
-			}
-		}
 		if ((_peer->isChat() || _peer->isMegagroup())
 			&& !_peer->isMonoforum()
 			&& !_topic
@@ -326,9 +320,6 @@ object_ptr<Ui::RpWidget> InnerWidget::setupContent(
 				MembersInTabValue(_peer)));
 		}
 		addMediaTabs();
-		if (!_topic && !_savedMessages) {
-			tabs.push_back(MakeSavedTabDescriptor(tabsPeer));
-		}
 		addTab(Storage::SharedMediaType::File);
 		addTab(Storage::SharedMediaType::Link);
 		addTab(Storage::SharedMediaType::MusicFile);

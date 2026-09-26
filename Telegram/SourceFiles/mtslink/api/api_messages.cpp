@@ -353,6 +353,84 @@ void Messages::loadThread(
 		});
 }
 
+void Messages::loadAround(
+		const ChatId &chatId,
+		const MessageId &messageId,
+		int limit) {
+	const auto half = limit / 2;
+
+	QJsonObject beforeParam;
+	beforeParam["chatId"] = chatId;
+	beforeParam["from"] = messageId;
+	beforeParam["direction"] = QStringLiteral("Before");
+	beforeParam["limit"] = 1;
+
+	_rpc->call(
+		"Chat.GetMessagesV2",
+		beforeParam,
+		[this, chatId, messageId, half](const QJsonObject &result) {
+			const auto value = result.value("value").toObject();
+			const auto msgArray = value.value("messages").toArray();
+
+			QString prevId;
+			if (!msgArray.isEmpty()) {
+				prevId = msgArray.first().toObject()
+					.value("id").toString();
+			}
+			if (prevId.isEmpty()) {
+				Q_EMIT aroundMessagesLoaded(
+					chatId, messageId, {}, {});
+				return;
+			}
+
+			QJsonObject afterParam;
+			afterParam["chatId"] = chatId;
+			afterParam["from"] = prevId;
+			afterParam["direction"] = QStringLiteral("After");
+			afterParam["limit"] = half;
+
+			_rpc->call(
+				"Chat.GetMessagesV2",
+				afterParam,
+				[this, chatId, messageId](const QJsonObject &r) {
+					const auto v = r.value("value").toObject();
+					const auto arr = v.value("messages").toArray();
+					const auto profArr =
+						v.value("memberProfiles").toArray();
+
+					QList<MessageData> messages;
+					messages.reserve(arr.size());
+					for (const auto &item : arr) {
+						auto msg = parseMessage(item.toObject());
+						if (msg.isDeleted) {
+							continue;
+						}
+						if (msg.chatId.isEmpty()) {
+							msg.chatId = chatId;
+						}
+						messages.push_back(std::move(msg));
+					}
+
+					QList<MemberProfile> profiles;
+					profiles.reserve(profArr.size());
+					for (const auto &item : profArr) {
+						profiles.push_back(
+							parseProfile(item.toObject()));
+					}
+
+					Q_EMIT aroundMessagesLoaded(
+						chatId, messageId, messages, profiles);
+				},
+				[this, chatId, messageId](const QString &) {
+					Q_EMIT aroundMessagesLoaded(
+						chatId, messageId, {}, {});
+				});
+		},
+		[this, chatId, messageId](const QString &) {
+			Q_EMIT aroundMessagesLoaded(chatId, messageId, {}, {});
+		});
+}
+
 bool Messages::isLoading(const ChatId &chatId) const {
 	return _loadingChats.contains(chatId);
 }

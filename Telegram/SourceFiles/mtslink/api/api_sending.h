@@ -47,6 +47,10 @@ public:
 		const ChatId &chatId,
 		const MessageId &messageId);
 
+	void setChatNotifications(
+		const ChatId &chatId,
+		bool isNotifiable);
+
 	void addReaction(
 		const ChatId &chatId,
 		const MessageId &messageId,

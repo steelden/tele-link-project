@@ -150,4 +150,9 @@ void setEmojiMapping(const QHash<QString, QString> &emojiToId);
 	not_null<Main::Session*> session,
 	PeerId chatPeerId);
 
+[[nodiscard]] bool isMtsLinkUrl(const QString &url);
+void handleMtsLinkUrl(
+	const QString &url,
+	const QVariant &context);
+
 } // namespace MtsLink

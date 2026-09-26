@@ -27,14 +27,25 @@ based on Telegram Desktop.
 #include "dialogs/dialogs_main_list.h"
 #include "data/data_lastseen_status.h"
 #include "data/data_types.h"
+#include "data/notify/data_notify_settings.h"
+#include "data/notify/data_peer_notify_settings.h"
+#include "core/application.h"
+#include "window/notifications_manager.h"
 #include "base/unixtime.h"
 #include "base/random.h"
 #include "ui/image/image_location.h"
 #include "ui/text/text_entity.h"
 #include "storage/cache/storage_cache_database.h"
 
+#include "core/click_handler_types.h"
+#include "core/file_utilities.h"
+#include "window/window_session_controller.h"
+
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QRegularExpression>
+#include <QtNetwork/QNetworkAccessManager>
+#include <QtNetwork/QNetworkReply>
+#include <QtNetwork/QNetworkRequest>
 #include <QtNetwork/QNetworkCookie>
 
 namespace MtsLink {
@@ -1191,6 +1202,23 @@ PeerId favoritesPeerId() {
 	return FavoritesPeerIdValue;
 }
 
+MTPPeerNotifySettings makeMuteSettings(bool muted) {
+	using Flag = MTPDpeerNotifySettings::Flag;
+	return MTP_peerNotifySettings(
+		MTP_flags(Flag::f_mute_until),
+		MTPBool(),
+		MTPBool(),
+		MTP_int(muted ? std::numeric_limits<int>::max() : 0),
+		MTPNotificationSound(),
+		MTPNotificationSound(),
+		MTPNotificationSound(),
+		MTPBool(),
+		MTPBool(),
+		MTPNotificationSound(),
+		MTPNotificationSound(),
+		MTPNotificationSound());
+}
+
 void applyDialogData(
 		not_null<Main::Session*> session,
 		const Api::ChannelData &src) {
@@ -1226,6 +1254,9 @@ void applyDialogData(
 	if (src.unreadCount >= 0 && src.lastMessageTimestamp) {
 		history->setUnreadCount(src.unreadCount);
 	}
+
+	session->data().notifySettings().apply(
+		not_null<PeerData*>(user), makeMuteSettings(src.isMuted));
 
 	if (src.type == ChatType::Favorites) {
 		FavoritesPeerIdValue = peerId;
@@ -1291,6 +1322,9 @@ void applyChannelData(
 	if (src.unreadCount >= 0 && src.lastMessageTimestamp) {
 		history->setUnreadCount(src.unreadCount);
 	}
+
+	session->data().notifySettings().apply(
+		channel, makeMuteSettings(src.isMuted));
 }
 
 void applyUserData(
@@ -1316,6 +1350,8 @@ void applyUserData(
 		{},
 		display);
 	user->setLoadedStatus(PeerData::LoadedStatus::Normal);
+	user->removeFlags(UserDataFlag::Scam | UserDataFlag::Fake);
+	user->setIsContact(true);
 	applyUserpic(user, src.avatarFileId);
 
 	if (!src.displayName.isEmpty()) {
@@ -1908,10 +1944,11 @@ void handleChatEvent(
 		const auto isThreadReply = takePendingThreadSend(clientId);
 		const auto chatPeerId = chatIdToPeerId(chatId);
 		const auto isThread = !msg.parentId.isEmpty();
+		HistoryItem *newItem = nullptr;
 		if (isThreadReply) {
 			replacePendingWithReal(session, chatPeerId, msg);
 		} else if (!replacePendingWithReal(session, chatPeerId, msg)) {
-			addMessage(session, msg, isThread);
+			newItem = addMessage(session, msg, isThread);
 		}
 		{
 			const auto mts = session->account().mtsLinkSession();
@@ -1923,6 +1960,15 @@ void handleChatEvent(
 				if (history->unreadCountKnown()) {
 					history->setUnreadCount(
 						history->unreadCount() + 1);
+				}
+				if (newItem && !isThread && newItem->showNotification()) {
+					auto notification = Data::ItemNotification{
+						.item = newItem,
+						.type = Data::ItemNotificationType::Message,
+					};
+					newItem->notificationThread()->pushNotification(
+						notification);
+					Core::App().notifications().schedule(notification);
 				}
 			}
 		}
@@ -2063,6 +2109,18 @@ void handleChatEvent(
 		if (const auto last = history->lastMessage()) {
 			last->invalidateChatListEntry();
 		}
+	} else if (type == "ChatNotificationsSettedEvent") {
+		const auto eventChatId = value.value("chatId").toString();
+		if (eventChatId.isEmpty()) {
+			return;
+		}
+		const auto peerId = chatIdToPeerId(eventChatId);
+		if (!hasChatId(peerId)) {
+			return;
+		}
+		const auto isNotifiable = value.value("isNotifiable").toBool(true);
+		session->data().notifySettings().apply(
+			session->data().peer(peerId), makeMuteSettings(!isNotifiable));
 	} else if (type == "MessageChildrenCountUpdatedEvent") {
 		const auto messageId = value.value("messageId").toString();
 		const auto childrenCount = value.value("childrenCount").toInt();
@@ -2607,6 +2665,155 @@ std::vector<not_null<UserData*>> chatMtsLinkUsers(
 			return a->name().compare(b->name(), Qt::CaseInsensitive) < 0;
 		});
 	return result;
+}
+
+bool isMtsLinkUrl(const QString &url) {
+	const auto lower = url.toLower();
+	return lower.contains(u"mts-link.ru/"_q)
+		|| lower.contains(u"webinar.ru/"_q);
+}
+
+namespace {
+
+void navigateToChat(
+		const QString &chatId,
+		const QString &threadId,
+		const QString &messageId,
+		const QVariant &context) {
+	const auto peerId = chatIdToPeerId(chatId);
+	if (!peerId) {
+		return;
+	}
+	const auto my = context.value<ClickHandlerContext>();
+	const auto controller = my.sessionWindow.get();
+	if (!controller) {
+		return;
+	}
+
+	if (!threadId.isEmpty()) {
+		const auto rootBareId = uuidToBareId(threadId);
+		const auto rootMsgId = MsgId(rootBareId & 0x7FFFFFFFLL);
+		MsgId commentId = 0;
+		if (!messageId.isEmpty()) {
+			const auto msgBareId = uuidToBareId(messageId);
+			commentId = MsgId(msgBareId & 0x7FFFFFFFLL);
+		}
+		const auto history = controller->session().data().history(peerId);
+		controller->showRepliesForMessage(history, rootMsgId, commentId);
+	} else if (!messageId.isEmpty()) {
+		const auto bareId = uuidToBareId(messageId);
+		const auto msgId = MsgId(bareId & 0x7FFFFFFFLL);
+		const auto item = controller->session().data().message(
+			peerId, msgId);
+		if (item) {
+			controller->showPeerHistory(
+				peerId,
+				Window::SectionShow::Way::Forward,
+				msgId);
+		} else {
+			const auto mts = controller->session().account().mtsLinkSession();
+			if (mts) {
+				const auto weak = my.sessionWindow;
+				const auto conn = std::make_shared<QMetaObject::Connection>();
+				*conn = QObject::connect(
+					mts->messages(),
+					&Api::Messages::aroundMessagesLoaded,
+					[weak, peerId, msgId, chatId, conn](
+							const ChatId &cid,
+							const MessageId &,
+							const QList<Api::MessageData> &messages,
+							const QList<Api::MemberProfile> &profiles) {
+						QObject::disconnect(*conn);
+						if (cid != chatId) {
+							return;
+						}
+						const auto ctrl = weak.get();
+						if (!ctrl) {
+							return;
+						}
+						for (const auto &p : profiles) {
+							applyUserData(&ctrl->session(), p);
+						}
+						for (const auto &src : messages) {
+							addMessage(&ctrl->session(), src);
+						}
+						const auto loaded = ctrl->session().data().message(
+							peerId, msgId);
+						if (loaded) {
+							ctrl->showPeerHistory(
+								peerId,
+								Window::SectionShow::Way::Forward,
+								msgId);
+						} else {
+							ctrl->showPeerHistory(
+								peerId,
+								Window::SectionShow::Way::Forward);
+						}
+					});
+				mts->messages()->loadAround(chatId, messageId, 50);
+			} else {
+				controller->showPeerHistory(
+					peerId,
+					Window::SectionShow::Way::Forward);
+			}
+		}
+	} else {
+		controller->showPeerHistory(
+			peerId,
+			Window::SectionShow::Way::Forward);
+	}
+}
+
+bool tryNavigateDirectUrl(
+		const QUrl &parsed,
+		const QVariant &context) {
+	const auto path = parsed.path();
+	static const auto re = QRegularExpression(
+		u"^/chats/(?:channel|group|dialog)/([0-9a-f-]+)"
+		"(?:/thread/([0-9a-f-]+))?"
+		"(?:/message/([0-9a-f-]+))?$"_q);
+	const auto match = re.match(path);
+	if (!match.hasMatch()) {
+		return false;
+	}
+	navigateToChat(
+		match.captured(1), match.captured(2), match.captured(3), context);
+	return true;
+}
+
+} // namespace
+
+void handleMtsLinkUrl(
+		const QString &url,
+		const QVariant &context) {
+	const auto parsed = QUrl(url);
+	const auto path = parsed.path();
+	if (tryNavigateDirectUrl(parsed, context)) {
+		return;
+	}
+	if (!path.startsWith(u"/r/"_q)) {
+		File::OpenUrl(url);
+		return;
+	}
+	auto *nam = new QNetworkAccessManager();
+	auto request = QNetworkRequest(parsed);
+	request.setAttribute(
+		QNetworkRequest::RedirectPolicyAttribute,
+		QNetworkRequest::ManualRedirectPolicy);
+	auto *reply = nam->head(request);
+	QObject::connect(reply, &QNetworkReply::finished, [=] {
+		const auto location = reply->header(
+			QNetworkRequest::LocationHeader).toUrl();
+		if (location.isValid()) {
+			if (!tryNavigateDirectUrl(location, context)) {
+				File::OpenUrl(location.toString());
+			}
+		} else {
+			File::OpenUrl(url);
+		}
+		reply->deleteLater();
+		nam->deleteLater();
+	});
 }
 
 } // namespace MtsLink

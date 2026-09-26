@@ -1860,6 +1860,7 @@ void History::addItemToBlock(not_null<HistoryItem*> item) {
 void History::addEdgesToSharedMedia() {
 	auto from = loadedAtTop() ? 0 : minMsgId();
 	auto till = loadedAtBottom() ? ServerMaxMsgId : maxMsgId();
+	if (from > till) std::swap(from, till);
 	for (auto i = 0; i != Storage::kSharedMediaTypeCount; ++i) {
 		const auto type = static_cast<Storage::SharedMediaType>(i);
 		session().storage().add(Storage::SharedMediaAddSlice(
@@ -2070,8 +2071,9 @@ void History::addToSharedMedia(
 			}
 		}
 	}
-	const auto from = loadedAtTop() ? 0 : minMsgId();
-	const auto till = loadedAtBottom() ? ServerMaxMsgId : maxMsgId();
+	auto from = loadedAtTop() ? 0 : minMsgId();
+	auto till = loadedAtBottom() ? ServerMaxMsgId : maxMsgId();
+	if (from > till) std::swap(from, till);
 	for (auto i = 0; i != Storage::kSharedMediaTypeCount; ++i) {
 		if (!medias[i].empty()) {
 			const auto type = static_cast<Storage::SharedMediaType>(i);

@@ -110,6 +110,11 @@ public:
 		const MessageId &fromMessageId = {},
 		int limit = 50);
 
+	void loadAround(
+		const ChatId &chatId,
+		const MessageId &messageId,
+		int limit = 50);
+
 Q_SIGNALS:
 	void messagesLoaded(
 		const ChatId &chatId,
@@ -136,6 +141,11 @@ Q_SIGNALS:
 	void threadMessagesLoaded(
 		const ChatId &chatId,
 		const MessageId &parentId,
+		const QList<MessageData> &messages,
+		const QList<MemberProfile> &profiles);
+	void aroundMessagesLoaded(
+		const ChatId &chatId,
+		const MessageId &targetId,
 		const QList<MessageData> &messages,
 		const QList<MemberProfile> &profiles);
 

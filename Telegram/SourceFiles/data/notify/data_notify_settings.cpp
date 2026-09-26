@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/notify/data_notify_settings.h"
 
+#include "mtslink/data_adapters.h"
 #include "apiwrap.h"
 #include "api/api_ringtones.h"
 #include "base/unixtime.h"
@@ -91,6 +92,9 @@ NotifySettings::NotifySettings(not_null<Session*> owner)
 }
 
 void NotifySettings::request(not_null<PeerData*> peer) {
+	if (MtsLink::hasChatId(peer->id)) {
+		return;
+	}
 	if (peer->notify().settingsUnknown()) {
 		const auto channel = peer->asChannel();
 		peer->session().api().requestNotifySettings(
