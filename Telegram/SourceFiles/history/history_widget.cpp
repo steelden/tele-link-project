@@ -3069,6 +3069,17 @@ void HistoryWidget::showHistory(
 
 			if (params.reapplyLocalDraft) {
 				return;
+			} else if (_historyInited
+				&& (showAtMsgId == ShowAtUnreadMsgId
+					|| showAtMsgId == ShowAtTheEndMsgId)) {
+				const auto target = findFirstUnreadHighlight();
+				if (target) {
+					enqueueMessageHighlight({ target });
+				}
+				LOG(("MtsLink Scroll: showHistory same-peer skip "
+					"re-scroll, _historyInited=true msgId=%1")
+					.arg(showAtMsgId.bare));
+				return;
 			} else if (showAtMsgId == ShowAtUnreadMsgId
 				&& insideJumpToEndInsteadOfToUnread()) {
 				DEBUG_LOG(("JumpToEnd(%1, %2, %3): "
@@ -6278,7 +6289,11 @@ void HistoryWidget::cornerButtonsShowAtPosition(
 			).arg(_history->peer->name()
 			).arg(_history->inboxReadTillId().bare
 			).arg(Logs::b(_history->loadedAtBottom())));
-		showHistory(_peer->id, ShowAtUnreadMsgId);
+		if (_historyInited) {
+			animatedScrollToY(_scroll->scrollTopMax());
+		} else {
+			showHistory(_peer->id, ShowAtUnreadMsgId);
+		}
 	} else if (_peer && position.fullId.peer == _peer->id) {
 		showHistory(_peer->id, position.fullId.msg);
 	} else if (_migrated && position.fullId.peer == _migrated->peer->id) {
@@ -8175,6 +8190,15 @@ void HistoryWidget::handlePendingHistoryUpdate() {
 		&& MtsLink::hasChatId(_history->peer->id)
 		&& !_history->isEmpty()) {
 		_firstLoadRequest = 0;
+		LOG(("MtsLink Scroll: handlePendingHistoryUpdate "
+			"showAtMsgId=%1 unread=%2 readDate=%3 "
+			"inboxReadBefore=%4 loadAroundId=%5 loadedAtBottom=%6")
+			.arg(_showAtMsgId.bare)
+			.arg(_history->unreadCount())
+			.arg(_history->mtsLinkInboxReadDate())
+			.arg(_history->inboxReadTillId().bare)
+			.arg(_history->loadAroundId().bare)
+			.arg(Logs::b(_history->loadedAtBottom())));
 		updateHistoryGeometry(true);
 		if (_list) {
 			_list->update();
@@ -8360,6 +8384,7 @@ bool HistoryWidget::hasSavedScroll() const {
 
 int HistoryWidget::countInitialScrollTop() {
 	if (hasSavedScroll()) {
+		LOG(("MtsLink Scroll: countInitialScrollTop -> savedScroll"));
 		return _list->historyScrollTop();
 	} else if (_showAtMsgId
 		&& (IsServerMsgId(_showAtMsgId)
@@ -8381,22 +8406,87 @@ int HistoryWidget::countInitialScrollTop() {
 			});
 			const auto result = itemTopForHighlight(view);
 			createUnreadBarIfBelowVisibleArea(result);
+			LOG(("MtsLink Scroll: countInitialScrollTop -> showAtMsg %1 top=%2")
+				.arg(_showAtMsgId.bare).arg(result));
 			return result;
 		}
 	} else if (_showAtMsgId == ShowAtTheEndMsgId) {
+		LOG(("MtsLink Scroll: countInitialScrollTop -> ShowAtTheEnd"));
 		return ScrollMax;
 	} else if (_showAtMsgId == ShowAtUnreadMsgId
 		&& _history->loadedAtTop()
 		&& (_history->loadAroundId() == 1)
 		&& (!_migrated || !_migrated->unreadCount())) {
-		createUnreadBarIfBelowVisibleArea(0);
+		LOG(("MtsLink Scroll: countInitialScrollTop -> loadedAtTop+unread, return 0"));
 		return 0;
-	} else if (const auto top = unreadBarTop()) {
-		return *top;
 	} else {
 		_history->calculateFirstUnreadMessage();
-		return countAutomaticScrollTop();
+		const auto unread = _history->firstUnreadMessage();
+		if (unread) {
+			createUnreadBarAndResize();
+		}
+		const auto highlightTarget = findFirstUnreadHighlight();
+		if (highlightTarget) {
+			enqueueMessageHighlight({ highlightTarget });
+			const auto view = highlightTarget->mainView();
+			if (view) {
+				const auto msgTop = _list->itemTop(view);
+				const auto maxScroll = _scroll->scrollTopMax();
+				const auto visH = _scroll->height();
+				if (msgTop >= 0
+					&& msgTop >= maxScroll
+					&& msgTop < maxScroll + visH) {
+					LOG(("MtsLink Scroll: countInitialScrollTop -> "
+						"highlight already visible at bottom, "
+						"scrollMax msgId=%1")
+						.arg(highlightTarget->id.bare));
+					return ScrollMax;
+				}
+			}
+		}
+		if (const auto top = unreadBarTop()) {
+			LOG(("MtsLink Scroll: countInitialScrollTop -> "
+				"unreadBarTop=%1 highlight=%2")
+				.arg(*top)
+				.arg(highlightTarget
+					? highlightTarget->id.bare : 0));
+			return *top;
+		} else if (unread) {
+			const auto result = itemTopForHighlight(unread);
+			LOG(("MtsLink Scroll: countInitialScrollTop -> "
+				"firstUnread=%1 top=%2")
+				.arg(unread->data()->id.bare).arg(result));
+			return result;
+		}
+		LOG(("MtsLink Scroll: countInitialScrollTop -> "
+			"no firstUnread, scrollMax"));
+		return ScrollMax;
 	}
+}
+
+HistoryItem *HistoryWidget::findFirstUnreadHighlight() const {
+	if (!_history || !_history->loadedAtBottom()) {
+		return nullptr;
+	}
+	if (!MtsLink::hasChatId(_history->peer->id)) {
+		return nullptr;
+	}
+	const auto readDate = _history->mtsLinkInboxReadDate();
+	for (const auto &block : _history->blocks) {
+		for (const auto &message : block->messages) {
+			const auto item = message->data();
+			if (!item->isRegular()) {
+				continue;
+			}
+			const bool isUnreadMsg = readDate
+				&& !item->out()
+				&& (item->date() > readDate);
+			if (isUnreadMsg || item->areCommentsUnread()) {
+				return item;
+			}
+		}
+	}
+	return nullptr;
 }
 
 void HistoryWidget::createUnreadBarIfBelowVisibleArea(int withScrollTop) {
@@ -8434,9 +8524,7 @@ int HistoryWidget::countAutomaticScrollTop() {
 		const auto possibleUnreadBarTop = _scroll->scrollTopMax()
 			+ HistoryView::UnreadBar::height()
 			- HistoryView::UnreadBar::marginTop();
-		const auto isMtsLink = _history
-			&& MtsLink::hasChatId(_history->peer->id);
-		if (isMtsLink || firstUnreadTop < possibleUnreadBarTop) {
+		if (firstUnreadTop < possibleUnreadBarTop) {
 			createUnreadBarAndResize();
 			if (_history->unreadBar() != nullptr) {
 				setMsgId(ShowAtUnreadMsgId);
@@ -8640,6 +8728,15 @@ void HistoryWidget::updateHistoryGeometry(
 		}
 	}
 	const auto toY = std::clamp(newScrollTop, 0, _scroll->scrollTopMax());
+	if (_history && MtsLink::hasChatId(_history->peer->id)) {
+		LOG(("MtsLink Scroll: updateHistoryGeometry initial=%1 "
+			"wasAtBottom=%2 toY=%3 wasScrollTop=%4 scrollTopMax=%5")
+			.arg(Logs::b(initial))
+			.arg(Logs::b(wasAtBottom))
+			.arg(toY)
+			.arg(wasScrollTop)
+			.arg(_scroll->scrollTopMax()));
+	}
 	synteticScrollToY(toY);
 	if (initial && _showAtMsgId) {
 		const auto timestamp = base::take(_showAtMsgParams.videoTimestamp);

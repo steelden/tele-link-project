@@ -3055,9 +3055,21 @@ bool History::isReadyFor(MsgId msgId) {
 		return loadedAtBottom();
 	}
 	if (msgId == ShowAtUnreadMsgId) {
-		if (MtsLink::hasChatId(peer->id)
-			&& unreadCount()
-			&& _mtsLinkInboxReadDate == 0) {
+		if (MtsLink::hasChatId(peer->id)) {
+			if (!unreadCount()) {
+				return loadedAtBottom();
+			}
+			if (!_mtsLinkInboxReadDate) {
+				return false;
+			}
+			if (!isEmpty()) {
+				const auto minDate =
+					blocks.front()->messages.front()->data()->date();
+				const auto maxDate =
+					blocks.back()->messages.back()->data()->date();
+				return (loadedAtBottom() || maxDate > _mtsLinkInboxReadDate)
+					&& (loadedAtTop() || minDate <= _mtsLinkInboxReadDate);
+			}
 			return false;
 		}
 		if (const auto migratePeer = peer->migrateFrom()) {
@@ -3186,7 +3198,10 @@ void History::setChatListMessage(HistoryItem *item) {
 			return;
 		}
 		_chatListMessage = item;
-		setChatListTimeId(item->date());
+		if (!MtsLink::hasChatId(peer->id)
+			|| item->date() > chatListTimeId()) {
+			setChatListTimeId(item->date());
+		}
 		resolveChatListMessageGroup();
 	} else if (!_chatListMessage || *_chatListMessage) {
 		_chatListMessage = nullptr;

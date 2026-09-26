@@ -24,8 +24,8 @@ enum {
 
 	WebPageUserId = 701000,
 
-	UpdateDelayConstPart = 8 * 3600, // 8 hour min time between update check requests
-	UpdateDelayRandPart = 8 * 3600, // 8 hour max - min time between update check requests
+	UpdateDelayConstPart = 3600, // 1 hour min time between update check requests
+	UpdateDelayRandPart = 3600, // 1 hour max - min time between update check requests
 
 	WrongPasscodeTimeout = 1500,
 
@@ -44,17 +44,17 @@ inline const char *cGUIDStr() {
 
 static const char *UpdatesPublicKey = "\
 -----BEGIN RSA PUBLIC KEY-----\n\
-MIGJAoGBAMA4ViQrjkPZ9xj0lrer3r23JvxOnrtE8nI69XLGSr+sRERz9YnUptnU\n\
-BZpkIfKaRcl6XzNJiN28cVwO1Ui5JSa814UAiDHzWUqCaXUiUEQ6NmNTneiGx2sQ\n\
-+9PKKlb8mmr3BB9A45ZNwLT6G9AK3+qkZLHojeSA+m84/a6GP4svAgMBAAE=\n\
+MIGJAoGBANftESgQlneqE5WMp0Tp2TS7XsrtiUSECP+WLr0444Cyx6k5jaHHhWcl\n\
+G3z2psfhnO70Yhcc01DlMGKXwCIG+h1hW1834vCGHvgpontiSeTLF1PbvyA0b6PL\n\
+YinUuwi/b/0gcukcCg71rhEJtffHBQSaQ+So60TUMPrHWkIc0rW7AgMBAAE=\n\
 -----END RSA PUBLIC KEY-----\
 ";
 
 static const char *UpdatesPublicBetaKey = "\
 -----BEGIN RSA PUBLIC KEY-----\n\
-MIGJAoGBALWu9GGs0HED7KG7BM73CFZ6o0xufKBRQsdnq3lwA8nFQEvmdu+g/I1j\n\
-0LQ+0IQO7GW4jAgzF/4+soPDb6uHQeNFrlVx1JS9DZGhhjZ5rf65yg11nTCIHZCG\n\
-w/CVnbwQOw0g5GBwwFV3r0uTTvy44xx8XXxk+Qknu4eBCsmrAFNnAgMBAAE=\n\
+MIGJAoGBANftESgQlneqE5WMp0Tp2TS7XsrtiUSECP+WLr0444Cyx6k5jaHHhWcl\n\
+G3z2psfhnO70Yhcc01DlMGKXwCIG+h1hW1834vCGHvgpontiSeTLF1PbvyA0b6PL\n\
+YinUuwi/b/0gcukcCg71rhEJtffHBQSaQ+So60TUMPrHWkIc0rW7AgMBAAE=\n\
 -----END RSA PUBLIC KEY-----\
 ";
 
