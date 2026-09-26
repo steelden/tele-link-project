@@ -47,6 +47,7 @@ QHash<PeerId, std::vector<uint64>> ChatMembersMap;
 QHash<PeerId, MsgId> PendingTempMessages;
 QHash<QString, QPair<PeerId, MsgId>> MtsLinkIdToMsgMap;
 QSet<QString> PinnedMessagesLoadedChats;
+QSet<QString> ChatInfoLoadedChats;
 QSet<QString> PendingThreadClientIds;
 QHash<quint64, MsgId> ThreadRootMap;
 QString FileAuthTokenValue;
@@ -412,6 +413,10 @@ void connectToSession(
 				PinnedMessagesLoadedChats.insert(chatId);
 				mtsSession->messages()->loadPinned(chatId, 5);
 			}
+			if (!ChatInfoLoadedChats.contains(chatId)) {
+				ChatInfoLoadedChats.insert(chatId);
+				mtsSession->channels()->loadChatInfo(chatId);
+			}
 			if (messages.size() < 20 && rawCount > 0
 				&& !rawLastId.isEmpty()) {
 				const auto conn = std::make_shared<QMetaObject::Connection>();
@@ -678,12 +683,16 @@ void applyDialogData(
 	if (!history->folderKnown()) {
 		history->clearFolder();
 	}
-	const auto date = src.lastMessageTimestamp
-		? TimeId(src.lastMessageTimestamp / 1000)
-		: TimeId(1);
 
-	history->setChatListTimeId(date);
-	history->setUnreadCount(src.unreadCount);
+	if (src.lastMessageTimestamp) {
+		history->setChatListTimeId(
+			TimeId(src.lastMessageTimestamp / 1000));
+	} else if (!history->chatListTimeId()) {
+		history->setChatListTimeId(TimeId(1));
+	}
+	if (src.unreadCount >= 0 && src.lastMessageTimestamp) {
+		history->setUnreadCount(src.unreadCount);
+	}
 
 	if (src.type == ChatType::Favorites) {
 		FavoritesPeerIdValue = peerId;
@@ -730,18 +739,24 @@ void applyChannelData(
 	}
 	channel->setName(src.name, {});
 	applyUserpic(channel, src.avatarFileId);
+	if (src.memberCount > 0) {
+		channel->setMembersCount(src.memberCount);
+	}
 
 	const auto history = session->data().history(channel->id);
 	if (!history->folderKnown()) {
 		history->clearFolder();
 	}
 
-	const auto date = src.lastMessageTimestamp
-		? TimeId(src.lastMessageTimestamp / 1000)
-		: TimeId(1);
-
-	history->setChatListTimeId(date);
-	history->setUnreadCount(src.unreadCount);
+	if (src.lastMessageTimestamp) {
+		history->setChatListTimeId(
+			TimeId(src.lastMessageTimestamp / 1000));
+	} else if (!history->chatListTimeId()) {
+		history->setChatListTimeId(TimeId(1));
+	}
+	if (src.unreadCount >= 0 && src.lastMessageTimestamp) {
+		history->setUnreadCount(src.unreadCount);
+	}
 }
 
 void applyUserData(
@@ -891,6 +906,16 @@ HistoryItem *addMessage(
 			existing->setText(text);
 			session->data().requestItemTextRefresh(existing);
 			existing->invalidateChatListEntry();
+		}
+		if (!src.parentId.isEmpty()) {
+			const auto parentBareId = uuidToBareId(src.parentId);
+			const auto parentMsgId = MsgId(parentBareId & 0x7FFFFFFFLL);
+			existing->ensureReplyComponent();
+			existing->setReplyFields(
+				existing->replyToTop() ? existing->replyToTop() : parentMsgId,
+				parentMsgId,
+				false);
+			registerThreadRoot(chatPeerId, msgId, parentMsgId);
 		}
 		if (const auto reply = existing->Get<HistoryMessageReply>()) {
 			if (!reply->resolvedMessage) {
@@ -1043,6 +1068,10 @@ bool addOlderMessages(
 	}
 
 	history->addCreatedOlderSlice(items);
+
+	for (const auto &item : items) {
+		item->updateDependencyItem();
+	}
 
 	session->data().notifyHistoryChangeDelayed(history);
 	session->data().sendHistoryChangeNotifications();

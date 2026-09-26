@@ -2287,6 +2287,10 @@ MsgId History::outboxReadTillId() const {
 	return _outboxReadBefore.value_or(1) - 1;
 }
 
+TimeId History::mtsLinkInboxReadDate() const {
+	return _mtsLinkInboxReadDate;
+}
+
 HistoryItem *History::lastAvailableMessage() const {
 	return isEmpty() ? nullptr : blocks.back()->messages.back()->data().get();
 }

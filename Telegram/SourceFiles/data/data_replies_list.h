@@ -125,6 +125,7 @@ private:
 	MsgId _inboxReadTillId = 0;
 	MsgId _outboxReadTillId = 0;
 	TimeId _mtsLinkInboxReadDate = 0;
+	bool _loadingHistorical = false;
 	HistoryItem *_divider = nullptr;
 	bool _dividerWithComments = false;
 	int _beforeId = 0;

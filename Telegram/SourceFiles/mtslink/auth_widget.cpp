@@ -7,9 +7,6 @@ based on Telegram Desktop.
 #include "webview/webview_embed.h"
 #include "base/options.h"
 #include "core/application.h"
-#include "core/core_settings.h"
-#include "core/core_settings_proxy.h"
-#include "mtproto/mtproto_proxy_data.h"
 
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
@@ -22,40 +19,6 @@ namespace {
 
 const auto kSigninUrl =
 	"https://my.mts-link.ru/signin";
-
-[[nodiscard]] QString ResolveProxyServer() {
-	if (!Core::IsAppLaunched()) {
-		LOG(("MtsLink Auth Proxy: app not launched yet"));
-		return {};
-	}
-	const auto &proxy = Core::App().settings().proxy();
-	if (proxy.isEnabled()) {
-		const auto &data = proxy.selected();
-		LOG(("MtsLink Auth Proxy: mode=Enabled type=%1 host=%2:%3")
-			.arg(int(data.type))
-			.arg(data.host)
-			.arg(data.port));
-		if ((data.type == MTP::ProxyData::Type::Http
-			|| data.type == MTP::ProxyData::Type::Socks5)
-			&& !data.host.isEmpty()
-			&& data.port > 0) {
-			const auto scheme = (data.type == MTP::ProxyData::Type::Socks5)
-				? u"socks5://"_q
-				: QString();
-			const auto result = scheme + data.host
-				+ ':' + QString::number(data.port);
-			LOG(("MtsLink Auth Proxy: using explicit proxy: %1")
-				.arg(result));
-			return result;
-		}
-	} else if (proxy.isSystem()) {
-		LOG(("MtsLink Auth Proxy: mode=System "
-			"(WebView2 will use system settings)"));
-	} else {
-		LOG(("MtsLink Auth Proxy: mode=Disabled"));
-	}
-	return {};
-}
 
 } // namespace
 
@@ -118,7 +81,6 @@ void AuthWidget::createWebView() {
 				.token = Webview::LegacyStorageIdToken(),
 			},
 			.allowThirdPartyCookies = true,
-			.proxyServer = ResolveProxyServer(),
 		});
 
 	if (!_webView->valid()) {

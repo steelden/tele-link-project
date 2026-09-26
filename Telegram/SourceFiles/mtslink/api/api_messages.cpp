@@ -30,10 +30,19 @@ void Messages::load(
 
 	const auto isOlder = !fromMessageId.isEmpty();
 	_loadingChats.insert(chatId);
+	auto *timer = new QTimer(this);
+	timer->setSingleShot(true);
+	timer->start(10000);
+	QObject::connect(timer, &QTimer::timeout, this, [this, chatId, timer] {
+		_loadingChats.remove(chatId);
+		timer->deleteLater();
+	});
 	_rpc->call(
 		"Chat.GetMessagesV2",
 		param,
-		[this, chatId, isOlder](const QJsonObject &result) {
+		[this, chatId, isOlder, timer](const QJsonObject &result) {
+			timer->stop();
+			timer->deleteLater();
 			_loadingChats.remove(chatId);
 			LOG(("MtsLink Paging: result type=%1, keys=%2")
 				.arg(result.value("type").toString())

@@ -272,8 +272,10 @@ void Histories::readInboxTill(
 			return;
 		}
 		state.willReadTill = tillId;
-		state.willReadWhen = 0;
-		sendReadRequests();
+		state.willReadWhen = crl::now() + 300;
+		if (!_readRequestsTimer.isActive()) {
+			_readRequestsTimer.callOnce(300);
+		}
 		return;
 	}
 

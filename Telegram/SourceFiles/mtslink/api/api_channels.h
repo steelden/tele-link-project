@@ -33,6 +33,7 @@ struct ChannelData {
 	int pinnedMessageCount = 0;
 	QString memberRole;
 	QString interlocutorId;
+	int memberCount = 0;
 };
 
 class Channels final : public QObject {
