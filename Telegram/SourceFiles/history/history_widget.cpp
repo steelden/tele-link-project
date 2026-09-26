@@ -3400,6 +3400,10 @@ void HistoryWidget::showHistory(
 		setupGroupCallBar();
 		setupRequestsBar();
 		checkMessagesTTL();
+		if (MtsLink::hasChatId(_history->peer->id)) {
+			_history->destroyUnreadBar();
+			_history->clearFirstUnreadMessage();
+		}
 		if (_history->scrollTopItem
 			|| (_migrated && _migrated->scrollTopItem)
 			|| _history->isReadyFor(_showAtMsgId)) {
@@ -4829,7 +4833,11 @@ void HistoryWidget::firstLoadMessages() {
 		const auto chatId = MtsLink::peerIdToChatId(_history->peer->id);
 		if (!chatId.isEmpty()) {
 			if (const auto mts = _history->session().account().mtsLinkSession()) {
-				_history->getReadyFor(_showAtMsgId);
+				_history->destroyUnreadBar();
+				_history->clearFirstUnreadMessage();
+				_history->setMtsLinkInboxReadDate(0);
+				_history->getReadyFor(ShowAtTheEndMsgId);
+				_firstLoadRequest = -1;
 				mts->messages()->load(chatId);
 				mts->users()->loadChatMembers(chatId);
 			}
@@ -8163,6 +8171,18 @@ void HistoryWidget::updateHistoryItemsByTimer() {
 }
 
 void HistoryWidget::handlePendingHistoryUpdate() {
+	if (_history
+		&& _firstLoadRequest == -1
+		&& MtsLink::hasChatId(_history->peer->id)
+		&& !_history->isEmpty()) {
+		_firstLoadRequest = 0;
+		updateHistoryGeometry(true);
+		if (_list) {
+			_list->update();
+		}
+		preloadHistoryIfNeeded();
+		return;
+	}
 	if (hasPendingResizedItems() || _updateHistoryGeometryRequired) {
 		updateHistoryGeometry();
 		_list->update();
@@ -8415,7 +8435,9 @@ int HistoryWidget::countAutomaticScrollTop() {
 		const auto possibleUnreadBarTop = _scroll->scrollTopMax()
 			+ HistoryView::UnreadBar::height()
 			- HistoryView::UnreadBar::marginTop();
-		if (firstUnreadTop < possibleUnreadBarTop) {
+		const auto isMtsLink = _history
+			&& MtsLink::hasChatId(_history->peer->id);
+		if (isMtsLink || firstUnreadTop < possibleUnreadBarTop) {
 			createUnreadBarAndResize();
 			if (_history->unreadBar() != nullptr) {
 				setMsgId(ShowAtUnreadMsgId);

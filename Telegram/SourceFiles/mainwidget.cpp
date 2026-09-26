@@ -1680,10 +1680,14 @@ void MainWidget::showHistory(
 	if (peerId && MtsLink::hasChatId(peerId)) {
 		const auto chatId = MtsLink::peerIdToChatId(peerId);
 		if (const auto mts = _controller->session().account().mtsLinkSession()) {
-			if (!mts->messages()->isLoading(chatId)
-				&& MtsLink::oldestLoadedMessageId(peerId).isEmpty()) {
-				LOG(("MtsLink: loading messages for chat %1").arg(chatId));
+			const auto loading = mts->messages()->isLoading(chatId);
+			const auto oldest = MtsLink::oldestLoadedMessageId(peerId);
+			if (!loading && oldest.isEmpty()) {
 				mts->messages()->load(chatId);
+			} else {
+				LOG(("MtsLink: showHistory SKIP chatId=%1 "
+					"loading=%2 oldest='%3'")
+					.arg(chatId).arg(loading).arg(oldest));
 			}
 		}
 	}

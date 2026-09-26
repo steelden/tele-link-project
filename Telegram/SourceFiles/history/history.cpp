@@ -942,6 +942,18 @@ not_null<HistoryItem*> History::addNewExternalMessage(
 		true);
 }
 
+void History::clearFirstUnreadMessage() {
+	_firstUnreadView = nullptr;
+}
+
+void History::reattachToBlock(not_null<HistoryItem*> item) {
+	if (item->mainView()) {
+		return;
+	}
+	addNewToBack(item, false);
+	owner().notifyHistoryChangeDelayed(this);
+}
+
 not_null<HistoryItem*> History::addSponsoredMessage(
 		MsgId id,
 		Data::SponsoredFrom from,
@@ -1098,18 +1110,19 @@ not_null<HistoryItem*> History::addNewToBack(
 	if ((!unread || MtsLink::hasChatId(peer->id)) && item->isRegular()) {
 		const auto from = loadedAtTop() ? 0 : minMsgId();
 		const auto till = loadedAtBottom() ? ServerMaxMsgId : maxMsgId();
-		if (_messages) {
-			_messages->addExisting(item->id, { from, till });
-		}
-		if (const auto types = item->sharedMediaTypes()) {
-			auto &storage = session().storage();
-			storage.add(Storage::SharedMediaAddExisting(
-				peer->id,
-				MsgId(0), // topicRootId
-				PeerId(0), // monoforumPeerId
-				types,
-				item->id,
-				{ from, till }));
+		if (from <= till) {
+			if (_messages) {
+				_messages->addExisting(item->id, { from, till });
+			}
+			if (const auto types = item->sharedMediaTypes()) {
+				auto &storage = session().storage();
+				storage.add(Storage::SharedMediaAddExisting(
+					peer->id,
+					MsgId(0), // topicRootId
+					PeerId(0), // monoforumPeerId
+					types,
+					item->id,
+					{ from, till }));
 			const auto pinned = types.test(Storage::SharedMediaType::Pinned);
 			if (pinned) {
 				setHasPinnedMessages(true);
@@ -1138,6 +1151,7 @@ not_null<HistoryItem*> History::addNewToBack(
 					sublist->setHasPinnedMessages(true);
 				}
 			}
+		}
 		}
 	}
 	const auto from = item->from();
@@ -1709,14 +1723,14 @@ void History::newItemAdded(not_null<HistoryItem*> item, NewAddType type) {
 		if (item->changesWallPaper()) {
 			peer->updateFullForced();
 		}
-	} else {
+	} else if (!MtsLink::hasChatId(peer->id)) {
 		if (item->unread(this)) {
 			if (unreadCountKnown()) {
 				setUnreadCount(unreadCount() + 1);
 			} else if (!isForum()) {
 				owner().histories().requestDialogEntry(this);
 			}
-		} else if (!MtsLink::hasChatId(peer->id)) {
+		} else {
 			inboxRead(item);
 		}
 	}
@@ -2087,13 +2101,18 @@ void History::calculateFirstUnreadMessage() {
 	if (!unreadCount() || !trackUnreadMessages()) {
 		return;
 	}
+	const auto isMtsLink = MtsLink::hasChatId(peer->id);
 	for (const auto &block : ranges::views::reverse(blocks)) {
 		for (const auto &message : ranges::views::reverse(block->messages)) {
 			const auto item = message->data();
 			if (!item->isRegular()) {
 				continue;
 			} else if (!item->out()) {
-				if (item->id >= *_inboxReadBefore) {
+				const auto isUnread = isMtsLink
+					? (_mtsLinkInboxReadDate
+						&& item->date() > _mtsLinkInboxReadDate)
+					: (item->id >= *_inboxReadBefore);
+				if (isUnread) {
 					_firstUnreadView = message.get();
 				} else {
 					return;
@@ -2296,6 +2315,13 @@ MsgId History::outboxReadTillId() const {
 
 TimeId History::mtsLinkInboxReadDate() const {
 	return _mtsLinkInboxReadDate;
+}
+
+void History::setMtsLinkInboxReadDate(TimeId date) {
+	_mtsLinkInboxReadDate = date;
+	if (!_inboxReadBefore) {
+		_inboxReadBefore = MsgId(1);
+	}
 }
 
 HistoryItem *History::lastAvailableMessage() const {
@@ -3027,6 +3053,11 @@ bool History::isReadyFor(MsgId msgId) {
 		return loadedAtBottom();
 	}
 	if (msgId == ShowAtUnreadMsgId) {
+		if (MtsLink::hasChatId(peer->id)
+			&& unreadCount()
+			&& _mtsLinkInboxReadDate == 0) {
+			return false;
+		}
 		if (const auto migratePeer = peer->migrateFrom()) {
 			if (const auto migrated = owner().historyLoaded(migratePeer)) {
 				if (migrated->unreadCount()) {
@@ -3783,11 +3814,6 @@ void History::setInboxReadTill(MsgId upTo) {
 	if (_inboxReadBefore) {
 		if (MtsLink::hasChatId(peer->id)) {
 			*_inboxReadBefore = upTo + 1;
-			if (const auto item = owner().message(peer->id, upTo)) {
-				if (item->date() > _mtsLinkInboxReadDate) {
-					_mtsLinkInboxReadDate = item->date();
-				}
-			}
 		} else {
 			tryMarkForumIntervalRead(*_inboxReadBefore, upTo + 1);
 			tryMarkMonoforumIntervalRead(*_inboxReadBefore, upTo + 1);
@@ -3795,11 +3821,6 @@ void History::setInboxReadTill(MsgId upTo) {
 		}
 	} else {
 		_inboxReadBefore = upTo + 1;
-		if (MtsLink::hasChatId(peer->id)) {
-			if (const auto item = owner().message(peer->id, upTo)) {
-				_mtsLinkInboxReadDate = item->date();
-			}
-		}
 		for (const auto &item : _items) {
 			item->applyEffectWatchedOnUnreadKnown();
 		}

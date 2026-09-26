@@ -741,7 +741,8 @@ void Histories::sendReadRequests() {
 		if (!state.willReadTill) {
 			DEBUG_LOG(("Reading: skipping zero till."));
 			continue;
-		} else if (state.willReadWhen <= now) {
+		}
+		if (state.willReadWhen <= now) {
 			DEBUG_LOG(("Reading: sending with till %1."
 				).arg(state.willReadTill.bare));
 			sendReadRequest(history, state);
@@ -774,6 +775,9 @@ void Histories::sendReadRequest(not_null<History*> history, State &state) {
 				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);
 			}
+		}
+		if (const auto item = session().data().message(history->peer, tillId)) {
+			history->setMtsLinkInboxReadDate(item->date());
 		}
 		state.sentReadDone = true;
 		state.sentReadTill = 0;

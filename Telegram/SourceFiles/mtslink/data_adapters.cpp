@@ -795,6 +795,13 @@ void connectToSession(
 		not_null<Main::Session*> mainSession,
 		not_null<Session*> mtsSession) {
 	QObject::connect(
+		mtsSession,
+		&Session::initialized,
+		mtsSession->messages(),
+		[mtsSession] {
+			mtsSession->messages()->retryFailedLoads();
+		});
+	QObject::connect(
 		mtsSession->channels(),
 		&Api::Channels::channelsLoaded,
 		[mainSession](const QList<Api::ChannelData> &list) {
@@ -852,6 +859,27 @@ void connectToSession(
 				.arg(rawCount)
 				.arg(rawLastId));
 			const auto peerId = chatIdToPeerId(chatId);
+			{
+				const auto history =
+					mainSession->data().historyLoaded(peerId);
+				if (history && !messages.isEmpty()) {
+					const auto unread = history->unreadCount();
+					if (unread > 0
+						&& unread < int(messages.size())) {
+						const auto &lastRead = messages[unread];
+						const auto readDate = TimeId(
+							lastRead.createdAt / 1000);
+						history->setMtsLinkInboxReadDate(readDate);
+					} else if (unread == 0
+						&& !history->mtsLinkInboxReadDate()) {
+						const auto &newest = messages[0];
+						const auto readDate = TimeId(
+							newest.createdAt / 1000);
+						history->setMtsLinkInboxReadDate(readDate);
+					}
+				}
+			}
+			mainSession->data().sendHistoryChangeNotifications();
 			if (!rawLastId.isEmpty()
 				&& oldestLoadedMessageId(peerId).isEmpty()) {
 				setOldestLoadedMessageId(peerId, rawLastId);
@@ -926,6 +954,8 @@ void connectToSession(
 				const QString &name,
 				const QString &dst,
 				const QJsonObject &param) {
+			LOG(("MtsLink WS event: name=%1 dst=%2")
+				.arg(name).arg(dst));
 			if (name == "ChatEvent") {
 				handleChatEvent(mainSession, dst, param);
 			} else if (name == "TypingEvent") {
@@ -1459,6 +1489,9 @@ HistoryItem *addMessage(
 				existing->updateReactions(&*mtp);
 			}
 		}
+		if (!existing->mainView() && !threadOnly) {
+			history->reattachToBlock(existing);
+		}
 		return existing;
 	}
 
@@ -1753,6 +1786,9 @@ void handleNotificationEvent(
 				const auto history = session->data().historyLoaded(peerId);
 				if (history) {
 					history->setInboxReadTill(readMsgId);
+					if (const auto item = session->data().message(peerId, readMsgId)) {
+						history->setMtsLinkInboxReadDate(item->date());
+					}
 				}
 			}
 		}
@@ -1765,7 +1801,12 @@ void handleChatEvent(
 		const QJsonObject &param) {
 	const auto type = param.value("type").toString();
 	const auto value = param.value("value").toObject();
-	const auto chatId = extractChatIdFromDst(dst);
+	const auto isUserLevel = dst.startsWith(u"chat-user-"_q);
+	const auto chatId = isUserLevel
+		? value.value("chatId").toString()
+		: extractChatIdFromDst(dst);
+	LOG(("MtsLink Event: type=%1 chatId=%2 dst=%3")
+		.arg(type).arg(chatId).arg(dst));
 
 	if (chatId.isEmpty()) {
 		return;
@@ -1872,6 +1913,19 @@ void handleChatEvent(
 		} else if (!replacePendingWithReal(session, chatPeerId, msg)) {
 			addMessage(session, msg, isThread);
 		}
+		{
+			const auto mts = session->account().mtsLinkSession();
+			const auto isOutgoing =
+				mts && (msg.authorId == mts->userId());
+			if (!isOutgoing) {
+				const auto history =
+					session->data().history(chatPeerId);
+				if (history->unreadCountKnown()) {
+					history->setUnreadCount(
+						history->unreadCount() + 1);
+				}
+			}
+		}
 		if (isThread) {
 			const auto parentBareId = uuidToBareId(msg.parentId);
 			const auto parentMsgId = MsgId(parentBareId & 0x7FFFFFFFLL);
@@ -1890,19 +1944,12 @@ void handleChatEvent(
 				const auto key = qMakePair(chatPeerId, parentMsgId);
 				PendingThreadUnread[key]++;
 			}
-			const auto mts = session->account().mtsLinkSession();
-			const auto isOutgoing = mts && (msg.authorId == mts->userId());
-			if (!isOutgoing) {
-				const auto history = session->data().history(chatPeerId);
-				if (history->unreadCountKnown()) {
-					history->setUnreadCount(history->unreadCount() + 1);
-				}
-				const auto last = history->lastMessage();
-				if (last) {
-					last->invalidateChatListEntry();
-				} else {
-					history->updateChatListEntry();
-				}
+			const auto history = session->data().history(chatPeerId);
+			const auto last = history->lastMessage();
+			if (last) {
+				last->invalidateChatListEntry();
+			} else {
+				history->updateChatListEntry();
 			}
 		}
 	} else if (type == "MessageDeletedEvent") {
@@ -2004,10 +2051,15 @@ void handleChatEvent(
 		}
 		const auto count = value.value("unreadMessageCount").toInt();
 		const auto localCount = history->unreadCount();
-		if (count < localCount && !consumeReadRequestSent(eventChatId)) {
+		const auto wasReadRequest = consumeReadRequestSent(eventChatId);
+		if (count < localCount && !wasReadRequest) {
 			return;
 		}
 		history->setUnreadCount(count);
+		if (wasReadRequest && count == 0) {
+			history->destroyUnreadBar();
+			history->clearFirstUnreadMessage();
+		}
 		if (const auto last = history->lastMessage()) {
 			last->invalidateChatListEntry();
 		}

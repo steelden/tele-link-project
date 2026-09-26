@@ -187,6 +187,8 @@ public:
 		HistoryItemCommonFields &&fields,
 		const TextWithEntities &text,
 		const MTPMessageMedia &media);
+	void reattachToBlock(not_null<HistoryItem*> item);
+	void clearFirstUnreadMessage();
 
 	not_null<HistoryItem*> addSponsoredMessage(
 		MsgId id,
@@ -231,6 +233,7 @@ public:
 	[[nodiscard]] MsgId inboxReadTillId() const;
 	[[nodiscard]] MsgId outboxReadTillId() const;
 	[[nodiscard]] TimeId mtsLinkInboxReadDate() const;
+	void setMtsLinkInboxReadDate(TimeId date);
 
 	[[nodiscard]] bool isServerSideUnread(
 		not_null<const HistoryItem*> item) const override;

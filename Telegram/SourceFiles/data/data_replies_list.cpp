@@ -1073,6 +1073,9 @@ MsgId RepliesList::inboxReadTillId() const {
 
 MsgId RepliesList::computeInboxReadTillFull() const {
 	const auto local = _inboxReadTillId;
+	if (MtsLink::hasChatId(_history->peer->id)) {
+		return local;
+	}
 	if (const auto megagroup = _history->peer->asMegagroup()) {
 		if (!megagroup->isForum() && megagroup->amIn()) {
 			return std::max(local, _history->inboxReadTillId());
@@ -1124,7 +1127,10 @@ bool RepliesList::isServerSideUnread(
 		? computeOutboxReadTillFull()
 		: computeInboxReadTillFull();
 	if (MtsLink::hasChatId(_history->peer->id)) {
-		if (!till || !_mtsLinkInboxReadDate) {
+		if (item->out()) {
+			return false;
+		}
+		if (!_mtsLinkInboxReadDate) {
 			return true;
 		}
 		return item->date() > _mtsLinkInboxReadDate;
@@ -1266,6 +1272,10 @@ void RepliesList::readTill(
 	if (!isMtsLink && now < was) {
 		return;
 	}
+	const auto oldMtsReadDate = _mtsLinkInboxReadDate;
+	if (isMtsLink && tillIdItem) {
+		setMtsLinkInboxReadDate(tillIdItem->date());
+	}
 	const auto unreadCount = isMtsLink
 		? std::optional<int>(std::nullopt)
 		: computeUnreadCountLocally(now);
@@ -1279,20 +1289,32 @@ void RepliesList::readTill(
 			const auto rootFullId = FullMsgId(_history->peer->id, _rootId);
 			if (const auto root = _history->owner().message(rootFullId)) {
 				if (const auto views = root->Get<HistoryMessageViews>()) {
-					const auto threadUnread = views->commentsMaxId.bare
-						- views->commentsInboxReadTillId.bare;
 					root->setCommentsInboxReadTill(views->commentsMaxId);
-					if (threadUnread > 0
-						&& _history->unreadCountKnown()
-						&& _history->unreadCount() > 0) {
-						const auto newCount = std::max(
-							0,
-							_history->unreadCount() - int(threadUnread));
-						_history->setUnreadCount(newCount);
-						if (const auto last = _history->lastMessage()) {
-							last->invalidateChatListEntry();
+				}
+			}
+			auto threadUnread = 0;
+			if (tillIdItem && oldMtsReadDate < tillIdItem->date()) {
+				for (const auto &msgId : _list) {
+					const auto fullId = FullMsgId(
+						_history->peer->id, msgId);
+					if (const auto msg = _history->owner().message(fullId)) {
+						if (!msg->out()
+							&& msg->date() > oldMtsReadDate
+							&& msg->date() <= tillIdItem->date()) {
+							++threadUnread;
 						}
 					}
+				}
+			}
+			if (threadUnread > 0
+				&& _history->unreadCountKnown()
+				&& _history->unreadCount() > 0) {
+				const auto newCount = std::max(
+					0,
+					_history->unreadCount() - threadUnread);
+				_history->setUnreadCount(newCount);
+				if (const auto last = _history->lastMessage()) {
+					last->invalidateChatListEntry();
 				}
 			}
 		} else {
@@ -1329,6 +1351,10 @@ void RepliesList::sendReadTillRequest() {
 			if (!chatId.isEmpty() && !mtsId.isEmpty()) {
 				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);
+			}
+			if (const auto item = _history->owner().message(
+					_history->peer->id, tillId)) {
+				setMtsLinkInboxReadDate(item->date());
 			}
 		}
 		return;
