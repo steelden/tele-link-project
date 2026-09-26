@@ -1514,9 +1514,15 @@ void applyUserData(
 		user->setAbout(aboutParts.join(QChar('\n')));
 	}
 
+	const auto status = (src.presence == MemberPresence::Online)
+		? Data::LastseenStatus::OnlineTill(base::unixtime::now() + 300)
+		: Data::LastseenStatus::Recently();
+	user->updateLastseen(status);
+
 	auto flags = Data::PeerUpdate::Flag::Name
 		| Data::PeerUpdate::Flag::Photo
-		| Data::PeerUpdate::Flag::Username;
+		| Data::PeerUpdate::Flag::Username
+		| Data::PeerUpdate::Flag::OnlineStatus;
 	if (!src.phone.isEmpty()) {
 		flags |= Data::PeerUpdate::Flag::PhoneNumber;
 	}
