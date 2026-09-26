@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "mtslink/data_adapters.h"
 #include "mtslink/session.h"
+#include "mtslink/api/api_messages.h"
 #include "api/api_compose_with_ai.h"
 #include "api/api_editing.h"
 #include "api/api_bot.h"
@@ -5143,9 +5144,49 @@ void HistoryWidget::delayedShowAt(
 	if (MtsLink::hasChatId(_history->peer->id)) {
 		_delayedShowAtRequest = 0;
 		if (const auto item = getItemFromHistoryOrMigrated(_delayedShowAtMsgId)) {
-			_delayedShowAtMsgId = -1;
-			setMsgId(item->id);
-			historyLoaded();
+			if (_list && _list->itemTop(item) >= 0) {
+				_delayedShowAtMsgId = -1;
+				setMsgId(item->id);
+				historyLoaded();
+				return;
+			}
+		}
+		const auto peerId = _history->peer->id;
+		const auto chatId = MtsLink::peerIdToChatId(peerId);
+		const auto messageId = MtsLink::msgIdToMtsLinkId(
+			peerId, _delayedShowAtMsgId);
+		const auto mts = session().account().mtsLinkSession();
+		if (mts && !chatId.isEmpty() && !messageId.isEmpty()) {
+			const auto targetMsgId = _delayedShowAtMsgId;
+			const auto conn = std::make_shared<QMetaObject::Connection>();
+			*conn = QObject::connect(
+				mts->messages(),
+				&MtsLink::Api::Messages::aroundMessagesLoaded,
+				[this, peerId, chatId, targetMsgId, conn](
+						const QString &cid,
+						const QString &,
+						const QList<MtsLink::Api::MessageData> &messages,
+						const QList<MtsLink::Api::MemberProfile> &profiles) {
+					QObject::disconnect(*conn);
+					if (cid != chatId) {
+						return;
+					}
+					for (const auto &p : profiles) {
+						MtsLink::applyUserData(&session(), p);
+					}
+					std::vector<not_null<HistoryItem*>> items;
+					for (const auto &src : messages) {
+						MtsLink::addMessage(
+							&session(), src, false, &items);
+					}
+					if (!items.empty()) {
+						_history->addCreatedOlderSlice(items);
+					}
+					_delayedShowAtMsgId = -1;
+					setMsgId(targetMsgId);
+					historyLoaded();
+				});
+			mts->messages()->loadAround(chatId, messageId, 50);
 		}
 		return;
 	}
