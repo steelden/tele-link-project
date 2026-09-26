@@ -27,6 +27,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "base/weak_ptr.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/session.h"
+#include "mtslink/rpc.h"
+#include "mtslink/api/api_messages.h"
+#include "main/main_account.h"
 #include "ui/controls/who_reacted_context_action.h"
 #include "apiwrap.h"
 #include "styles/style_chat_helpers.h"
@@ -377,9 +381,101 @@ struct State {
 		if (MtsLink::hasChatId(item->history()->peer->id)) {
 			const auto context = PreparedContextAt(weak.get(), session);
 			auto &entry = context->cacheReacted(item, reaction);
-			entry.data = PeersWithReactions{
-				.state = WhoReadState::Empty,
-			};
+			if (entry.data.current().state == WhoReadState::Unknown) {
+				const auto peerId = item->history()->peer->id;
+				const auto chatId = MtsLink::peerIdToChatId(peerId);
+				const auto messageId = MtsLink::msgIdToMtsLinkId(
+					peerId, item->id);
+				const auto mts = session->account().mtsLinkSession();
+				if (mts && !chatId.isEmpty() && !messageId.isEmpty()) {
+					auto emojiIds = QStringList();
+					auto reactionIds = std::vector<ReactionId>();
+					if (!reaction.empty()) {
+						const auto eid = MtsLink::emojiToId(
+							reaction.emoji());
+						if (!eid.isEmpty()) {
+							emojiIds.push_back(eid);
+							reactionIds.push_back(reaction);
+						}
+					} else {
+						for (const auto &r : item->reactions()) {
+							const auto eid = MtsLink::emojiToId(
+								r.id.emoji());
+							if (!eid.isEmpty()) {
+								emojiIds.push_back(eid);
+								reactionIds.push_back(r.id);
+							}
+						}
+					}
+					if (emojiIds.isEmpty()) {
+						entry.data = PeersWithReactions{
+							.state = WhoReadState::Empty,
+						};
+					} else {
+						struct Accumulator {
+							PeersWithReactions result;
+							int remaining = 0;
+						};
+						const auto acc = std::make_shared<Accumulator>();
+						acc->remaining = emojiIds.size();
+						for (int idx = 0; idx < emojiIds.size(); ++idx) {
+							QJsonObject param;
+							param["chatId"] = chatId;
+							param["messageId"] = messageId;
+							param["emojiId"] = emojiIds[idx];
+							param["limit"] = kContextReactionsLimit;
+							param["offset"] = 0;
+							const auto rid = reactionIds[idx];
+							mts->rpc()->call(
+								"Chat.GetReactionsV2",
+								param,
+								[=](const QJsonObject &result) {
+									const auto val = result.value("value").toObject();
+									const auto profiles = val.value("memberProfiles").toArray();
+									for (const auto &p : profiles) {
+										const auto po = p.toObject();
+										const auto userId = po.value("userId").toString();
+										const auto bareId = MtsLink::uuidToBareId(userId);
+										const auto userPeerId = PeerId(::UserId(bareId));
+										MtsLink::Api::MemberProfile profile{
+											.userId = userId,
+											.firstName = po.value("firstName").toString(),
+											.lastName = po.value("lastName").toString(),
+											.displayName = po.value("displayName").toString(),
+											.avatarFileId = po.value("avatarFileId").toString(),
+										};
+										MtsLink::applyUserData(session, profile);
+										acc->result.list.push_back(PeerWithReaction{
+											.peerWithDate = {
+												.peer = userPeerId,
+												.date = 0,
+												.dateReacted = true,
+											},
+											.reaction = rid,
+										});
+									}
+									acc->result.fullReactionsCount += int(profiles.size());
+									if (--acc->remaining <= 0) {
+										ranges::sort(
+											acc->result.list,
+											[&](const PeerWithReaction &a,
+												const PeerWithReaction &b) {
+												const auto pa = session->data().peer(a.peerWithDate.peer);
+												const auto pb = session->data().peer(b.peerWithDate.peer);
+												return pa->name().compare(pb->name(), Qt::CaseInsensitive) < 0;
+											});
+										auto &entry = context->cacheReacted(item, reaction);
+										entry.data = std::move(acc->result);
+									}
+								});
+						}
+					}
+				} else {
+					entry.data = PeersWithReactions{
+						.state = WhoReadState::Empty,
+					};
+				}
+			}
 			return entry.data.value().start_existing(consumer);
 		}
 		const auto context = PreparedContextAt(weak.get(), session);
@@ -617,7 +713,8 @@ rpl::producer<Ui::WhoReadContent> WhoReacted(
 		auto lifetime = rpl::lifetime();
 
 		const auto resolveWhoRead = reaction.empty()
-			&& WhoReadExists(item);
+			&& WhoReadExists(item)
+			&& !MtsLink::hasChatId(item->history()->peer->id);
 
 		const auto state = lifetime.make_state<State>();
 		const auto pushNext = [=] {
@@ -650,12 +747,7 @@ rpl::producer<Ui::WhoReadContent> WhoReacted(
 					&Data::MessageReaction::id);
 				return (i != end(list)) ? i->count : 0;
 			}();
-			state->current.singleCustomEntityData = ReactionEntityData(
-				!reaction.empty()
-				? reaction
-				: (list.size() == 1)
-				? list.front().id
-				: ReactionId());
+			state->current.singleCustomEntityData = QString();
 		}
 		std::move(
 			idsWithReactions

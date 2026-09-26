@@ -16,6 +16,8 @@ based on Telegram Desktop.
 #include "data/data_changes.h"
 #include "data/data_send_action.h"
 #include "data/data_replies_list.h"
+#include "data/data_message_reaction_id.h"
+#include "data/data_message_reactions.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
@@ -75,6 +77,55 @@ quint64 makeMsgKey(PeerId peerId, MsgId msgId) {
 
 bool isImageMime(const QString &mime) {
 	return mime.startsWith(u"image/"_q);
+}
+
+std::optional<MTPMessageReactions> buildMtpReactions(
+		const QList<Api::ReactionData> &reactions) {
+	if (reactions.isEmpty()) {
+		return std::nullopt;
+	}
+
+	auto results = QVector<MTPReactionCount>();
+	results.reserve(reactions.size());
+	int chosenIdx = 0;
+
+	for (const auto &r : reactions) {
+		auto emoji = r.emoji;
+		if (emoji.isEmpty()) {
+			emoji = IdToEmojiMap.value(r.emojiId);
+		}
+		if (emoji.isEmpty()) {
+			continue;
+		}
+		if (!r.emojiId.isEmpty() && !IdToEmojiMap.contains(r.emojiId)) {
+			IdToEmojiMap[r.emojiId] = emoji;
+			EmojiToIdMap[emoji] = r.emojiId;
+		}
+
+		auto rcFlags = MTPDreactionCount::Flags(0);
+		int order = 0;
+		if (r.selected) {
+			rcFlags |= MTPDreactionCount::Flag::f_chosen_order;
+			order = chosenIdx++;
+		}
+		results.push_back(MTP_reactionCount(
+			MTP_flags(rcFlags),
+			MTP_int(order),
+			MTP_reactionEmoji(MTP_string(emoji)),
+			MTP_int(r.count)));
+	}
+
+	if (results.isEmpty()) {
+		return std::nullopt;
+	}
+
+	const auto mrFlags = MTPDmessageReactions::Flags(
+		MTPDmessageReactions::Flag::f_can_see_list);
+	return MTP_messageReactions(
+		MTP_flags(mrFlags),
+		MTP_vector<MTPReactionCount>(results),
+		MTP_vector<MTPMessagePeerReaction>(),
+		MTP_vector<MTPMessageReactor>());
 }
 
 void reapplyPhotoUrls(
@@ -606,6 +657,54 @@ void connectToSession(
 			}
 		});
 
+	mainSession->data().reactions().populateMtsLinkReactions({
+		QString::fromUtf8("\xF0\x9F\x91\x8D"),     // 👍
+		QString::fromUtf8("\xF0\x9F\x91\x8E"),     // 👎
+		QString::fromUtf8("\xE2\x9D\xA4"),          // ❤
+		QString::fromUtf8("\xF0\x9F\x94\xA5"),     // 🔥
+		QString::fromUtf8("\xF0\x9F\xA5\xB0"),     // 🥰
+		QString::fromUtf8("\xF0\x9F\x91\x8F"),     // 👏
+		QString::fromUtf8("\xF0\x9F\x98\x81"),     // 😁
+		QString::fromUtf8("\xF0\x9F\xA4\x94"),     // 🤔
+		QString::fromUtf8("\xF0\x9F\xA4\xAF"),     // 🤯
+		QString::fromUtf8("\xF0\x9F\x98\xB1"),     // 😱
+		QString::fromUtf8("\xF0\x9F\xA4\xAC"),     // 🤬
+		QString::fromUtf8("\xF0\x9F\x98\xA2"),     // 😢
+		QString::fromUtf8("\xF0\x9F\x8E\x89"),     // 🎉
+		QString::fromUtf8("\xF0\x9F\xA4\xA9"),     // 🤩
+		QString::fromUtf8("\xF0\x9F\xA4\xAE"),     // 🤮
+		QString::fromUtf8("\xF0\x9F\x92\xA9"),     // 💩
+		QString::fromUtf8("\xF0\x9F\x99\x8F"),     // 🙏
+		QString::fromUtf8("\xF0\x9F\x91\x8C"),     // 👌
+		QString::fromUtf8("\xF0\x9F\x95\x8A"),     // 🕊
+		QString::fromUtf8("\xF0\x9F\xA4\xA1"),     // 🤡
+		QString::fromUtf8("\xF0\x9F\xA5\xB1"),     // 🥱
+		QString::fromUtf8("\xF0\x9F\xA5\xB4"),     // 🥴
+		QString::fromUtf8("\xF0\x9F\x98\x8D"),     // 😍
+		QString::fromUtf8("\xF0\x9F\x90\xB3"),     // 🐳
+		QString::fromUtf8("\xE2\x9D\xA4\xEF\xB8\x8F\xE2\x80\x8D\xF0\x9F\x94\xA5"), // ❤‍🔥
+		QString::fromUtf8("\xF0\x9F\x8C\x9A"),     // 🌚
+		QString::fromUtf8("\xF0\x9F\x8C\xAD"),     // 🌭
+		QString::fromUtf8("\xF0\x9F\x92\xAF"),     // 💯
+		QString::fromUtf8("\xF0\x9F\xA4\xA3"),     // 🤣
+		QString::fromUtf8("\xE2\x9A\xA1"),          // ⚡
+		QString::fromUtf8("\xF0\x9F\x8D\x8C"),     // 🍌
+		QString::fromUtf8("\xF0\x9F\x8F\x86"),     // 🏆
+		QString::fromUtf8("\xF0\x9F\x92\x94"),     // 💔
+		QString::fromUtf8("\xF0\x9F\xA4\x9D"),     // 🤝
+		QString::fromUtf8("\xF0\x9F\x98\x98"),     // 😘
+		QString::fromUtf8("\xF0\x9F\x91\x80"),     // 👀
+		QString::fromUtf8("\xF0\x9F\x98\x86"),     // 😆
+		QString::fromUtf8("\xF0\x9F\x98\x85"),     // 😅
+		QString::fromUtf8("\xF0\x9F\xA5\xB2"),     // 🥲
+		QString::fromUtf8("\xF0\x9F\x98\x92"),     // 😒
+		QString::fromUtf8("\xF0\x9F\x98\xB0"),     // 😰
+		QString::fromUtf8("\xF0\x9F\x98\xA5"),     // 😥
+		QString::fromUtf8("\xF0\x9F\x98\x80"),     // 😀
+		QString::fromUtf8("\xE2\x9E\x95"),          // ➕
+		QString::fromUtf8("\xF0\x9F\x8C\xB4"),     // 🌴
+	});
+
 	mtsSession->users()->loadOrganizationMembers();
 }
 
@@ -742,6 +841,9 @@ void applyChannelData(
 	if (src.memberCount > 0) {
 		channel->setMembersCount(src.memberCount);
 	}
+	channel->setAllowedReactions({
+		.type = Data::AllowedReactionsType::All,
+	});
 
 	const auto history = session->data().history(channel->id);
 	if (!history->folderKnown()) {
@@ -922,6 +1024,12 @@ HistoryItem *addMessage(
 				existing->updateDependencyItem();
 			}
 		}
+		if (!src.reactions.isEmpty()) {
+			const auto mtp = buildMtpReactions(src.reactions);
+			if (mtp) {
+				existing->updateReactions(&*mtp);
+			}
+		}
 		return existing;
 	}
 
@@ -949,6 +1057,12 @@ HistoryItem *addMessage(
 	}
 	if (item && src.updatedAt > 0 && src.updatedAt != src.createdAt) {
 		item->setEditDate(TimeId(src.updatedAt / 1000));
+	}
+	if (item && !src.reactions.isEmpty()) {
+		const auto mtp = buildMtpReactions(src.reactions);
+		if (mtp) {
+			item->updateReactions(&*mtp);
+		}
 	}
 	if (item && threadOnly) {
 		session->changes().messageUpdated(
@@ -1316,6 +1430,44 @@ void handleChatEvent(
 			item->setReplies(std::move(repliesData));
 			session->data().requestItemViewRefresh(item);
 		}
+	} else if (type == "MessageReactionsUpdatedEvent") {
+		const auto messageId = value.value("messageId").toString();
+		if (messageId.isEmpty()) {
+			return;
+		}
+		const auto chatPeerId = chatIdToPeerId(chatId);
+		const auto msgBareId = uuidToBareId(messageId);
+		const auto msgId = MsgId(msgBareId & 0x7FFFFFFFLL);
+		const auto item = session->data().message(chatPeerId, msgId);
+		if (!item) {
+			return;
+		}
+		QList<Api::ReactionData> reactions;
+		const auto arr = value.value("reactions").toArray();
+		for (const auto &r : arr) {
+			const auto ro = r.toObject();
+			reactions.push_back({
+				.emojiId = ro.value("emojiId").toString(),
+				.emoji = ro.value("emoji").toString(),
+				.count = ro.value("count").toInt(),
+				.selected = ro.value("selected").toBool(),
+			});
+		}
+		const auto mtp = buildMtpReactions(reactions);
+		if (mtp) {
+			item->updateReactions(&*mtp);
+		} else {
+			item->updateReactions(nullptr);
+		}
+	} else if (type == "MessageReactionAddedEvent"
+		|| type == "MessageReactionDeletedEvent") {
+		const auto emoji = value.value("emoji").toString();
+		const auto emojiId = value.value("emojiId").toString();
+		if (!emoji.isEmpty() && !emojiId.isEmpty()
+			&& !IdToEmojiMap.contains(emojiId)) {
+			IdToEmojiMap[emojiId] = emoji;
+			EmojiToIdMap[emoji] = emojiId;
+		}
 	}
 }
 
@@ -1473,9 +1625,6 @@ void fetchThreadLastRead(
 		[session, peerId, rootId](const QJsonObject &result) {
 			const auto obj = result.value("value").toObject();
 			const auto lastReadId = obj.value("id").toString();
-			LOG(("READ-DBG: GetLastReadChildMessage result=%1")
-				.arg(QString::fromUtf8(
-					QJsonDocument(obj).toJson(QJsonDocument::Compact).left(300))));
 			if (lastReadId.isEmpty()) {
 				return;
 			}

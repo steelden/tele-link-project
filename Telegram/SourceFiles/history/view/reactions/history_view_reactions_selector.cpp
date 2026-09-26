@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/vertical_layout.h"
 #include "ui/text/text_custom_emoji.h"
 #include "ui/text/text_utilities.h"
+#include "ui/emoji_config.h"
 #include "ui/platform/ui_platform_utility.h"
 #include "ui/integration.h"
 #include "ui/painter.h"
@@ -50,6 +51,41 @@ constexpr auto kExpandDelay = crl::time(40);
 constexpr auto kAcceptClicksAfter = crl::time(300);
 constexpr auto kDefaultColumns = 8;
 constexpr auto kMinNonTransparentColumns = 7;
+
+class SpriteSheetEmoji final : public Ui::Text::CustomEmoji {
+public:
+	SpriteSheetEmoji(EmojiPtr emoji, int size)
+	: _emoji(emoji), _size(size) {
+	}
+
+	int width() override { return _size; }
+	QString entityData() override { return _emoji->text(); }
+	void paint(QPainter &p, const Context &context) override {
+		if (_image.isNull()) {
+			const auto large = Ui::Emoji::GetSizeLarge();
+			const auto factor = style::DevicePixelRatio();
+			auto source = QImage(
+				large, large, QImage::Format_ARGB32_Premultiplied);
+			source.fill(Qt::transparent);
+			{ QPainter ep(&source); Ui::Emoji::Draw(ep, _emoji, large, 0, 0); }
+			const auto target = _size * factor;
+			_image = source.scaled(
+				target, target,
+				Qt::KeepAspectRatio,
+				Qt::SmoothTransformation);
+			_image.setDevicePixelRatio(factor);
+		}
+		p.drawImage(context.position, _image);
+	}
+	void unload() override { _image = QImage(); }
+	bool ready() override { return true; }
+	bool readyInDefaultState() override { return true; }
+
+private:
+	EmojiPtr _emoji = nullptr;
+	int _size = 0;
+	QImage _image;
+};
 
 class StripEmoji final : public Ui::Text::CustomEmoji {
 public:
@@ -181,12 +217,24 @@ UnifiedFactoryOwner::RecentFactory UnifiedFactoryOwner::factory() {
 		const auto i = _defaultReactionIds.find(id);
 		const auto isDefaultReaction = (i != end(_defaultReactionIds))
 			&& !i->second.custom();
+		const auto doc = _session->data().document(id);
+		const auto isDummy = doc && !doc->sticker();
 		const auto manager = &_session->data().customEmojiManager();
-		auto result = isDefaultReaction
-			? MakeWrappedEmoji<Ui::Text::ShiftedEmoji>(
-				manager->create(id, std::move(repaint), tag, sizeOverride),
-				_defaultReactionShift)
-			: manager->create(id, std::move(repaint), tag);
+		std::unique_ptr<Ui::Text::CustomEmoji> result;
+		if (isDummy && isDefaultReaction) {
+			const auto emoji = Ui::Emoji::Find(i->second.emoji());
+			if (emoji) {
+				result = std::make_unique<SpriteSheetEmoji>(
+					emoji, sizeOverride);
+			}
+		}
+		if (!result) {
+			result = isDefaultReaction
+				? MakeWrappedEmoji<Ui::Text::ShiftedEmoji>(
+					manager->create(id, std::move(repaint), tag, sizeOverride),
+					_defaultReactionShift)
+				: manager->create(id, std::move(repaint), tag);
+		}
 		const auto j = _defaultReactionInStripMap.find(id);
 		if (j != end(_defaultReactionInStripMap)) {
 			Assert(_strip != nullptr);

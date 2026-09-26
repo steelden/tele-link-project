@@ -125,6 +125,18 @@ MessageData Messages::parseMessage(const QJsonObject &obj) const {
 		}
 	}
 
+	QList<ReactionData> reactions;
+	const auto reactionsArray = obj.value("reactions").toArray();
+	for (const auto &r : reactionsArray) {
+		const auto ro = r.toObject();
+		reactions.push_back({
+			.emojiId = ro.value("emojiId").toString(),
+			.emoji = ro.value("emoji").toString(),
+			.count = ro.value("count").toInt(),
+			.selected = ro.value("selected").toBool(),
+		});
+	}
+
 	return {
 		.id = obj.value("id").toString(),
 		.chatId = obj.value("chatId").toString(),
@@ -141,6 +153,7 @@ MessageData Messages::parseMessage(const QJsonObject &obj) const {
 		.blocks = obj.value("blocks").toArray(),
 		.files = files,
 		.mentions = mentions,
+		.reactions = reactions,
 		.createdAt = qint64(obj.value("createdAt").toDouble()),
 		.updatedAt = qint64(obj.value("updatedAt").toDouble()),
 		.isDeleted = obj.value("isDeleted").toBool(),

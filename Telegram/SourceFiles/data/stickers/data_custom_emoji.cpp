@@ -35,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/fields/input_field.h"
 #include "ui/text/custom_emoji_instance.h"
 #include "ui/text/text_custom_emoji.h"
+#include "ui/emoji_config.h"
 #include "ui/text/text_utilities.h"
 #include "ui/dynamic_thumbnails.h"
 #include "ui/ui_utility.h"
@@ -45,6 +46,45 @@ namespace Data {
 namespace {
 
 constexpr auto kMaxPerRequest = 100;
+
+class SpriteSheetReactionEmoji final : public Ui::Text::CustomEmoji {
+public:
+	SpriteSheetReactionEmoji(EmojiPtr emoji, int size)
+	: _emoji(emoji)
+	, _size(size) {
+	}
+
+	int width() override { return _size; }
+	QString entityData() override { return _emoji->text(); }
+	void paint(QPainter &p, const Context &context) override {
+		if (_image.isNull()) {
+			const auto large = Ui::Emoji::GetSizeLarge();
+			const auto factor = style::DevicePixelRatio();
+			auto source = QImage(
+				large, large, QImage::Format_ARGB32_Premultiplied);
+			source.fill(Qt::transparent);
+			{
+				QPainter ep(&source);
+				Ui::Emoji::Draw(ep, _emoji, large, 0, 0);
+			}
+			const auto target = _size * factor;
+			_image = source.scaled(
+				target, target,
+				Qt::KeepAspectRatio,
+				Qt::SmoothTransformation);
+			_image.setDevicePixelRatio(factor);
+		}
+		p.drawImage(context.position, _image);
+	}
+	void unload() override { _image = QImage(); }
+	bool ready() override { return true; }
+	bool readyInDefaultState() override { return true; }
+
+private:
+	EmojiPtr _emoji = nullptr;
+	int _size = 0;
+	QImage _image;
+};
 #if 0 // inject-to-on_main
 constexpr auto kUnsubscribeUpdatesDelay = 3 * crl::time(1000);
 #endif
@@ -1091,10 +1131,20 @@ Ui::Text::CustomEmojiFactory ReactedMenuFactory(
 				const auto document = i->centerIcon
 					? not_null(i->centerIcon)
 					: i->selectAnimation;
+				const auto isDummy = !document->sticker();
 				const auto size = st::emojiSize * (i->centerIcon ? 2 : 1);
 				const auto tag = Data::CustomEmojiManager::SizeTag::Normal;
 				const auto ratio = style::DevicePixelRatio();
 				const auto skip = (Data::FrameSizeFromTag(tag) / ratio - size) / 2;
+				if (isDummy) {
+					const auto e = Ui::Emoji::Find(emoji);
+					if (e) {
+						return MakeWrappedEmoji<Ui::Text::ShiftedEmoji>(
+							std::make_unique<SpriteSheetReactionEmoji>(
+								e, size),
+							QPoint(skip, skip));
+					}
+				}
 				return MakeWrappedEmoji<Ui::Text::FirstFrameEmoji>(
 					MakeWrappedEmoji<Ui::Text::ShiftedEmoji>(
 						owner->customEmojiManager().create(

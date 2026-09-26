@@ -99,6 +99,8 @@ public:
 	void refreshTags();
 	void refreshEffects();
 
+	void populateMtsLinkReactions(const QStringList &emojis);
+
 	enum class Type {
 		Active,
 		Recent,

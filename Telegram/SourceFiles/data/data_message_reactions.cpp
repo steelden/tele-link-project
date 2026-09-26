@@ -744,7 +744,8 @@ void Reactions::preloadImageFor(const ReactionId &id) {
 		: i->centerIcon
 		? i->centerIcon
 		: i->selectAnimation.get();
-	if (document || (set.effect && i != end(list))) {
+	const auto isDummy = document && !document->sticker();
+	if (!isDummy && (document || (set.effect && i != end(list)))) {
 		if (!set.effect || i->centerIcon) {
 			loadImage(set, document, !i->centerIcon);
 		} else {
@@ -752,6 +753,35 @@ void Reactions::preloadImageFor(const ReactionId &id) {
 		}
 		if (set.effect) {
 			preloadEffect(*i);
+		}
+	} else if (!set.effect && !id.emoji().isEmpty()) {
+		const auto e = Ui::Emoji::Find(id.emoji());
+		if (e) {
+			const auto large = Ui::Emoji::GetSizeLarge();
+			const auto factor = style::DevicePixelRatio();
+			auto source = QImage(
+				large, large, QImage::Format_ARGB32_Premultiplied);
+			source.fill(Qt::transparent);
+			{
+				QPainter p(&source);
+				Ui::Emoji::Draw(p, e, large, 0, 0);
+			}
+			const auto size = st::reactionInlineImage;
+			const auto frameSize = size / 2;
+			auto scaled = source.scaled(
+				frameSize * factor, frameSize * factor,
+				Qt::KeepAspectRatio,
+				Qt::SmoothTransformation);
+			set.image = QImage(
+				size * factor, size * factor,
+				QImage::Format_ARGB32_Premultiplied);
+			set.image.fill(Qt::transparent);
+			{
+				QPainter p(&set.image);
+				const auto offset = (size - frameSize) * factor / 2;
+				p.drawImage(offset, offset, scaled);
+			}
+			set.image.setDevicePixelRatio(factor);
 		}
 	} else if (set.effect && !_waitingForEffects) {
 		_waitingForEffects = true;
@@ -1168,6 +1198,39 @@ void Reactions::updateDefault(const MTPDmessages_availableReactions &data) {
 		resolveReactionImages();
 	}
 	defaultUpdated();
+}
+
+void Reactions::populateMtsLinkReactions(const QStringList &emojis) {
+	if (!_available.empty()) {
+		return;
+	}
+	_available.reserve(emojis.size());
+	_active.reserve(emojis.size());
+	for (const auto &emoji : emojis) {
+		if (Ui::Emoji::Find(emoji)) {
+			const auto hash = QCryptographicHash::hash(
+				emoji.toUtf8(), QCryptographicHash::Md5);
+			DocumentId docId = 0;
+			memcpy(&docId, hash.constData(), sizeof(docId));
+			docId |= DocumentId(1);
+			const auto doc = _owner->document(docId);
+			auto reaction = Reaction{
+				.id = ReactionId{ emoji },
+				.title = emoji,
+				.appearAnimation = doc,
+				.selectAnimation = doc,
+				.active = true,
+			};
+			_available.push_back(reaction);
+			_active.push_back(reaction);
+		}
+	}
+	if (!_active.empty()) {
+		_favoriteId = _active.front().id;
+		_favorite = _active.front();
+		_favoriteUpdated.fire({});
+		defaultUpdated();
+	}
 }
 
 void Reactions::updateGeneric(const MTPDmessages_stickerSet &data) {

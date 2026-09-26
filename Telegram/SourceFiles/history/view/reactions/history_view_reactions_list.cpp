@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer.h"
 #include "data/data_chat.h"
 #include "data/data_channel.h"
+#include "mtslink/data_adapters.h"
 #include "lang/lang_keys.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_widgets.h"
@@ -603,7 +604,8 @@ void ShowReactionParticipantInfo(
 		not_null<PeerData*> originPeer,
 		MsgId originMsgId,
 		bool reactionRow) {
-	if (!reactionRow) {
+	if (!reactionRow
+		|| MtsLink::hasChatId(originPeer->id)) {
 		window->showPeerInfo(participant);
 		return;
 	}
