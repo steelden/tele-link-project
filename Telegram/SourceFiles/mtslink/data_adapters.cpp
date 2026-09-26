@@ -36,6 +36,7 @@ based on Telegram Desktop.
 #include "ui/image/image_location.h"
 #include "ui/text/text_entity.h"
 #include "storage/cache/storage_cache_database.h"
+#include "storage/storage_shared_media.h"
 
 #include "core/click_handler_types.h"
 #include "core/file_utilities.h"
@@ -1213,6 +1214,16 @@ void connectToSession(
 				if (history) {
 					history->setHasPinnedMessages(true);
 				}
+				std::sort(pinnedIds.begin(), pinnedIds.end());
+				mainSession->storage().add(
+					Storage::SharedMediaAddSlice(
+						peerId,
+						MsgId(0),
+						PeerId(0),
+						Storage::SharedMediaType::Pinned,
+						std::move(pinnedIds),
+						{ 0, ServerMaxMsgId },
+						total));
 			}
 		});
 
@@ -1657,7 +1668,11 @@ HistoryItem *addMessage(
 			}
 		}
 		if (!existing->mainView() && !threadOnly) {
-			history->reattachToBlock(existing);
+			if (batchItems) {
+				batchItems->push_back(existing);
+			} else {
+				history->reattachToBlock(existing);
+			}
 		}
 		return existing;
 	}
