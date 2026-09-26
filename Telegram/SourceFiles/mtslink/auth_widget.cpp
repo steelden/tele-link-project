@@ -7,6 +7,9 @@ based on Telegram Desktop.
 #include "webview/webview_embed.h"
 #include "base/options.h"
 #include "core/application.h"
+#include "core/core_settings.h"
+#include "core/core_settings_proxy.h"
+#include "mtproto/mtproto_proxy_data.h"
 
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
@@ -19,6 +22,40 @@ namespace {
 
 const auto kSigninUrl =
 	"https://my.mts-link.ru/signin";
+
+[[nodiscard]] QString ResolveProxyServer() {
+	if (!Core::IsAppLaunched()) {
+		LOG(("MtsLink Auth Proxy: app not launched yet"));
+		return {};
+	}
+	const auto &proxy = Core::App().settings().proxy();
+	if (proxy.isEnabled()) {
+		const auto &data = proxy.selected();
+		LOG(("MtsLink Auth Proxy: mode=Enabled type=%1 host=%2:%3")
+			.arg(int(data.type))
+			.arg(data.host)
+			.arg(data.port));
+		if ((data.type == MTP::ProxyData::Type::Http
+			|| data.type == MTP::ProxyData::Type::Socks5)
+			&& !data.host.isEmpty()
+			&& data.port > 0) {
+			const auto scheme = (data.type == MTP::ProxyData::Type::Socks5)
+				? u"socks5://"_q
+				: QString();
+			const auto result = scheme + data.host
+				+ ':' + QString::number(data.port);
+			LOG(("MtsLink Auth Proxy: using explicit proxy: %1")
+				.arg(result));
+			return result;
+		}
+	} else if (proxy.isSystem()) {
+		LOG(("MtsLink Auth Proxy: mode=System "
+			"(WebView2 will use system settings)"));
+	} else {
+		LOG(("MtsLink Auth Proxy: mode=Disabled"));
+	}
+	return {};
+}
 
 } // namespace
 
@@ -81,6 +118,7 @@ void AuthWidget::createWebView() {
 				.token = Webview::LegacyStorageIdToken(),
 			},
 			.allowThirdPartyCookies = true,
+			.proxyServer = ResolveProxyServer(),
 		});
 
 	if (!_webView->valid()) {
@@ -91,6 +129,40 @@ void AuthWidget::createWebView() {
 	if (auto *widget = _webView->widget()) {
 		_layout->insertWidget(0, widget);
 	}
+
+	_webView->init(R"JS(
+		(function() {
+			var post = function(obj) {
+				try { window.chrome.webview.postMessage(JSON.stringify(obj)); }
+				catch(e) {}
+			};
+			var origError = console.error;
+			console.error = function() {
+				var args = Array.prototype.slice.call(arguments);
+				post({type:'console.error', msg: args.join(' ')});
+				origError.apply(console, arguments);
+			};
+			var origWarn = console.warn;
+			console.warn = function() {
+				var args = Array.prototype.slice.call(arguments);
+				post({type:'console.warn', msg: args.join(' ')});
+				origWarn.apply(console, arguments);
+			};
+			window.onerror = function(msg, src, line, col, err) {
+				post({type:'onerror', msg:msg, src:src, line:line});
+			};
+			window.addEventListener('unhandledrejection', function(e) {
+				post({type:'unhandledrejection', msg: String(e.reason)});
+			});
+			window.addEventListener('error', function(e) {
+				if (e.target && e.target.tagName) {
+					post({type:'resource-error',
+						tag: e.target.tagName,
+						src: e.target.src || e.target.href || ''});
+				}
+			}, true);
+		})();
+	)JS");
 
 	_webView->setNavigationStartHandler([this](QString url, bool newWindow) {
 		LOG(("MtsLink Auth: navigation start: %1 (new=%2)")
@@ -106,14 +178,32 @@ void AuthWidget::createWebView() {
 		_webView->eval(R"JS(
 			(function() {
 				var info = {
+					type: 'page-info',
 					url: location.href,
 					title: document.title,
-					bodyText: document.body
-						? document.body.innerText.substring(0, 500)
-						: '(no body)',
+					bodyLen: document.body
+						? document.body.innerText.length
+						: 0,
+					scripts: document.scripts.length,
+					links: document.querySelectorAll(
+						'link[rel=stylesheet]').length,
 				};
 				window.chrome.webview.postMessage(
 					JSON.stringify(info));
+				setTimeout(function() {
+					var delayed = {
+						type: 'page-info-delayed',
+						url: location.href,
+						bodyLen: document.body
+							? document.body.innerText.length
+							: 0,
+						bodyText: document.body
+							? document.body.innerText.substring(0, 500)
+							: '(no body)',
+					};
+					window.chrome.webview.postMessage(
+						JSON.stringify(delayed));
+				}, 5000);
 			})();
 		)JS");
 	});

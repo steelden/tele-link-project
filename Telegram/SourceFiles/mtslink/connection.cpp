@@ -8,6 +8,9 @@ based on Telegram Desktop.
 #include <QUrl>
 #include <QCryptographicHash>
 #include <QRandomGenerator>
+#include <QtNetwork/QNetworkProxy>
+#include <QtNetwork/QNetworkProxyFactory>
+#include <QtNetwork/QNetworkProxyQuery>
 
 namespace MtsLink {
 namespace {
@@ -115,6 +118,22 @@ void Connection::connectToServer(const QString &token) {
 	}
 
 	LOG(("MtsLink WS: connecting to %1:%2%3").arg(_host).arg(kWsPort).arg(_path));
+
+	{
+		const auto appProxy = QNetworkProxy::applicationProxy();
+		LOG(("MtsLink WS: app proxy type=%1 host=%2:%3")
+			.arg(int(appProxy.type()))
+			.arg(appProxy.hostName())
+			.arg(appProxy.port()));
+		const auto proxies = QNetworkProxyFactory::systemProxyForQuery(
+			QNetworkProxyQuery(url));
+		for (const auto &p : proxies) {
+			LOG(("MtsLink WS: system proxy type=%1 host=%2:%3")
+				.arg(int(p.type()))
+				.arg(p.hostName())
+				.arg(p.port()));
+		}
+	}
 
 	if (!_errorSignalConnected) {
 		_errorSignalConnected = true;
