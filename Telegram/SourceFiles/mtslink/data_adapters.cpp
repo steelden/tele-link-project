@@ -1184,6 +1184,29 @@ void connectToSession(
 					}
 				}
 			}
+			if (const auto channel = mainSession->data().channelLoaded(
+					peerToChannel(peerId))) {
+				if (const auto mega = channel->asMegagroup()) {
+					if (mega->mgInfo) {
+						mega->mgInfo->lastParticipants.clear();
+						for (const auto bareId : stored) {
+							if (const auto user = mainSession->data()
+									.userLoaded(::UserId(bareId))) {
+								mega->mgInfo->lastParticipants.push_back(
+									user);
+							}
+						}
+						mega->mgInfo->lastParticipantsStatus
+							= MegagroupInfo::LastParticipantsUpToDate
+							| MegagroupInfo::LastParticipantsOnceReceived;
+						mega->mgInfo->lastParticipantsCount
+							= mega->membersCount();
+						mainSession->changes().peerUpdated(
+							mega,
+							Data::PeerUpdate::Flag::Members);
+					}
+				}
+			}
 		});
 	QObject::connect(
 		mtsSession->messages(),
