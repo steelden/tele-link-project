@@ -42,6 +42,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "history/history.h"
 #include "history/view/history_view_message.h"
+#include "mtslink/data_adapters.h"
 #include "styles/style_chat.h"
 #include "styles/style_menu_icons.h"
 
@@ -1775,6 +1776,21 @@ void ParticipantsBoxController::loadMoreRows() {
 
 	const auto channel = _peer->asChannel();
 	if (feedMegagroupLastParticipants()) {
+		return;
+	}
+
+	if (MtsLink::hasChatId(_peer->id)) {
+		const auto users = MtsLink::chatMtsLinkUsers(
+			&_peer->session(), _peer->id);
+		for (const auto &user : users) {
+			if (appendRow(user)) {
+			}
+		}
+		_allLoaded = true;
+		refreshDescription();
+		resort();
+		refreshRows();
+		chatListReady();
 		return;
 	}
 

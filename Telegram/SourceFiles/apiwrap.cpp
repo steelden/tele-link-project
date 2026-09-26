@@ -3691,6 +3691,13 @@ void ApiWrap::requestSharedMedia(
 				}
 			}
 		}
+		_session->storage().add(Storage::SharedMediaAddSlice(
+			peer->id,
+			topicRootId,
+			monoforumPeerId,
+			type,
+			std::vector<MsgId>{},
+			{ MsgId(0), ServerMaxMsgId }));
 		return;
 	}
 	const auto key = SharedMediaRequest{
