@@ -547,9 +547,7 @@ void AddPostLinkAction(
 		: Context::History;
 	const auto controller = request.navigation->parentController();
 	menu->addAction(
-		(item->history()->peer->isMegagroup()
-			? tr::lng_context_copy_message_link
-			: tr::lng_context_copy_post_link)(tr::now),
+		tr::lng_context_copy_message_link(tr::now),
 		[=] { CopyPostLink(controller, itemId, context); },
 		&st::menuIconLink);
 }
@@ -2060,53 +2058,14 @@ void CopyPostLink(
 		return;
 	}
 	const auto inRepliesContext = (context == Context::Replies);
-	const auto forceNonPublicLink = !videoTimestamp && base::IsCtrlPressed();
-	QGuiApplication::clipboard()->setText(
-		item->history()->session().api().exportDirectMessageLink(
-			item,
-			inRepliesContext,
-			forceNonPublicLink,
-			videoTimestamp));
-
-	const auto isPublicLink = [&] {
-		if (forceNonPublicLink) {
-			return false;
-		}
-		const auto channel = item->history()->peer->asChannel();
-		Assert(channel != nullptr);
-		if (const auto rootId = item->replyToTop()) {
-			const auto root = item->history()->owner().message(
-				channel->id,
-				rootId);
-			const auto sender = root
-				? root->discussionPostOriginalSender()
-				: nullptr;
-			if (sender && sender->hasUsername()) {
-				return true;
-			}
-		}
-		return channel->hasUsername();
-	}();
-	if (isPublicLink && !videoTimestamp) {
-		show->showToast({
-			.text = tr::lng_channel_public_link_copied(
-				tr::now, tr::bold
-			).append('\n').append(Platform::IsMac()
-				? tr::lng_public_post_private_hint_cmd(tr::now)
-				: tr::lng_public_post_private_hint_ctrl(tr::now)),
-			.iconLottie = u"toast/voip_invite"_q,
-			.iconLottieSize = st::toastLottieIconSize,
-			.duration = kPublicPostLinkToastDuration,
-		});
-	} else if (isPublicLink) {
-		show->showToast({
-			.text = { tr::lng_channel_public_link_copied(tr::now) },
-			.iconLottie = u"toast/voip_invite"_q,
-			.iconLottieSize = st::toastLottieIconSize,
-		});
-	} else {
-		show->showToast(tr::lng_context_about_private_link(tr::now));
-	}
+	const auto link = item->history()->session().api()
+		.exportDirectMessageLink(item, inRepliesContext);
+	MtsLink::shortenAndCopy(&item->history()->session(), link);
+	show->showToast({
+		.text = { tr::lng_channel_public_link_copied(tr::now) },
+		.iconLottie = u"toast/voip_invite"_q,
+		.iconLottieSize = st::toastLottieIconSize,
+	});
 }
 
 void CopyStoryLink(

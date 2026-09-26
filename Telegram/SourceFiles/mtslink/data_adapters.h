@@ -92,6 +92,14 @@ void updateMessage(
 [[nodiscard]] QString msgIdToMtsLinkId(PeerId peerId, MsgId msgId);
 void registerMessageId(PeerId peerId, MsgId msgId, const QString &mtsLinkId);
 
+[[nodiscard]] QString buildChatLink(PeerId peerId);
+[[nodiscard]] QString buildMessageLink(
+	not_null<HistoryItem*> item,
+	bool inRepliesContext);
+void shortenAndCopy(
+	not_null<Main::Session*> session,
+	const QString &fullUrl);
+
 void registerThreadRoot(PeerId peerId, MsgId msgId, MsgId rootId);
 [[nodiscard]] MsgId threadRootFor(PeerId peerId, MsgId msgId);
 

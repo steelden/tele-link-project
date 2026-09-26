@@ -3829,7 +3829,7 @@ crl::time HistoryItem::lastReactionsRefreshTime() const {
 }
 
 bool HistoryItem::hasDirectLink() const {
-	return isRegular() && _history->peer->isChannel();
+	return isRegular();
 }
 
 bool HistoryItem::changesWallPaper() const {

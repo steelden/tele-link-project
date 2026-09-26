@@ -47,6 +47,8 @@ based on Telegram Desktop.
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QRegularExpression>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QClipboard>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
@@ -953,7 +955,6 @@ void connectToSession(
 			for (const auto &p : profiles) {
 				applyUserData(mainSession, p);
 			}
-			const auto perfStart = crl::now();
 			const auto peerId = chatIdToPeerId(chatId);
 			TimeId newestExistingDate = 0;
 			{
@@ -995,19 +996,6 @@ void connectToSession(
 				mainSession->data().notifyHistoryChangeDelayed(
 					history);
 			}
-			const auto perfEnd = crl::now();
-			LOG(("MtsLink Paging: messagesLoaded chatId=%1 "
-				"filtered=%2 added=%3 skippedOlder=%4 "
-				"batchedNewer=%5 rawCount=%6 rawLastId=%7 "
-				"elapsed=%8ms")
-				.arg(chatId)
-				.arg(messages.size())
-				.arg(addedCount)
-				.arg(skippedOlder)
-				.arg(newerItems.size())
-				.arg(rawCount)
-				.arg(rawLastId)
-				.arg(perfEnd - perfStart));
 			{
 				const auto history =
 					mainSession->data().historyLoaded(peerId);
@@ -1085,8 +1073,6 @@ void connectToSession(
 				const QString &name,
 				const QString &dst,
 				const QJsonObject &param) {
-			LOG(("MtsLink WS event: name=%1 dst=%2")
-				.arg(name).arg(dst));
 			if (name == "ChatEvent") {
 				handleChatEvent(mainSession, dst, param);
 			} else if (name == "TypingEvent") {
@@ -1811,13 +1797,7 @@ bool addOlderMessages(
 	const auto chatPeerId = chatIdToPeerId(chatId);
 	const auto history = session->data().history(chatPeerId);
 
-	const auto olderStart = crl::now();
-	LOG(("MtsLink Paging: addOlderMessages count=%1 rawCount=%2")
-		.arg(messages.size())
-		.arg(rawCount));
-
 	if (rawCount == 0) {
-		LOG(("MtsLink Paging: server returned empty, markLoadedAtTop"));
 		history->markLoadedAtTop();
 		return true;
 	}
@@ -1949,18 +1929,8 @@ bool addOlderMessages(
 		}
 	}
 
-	LOG(("MtsLink Paging: newItems=%1, duplicates=%2 elapsed=%3ms")
-		.arg(items.size())
-		.arg(duplicates)
-		.arg(crl::now() - olderStart));
-
 	if (items.empty()) {
-		if (duplicates > 0) {
-			LOG(("MtsLink Paging: all duplicates, already loaded"));
-			return true;
-		}
-		LOG(("MtsLink Paging: no visible items, cursor updated, need retry"));
-		return false;
+		return (duplicates > 0);
 	}
 
 	std::reverse(items.begin(), items.end());
@@ -2537,6 +2507,84 @@ bool replacePendingWithReal(
 
 QString msgIdToMtsLinkId(PeerId peerId, MsgId msgId) {
 	return MsgIdToMtsLinkIdMap.value(makeMsgKey(peerId, msgId));
+}
+
+namespace {
+
+QString chatTypeSlug(ChatType type) {
+	switch (type) {
+	case ChatType::Channel: return u"channel"_q;
+	case ChatType::GroupChat: return u"group"_q;
+	case ChatType::Discussion: return u"group"_q;
+	case ChatType::Dialog: return u"direct"_q;
+	case ChatType::Favorites: return u"direct"_q;
+	}
+	return u"channel"_q;
+}
+
+} // namespace
+
+QString buildChatLink(PeerId peerId) {
+	const auto chatId = peerIdToChatId(peerId);
+	if (chatId.isEmpty()) {
+		return {};
+	}
+	const auto type = chatTypeForPeer(peerId);
+	return EnvConfig::instance().webinarHost()
+		+ u"/chats/"_q + chatTypeSlug(type)
+		+ u"/"_q + chatId;
+}
+
+QString buildMessageLink(
+		not_null<HistoryItem*> item,
+		bool inRepliesContext) {
+	const auto peerId = item->history()->peer->id;
+	const auto chatId = peerIdToChatId(peerId);
+	if (chatId.isEmpty()) {
+		return {};
+	}
+	const auto type = chatTypeForPeer(peerId);
+	const auto base = EnvConfig::instance().webinarHost()
+		+ u"/chats/"_q + chatTypeSlug(type)
+		+ u"/"_q + chatId;
+
+	const auto msgUuid = msgIdToMtsLinkId(peerId, item->id);
+	if (msgUuid.isEmpty()) {
+		return base;
+	}
+
+	const auto rootId = threadRootFor(peerId, item->id);
+	if (rootId && inRepliesContext) {
+		const auto threadUuid = msgIdToMtsLinkId(peerId, rootId);
+		if (!threadUuid.isEmpty()) {
+			return base
+				+ u"/thread/"_q + threadUuid
+				+ u"/message/"_q + msgUuid;
+		}
+	}
+	return base + u"/thread/"_q + msgUuid;
+}
+
+void shortenAndCopy(
+		not_null<Main::Session*> session,
+		const QString &fullUrl) {
+	QGuiApplication::clipboard()->setText(fullUrl);
+	const auto mts = session->account().mtsLinkSession();
+	if (!mts) {
+		return;
+	}
+	QJsonObject param;
+	param["url"] = fullUrl;
+	mts->rpc()->call(
+		"Shortener.Shorten",
+		param,
+		[](const QJsonObject &result) {
+			const auto shortUrl = result.value("value").toObject()
+				.value("shortUrl").toString();
+			if (!shortUrl.isEmpty()) {
+				QGuiApplication::clipboard()->setText(shortUrl);
+			}
+		});
 }
 
 void registerThreadRoot(PeerId peerId, MsgId msgId, MsgId rootId) {
@@ -3261,36 +3309,28 @@ void navigateToChat(
 		const QString &threadId,
 		const QString &messageId,
 		const QVariant &context) {
+	LOG(("MtsLink Navigate: navigateToChat chatId='%1' threadId='%2' messageId='%3'")
+		.arg(chatId).arg(threadId).arg(messageId));
 	const auto peerId = chatIdToPeerId(chatId);
 	if (!peerId) {
+		LOG(("MtsLink Navigate: peerId is 0, abort"));
 		return;
 	}
 	const auto my = context.value<ClickHandlerContext>();
 	const auto controller = my.sessionWindow.get();
 	if (!controller) {
+		LOG(("MtsLink Navigate: controller is null, abort"));
 		return;
 	}
 
-	if (!threadId.isEmpty()) {
-		const auto rootBareId = uuidToBareId(threadId);
-		const auto rootMsgId = MsgId(rootBareId & 0x7FFFFFFFLL);
-		MsgId commentId = 0;
-		if (!messageId.isEmpty()) {
-			const auto msgBareId = uuidToBareId(messageId);
-			commentId = MsgId(msgBareId & 0x7FFFFFFFLL);
-		}
-		const auto history = controller->session().data().history(peerId);
-		controller->showRepliesForMessage(history, rootMsgId, commentId);
-	} else if (!messageId.isEmpty()) {
+	const auto way = Window::SectionShow::Way::ClearStack;
+	if (!messageId.isEmpty()) {
 		const auto bareId = uuidToBareId(messageId);
 		const auto msgId = MsgId(bareId & 0x7FFFFFFFLL);
 		const auto item = controller->session().data().message(
 			peerId, msgId);
 		if (item) {
-			controller->showPeerHistory(
-				peerId,
-				Window::SectionShow::Way::Forward,
-				msgId);
+			controller->showPeerHistory(peerId, way, msgId);
 		} else {
 			const auto mts = controller->session().account().mtsLinkSession();
 			if (mts) {
@@ -3318,30 +3358,22 @@ void navigateToChat(
 						for (const auto &src : messages) {
 							addMessage(&ctrl->session(), src);
 						}
+						const auto w = Window::SectionShow::Way::ClearStack;
 						const auto loaded = ctrl->session().data().message(
 							peerId, msgId);
 						if (loaded) {
-							ctrl->showPeerHistory(
-								peerId,
-								Window::SectionShow::Way::Forward,
-								msgId);
+							ctrl->showPeerHistory(peerId, w, msgId);
 						} else {
-							ctrl->showPeerHistory(
-								peerId,
-								Window::SectionShow::Way::Forward);
+							ctrl->showPeerHistory(peerId, w);
 						}
 					});
 				mts->messages()->loadAround(chatId, messageId, 50);
 			} else {
-				controller->showPeerHistory(
-					peerId,
-					Window::SectionShow::Way::Forward);
+				controller->showPeerHistory(peerId, way);
 			}
 		}
 	} else {
-		controller->showPeerHistory(
-			peerId,
-			Window::SectionShow::Way::Forward);
+		controller->showPeerHistory(peerId, way);
 	}
 }
 
@@ -3349,16 +3381,25 @@ bool tryNavigateDirectUrl(
 		const QUrl &parsed,
 		const QVariant &context) {
 	const auto path = parsed.path();
+	LOG(("MtsLink Navigate: tryNavigateDirectUrl path='%1'").arg(path));
 	static const auto re = QRegularExpression(
-		u"^/chats/(?:channel|group|dialog)/([0-9a-f-]+)"
+		u"^/chats/(?:channel|group|direct|dialog)/([0-9a-f-]+)"
 		"(?:/thread/([0-9a-f-]+))?"
 		"(?:/message/([0-9a-f-]+))?$"_q);
 	const auto match = re.match(path);
 	if (!match.hasMatch()) {
+		LOG(("MtsLink Navigate: regex no match"));
 		return false;
 	}
-	navigateToChat(
-		match.captured(1), match.captured(2), match.captured(3), context);
+	const auto chatId = match.captured(1);
+	const auto threadOrMsg = match.captured(2);
+	const auto msgInThread = match.captured(3);
+	const auto targetMsg = !msgInThread.isEmpty()
+		? msgInThread
+		: threadOrMsg;
+	LOG(("MtsLink Navigate: chatId='%1' targetMsg='%2'")
+		.arg(chatId).arg(targetMsg));
+	navigateToChat(chatId, QString(), targetMsg, context);
 	return true;
 }
 
@@ -3367,6 +3408,7 @@ bool tryNavigateDirectUrl(
 void handleMtsLinkUrl(
 		const QString &url,
 		const QVariant &context) {
+	LOG(("MtsLink Navigate: handleMtsLinkUrl url='%1'").arg(url));
 	const auto parsed = QUrl(url);
 	const auto path = parsed.path();
 	if (tryNavigateDirectUrl(parsed, context)) {
@@ -3376,25 +3418,43 @@ void handleMtsLinkUrl(
 		File::OpenUrl(url);
 		return;
 	}
-	auto *nam = new QNetworkAccessManager();
-	auto request = QNetworkRequest(parsed);
-	request.setAttribute(
-		QNetworkRequest::RedirectPolicyAttribute,
-		QNetworkRequest::ManualRedirectPolicy);
-	auto *reply = nam->head(request);
-	QObject::connect(reply, &QNetworkReply::finished, [=] {
-		const auto location = reply->header(
-			QNetworkRequest::LocationHeader).toUrl();
-		if (location.isValid()) {
-			if (!tryNavigateDirectUrl(location, context)) {
-				File::OpenUrl(location.toString());
+	const auto my = context.value<ClickHandlerContext>();
+	const auto controller = my.sessionWindow.get();
+	if (!controller) {
+		File::OpenUrl(url);
+		return;
+	}
+	const auto mts = controller->session().account().mtsLinkSession();
+	if (!mts) {
+		File::OpenUrl(url);
+		return;
+	}
+	const auto linkId = path.mid(3); // strip "/r/"
+	QJsonObject param;
+	param["linkId"] = linkId;
+	LOG(("MtsLink Navigate: resolving short link /r/%1").arg(linkId));
+	mts->rpc()->call(
+		"Shortener.GetOrigin",
+		param,
+		[context, url](const QJsonObject &result) {
+			LOG(("MtsLink Navigate: GetOrigin result: %1")
+				.arg(QString::fromUtf8(
+					QJsonDocument(result).toJson(QJsonDocument::Compact))));
+			const auto origin = result.value("value").toObject()
+				.value("originLink").toString();
+			if (!origin.isEmpty()) {
+				LOG(("MtsLink Navigate: origin='%1'").arg(origin));
+				const auto originUrl = QUrl(origin);
+				if (!tryNavigateDirectUrl(originUrl, context)) {
+					File::OpenUrl(origin);
+				}
+			} else {
+				File::OpenUrl(url);
 			}
-		} else {
+		},
+		[url](const QString &) {
 			File::OpenUrl(url);
-		}
-		reply->deleteLater();
-		nam->deleteLater();
-	});
+		});
 }
 
 } // namespace MtsLink
