@@ -20,6 +20,9 @@ struct MemberProfile {
 	UserId userId;
 	OrganizationId organizationId;
 	QString email;
+	QString phone;
+	QString position;
+	QString department;
 	QString firstName;
 	QString lastName;
 	QString displayName;

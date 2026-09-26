@@ -49,6 +49,7 @@ QString FileAuthTokenValue;
 QList<QNetworkCookie> FileAuthCookies;
 QHash<QString, QString> EmojiToIdMap;
 QHash<QString, QString> IdToEmojiMap;
+PeerId FavoritesPeerIdValue = PeerId(0);
 
 const auto kStorageThumbBase =
 	u"https://prod-storage-chat.mts-link.ru/thumb/"_q;
@@ -446,7 +447,7 @@ void connectToSession(
 				if (!tChatId.isEmpty() && !tUserId.isEmpty()
 					&& tUserId != mtsSession->userId()) {
 					const auto peerId = chatIdToPeerId(tChatId);
-					if (isMtsLinkPeer(peerId)) {
+					if (hasChatId(peerId)) {
 						const auto h = mainSession->data()
 							.historyLoaded(peerId);
 						if (h) {
@@ -487,6 +488,12 @@ void connectToSession(
 			}
 		});
 
+	QObject::connect(
+		mtsSession->users(),
+		&Api::Users::memberLoaded,
+		[mainSession](const Api::MemberProfile &profile) {
+			applyUserData(mainSession, profile);
+		});
 	QObject::connect(
 		mtsSession->users(),
 		&Api::Users::membersLoaded,
@@ -596,7 +603,7 @@ QString peerIdToChatId(PeerId peerId) {
 	return PeerToChatMap.value(peerId);
 }
 
-bool isMtsLinkPeer(PeerId peerId) {
+bool hasChatId(PeerId peerId) {
 	return PeerToChatMap.contains(peerId);
 }
 
@@ -604,10 +611,24 @@ ChatType chatTypeForPeer(PeerId peerId) {
 	return PeerToChatTypeMap.value(peerId, ChatType::Channel);
 }
 
+PeerId favoritesPeerId() {
+	return FavoritesPeerIdValue;
+}
+
 void applyDialogData(
 		not_null<Main::Session*> session,
 		const Api::ChannelData &src) {
-	const auto peerId = chatIdToPeerId(src.id, ChatType::Dialog);
+	PeerId peerId;
+	if (!src.interlocutorId.isEmpty()) {
+		const auto bareId = uuidToBareId(src.interlocutorId);
+		peerId = PeerId(::UserId(bareId));
+		PeerToChatMap.insert(peerId, src.id);
+		ChatToPeerMap.insert(src.id, peerId);
+		PeerToChatTypeMap.insert(peerId, ChatType::Dialog);
+		UserBareIdToUuidMap.insert(bareId, src.interlocutorId);
+	} else {
+		peerId = chatIdToPeerId(src.id, ChatType::Dialog);
+	}
 	const auto userId = peerToUser(peerId);
 	const auto user = session->data().user(userId);
 
@@ -627,6 +648,7 @@ void applyDialogData(
 	history->setUnreadCount(src.unreadCount);
 
 	if (src.type == ChatType::Favorites) {
+		FavoritesPeerIdValue = peerId;
 		session->data().setChatPinned(history, FilterId(), true);
 		session->data().setChatPinned(history, FilterId(2), true);
 	}
@@ -690,10 +712,15 @@ void applyUserData(
 	const auto bareId = uuidToBareId(src.userId);
 	UserBareIdToUuidMap.insert(bareId, src.userId);
 	const auto user = session->data().user(::UserId(bareId));
+	const auto isSelf = (user == session->user());
 
 	const auto first = src.firstName;
 	const auto last = src.lastName;
 	const auto display = src.displayName;
+	if (isSelf) {
+		LOG(("MtsLink: applying SELF user data: '%1 %2' display='%3' avatar='%4'")
+			.arg(first, last, display, src.avatarFileId));
+	}
 	user->setName(
 		first.isEmpty() ? display : first,
 		last,
@@ -701,6 +728,43 @@ void applyUserData(
 		display);
 	user->setLoadedStatus(PeerData::LoadedStatus::Normal);
 	applyUserpic(user, src.avatarFileId);
+
+	if (!src.displayName.isEmpty()) {
+		user->setUsername(src.displayName);
+	}
+
+	if (!src.phone.isEmpty()) {
+		auto phone = src.phone;
+		if (phone.startsWith('+')) {
+			phone = phone.mid(1);
+		}
+		user->setPhone(phone);
+	}
+
+	QStringList aboutParts;
+	if (!src.email.isEmpty()) {
+		aboutParts << src.email;
+	}
+	if (!src.position.isEmpty()) {
+		aboutParts << src.position;
+	}
+	if (!src.department.isEmpty()) {
+		aboutParts << src.department;
+	}
+	if (!aboutParts.isEmpty()) {
+		user->setAbout(aboutParts.join(QChar('\n')));
+	}
+
+	auto flags = Data::PeerUpdate::Flag::Name
+		| Data::PeerUpdate::Flag::Photo
+		| Data::PeerUpdate::Flag::Username;
+	if (!src.phone.isEmpty()) {
+		flags |= Data::PeerUpdate::Flag::PhoneNumber;
+	}
+	if (!aboutParts.isEmpty()) {
+		flags |= Data::PeerUpdate::Flag::About;
+	}
+	session->changes().peerUpdated(user, flags);
 }
 
 HistoryItem *addMessage(
@@ -1053,7 +1117,7 @@ void handleChatEvent(
 			return;
 		}
 		const auto peerId = chatIdToPeerId(eventChatId);
-		if (!isMtsLinkPeer(peerId)) {
+		if (!hasChatId(peerId)) {
 			return;
 		}
 		const auto history = session->data().historyLoaded(peerId);

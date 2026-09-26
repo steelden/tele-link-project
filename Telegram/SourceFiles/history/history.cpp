@@ -874,7 +874,7 @@ void History::checkForLoadedAtTop(not_null<HistoryItem*> added) {
 			addEdgesToSharedMedia();
 		}
 	} else if (peer->isChannel()) {
-		if (added->id == 1 && !MtsLink::isMtsLinkPeer(peer->id)) {
+		if (added->id == 1 && !MtsLink::hasChatId(peer->id)) {
 			_loadedAtTop = true;
 			checkLocalMessages();
 			addEdgesToSharedMedia();

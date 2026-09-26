@@ -283,7 +283,7 @@ struct State {
 		if (!weak) {
 			return rpl::lifetime();
 		}
-		if (MtsLink::isMtsLinkPeer(item->history()->peer->id)) {
+		if (MtsLink::hasChatId(item->history()->peer->id)) {
 			const auto context = PreparedContextAt(weak.get(), session);
 			auto &entry = context->cacheRead(item);
 			entry.data = Peers{ .state = WhoReadState::Empty };
@@ -374,7 +374,7 @@ struct State {
 		if (!weak) {
 			return rpl::lifetime();
 		}
-		if (MtsLink::isMtsLinkPeer(item->history()->peer->id)) {
+		if (MtsLink::hasChatId(item->history()->peer->id)) {
 			const auto context = PreparedContextAt(weak.get(), session);
 			auto &entry = context->cacheReacted(item, reaction);
 			entry.data = PeersWithReactions{

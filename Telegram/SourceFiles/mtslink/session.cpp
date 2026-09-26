@@ -108,6 +108,10 @@ void Session::runInitSequence() {
 					.arg(_organizationId, _userId));
 			}
 
+			if (_users && !_userId.isEmpty()) {
+				_users->loadMember(_userId, _organizationId);
+			}
+
 			subscribeToEvents();
 		});
 }

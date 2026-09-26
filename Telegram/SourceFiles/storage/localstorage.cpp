@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "storage/localstorage.h"
 
+#include "mtslink/lang_overrides.h"
+
 #include "storage/serialize_common.h"
 #include "storage/storage_account.h"
 #include "storage/details/storage_file_utilities.h"
@@ -1251,6 +1253,7 @@ Window::Theme::Saved readThemeAfterSwitch() {
 void readLangPack() {
 	FileReadDescriptor langpack;
 	if (!_langPackKey || !ReadEncryptedFile(langpack, _langPackKey, _basePath, SettingsKey)) {
+		MtsLink::applyLangOverrides();
 		return;
 	}
 	auto data = QByteArray();
@@ -1258,6 +1261,7 @@ void readLangPack() {
 	if (langpack.stream.status() == QDataStream::Ok) {
 		Lang::GetInstance().fillFromSerialized(data, langpack.version);
 	}
+	MtsLink::applyLangOverrides();
 }
 
 void writeLangPack() {

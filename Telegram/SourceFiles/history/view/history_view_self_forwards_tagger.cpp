@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/choose_filter_box.h"
 #include "chat_helpers/share_message_phrase_factory.h"
 #include "core/ui_integration.h"
+#include "mtslink/data_adapters.h"
 #include "data/data_chat_filters.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
@@ -286,7 +287,12 @@ void SelfForwardsTagger::showTaggedToast(DocumentId reaction) {
 
 		const auto button = Ui::CreateChild<Ui::AbstractButton>(widget.get());
 		button->setClickedCallback([=] {
-			_controller->showPeerHistory(_controller->session().user());
+			const auto favPeerId = MtsLink::favoritesPeerId();
+			if (favPeerId) {
+				_controller->showPeerHistory(favPeerId);
+			} else {
+				_controller->showPeerHistory(_controller->session().user());
+			}
 			hideToast();
 		});
 

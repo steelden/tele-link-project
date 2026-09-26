@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "media/audio/media_audio.h"
 #include "mtproto/mtproto_config.h"
+#include "mtproto/facade.h"
 #include "mainwidget.h"
 #include "api/api_updates.h"
 #include "ui/ui_utility.h"
@@ -667,6 +668,20 @@ bool Account::isMtsLink() const {
 void Account::startMtsLinkSession(const QString &token) {
 	LOG(("MtsLink: creating MtsLink::Session..."));
 	_mtsLinkSession = std::make_unique<MtsLink::Session>();
+
+	_mtp->setConnectionState(MTP::ConnectingState);
+	const auto mtp = _mtp.get();
+	QObject::connect(
+		_mtsLinkSession.get(),
+		&MtsLink::Session::started,
+		_mtsLinkSession.get(),
+		[mtp] { mtp->setConnectionState(MTP::ConnectedState); });
+	QObject::connect(
+		_mtsLinkSession.get(),
+		&MtsLink::Session::stopped,
+		_mtsLinkSession.get(),
+		[mtp] { mtp->setConnectionState(MTP::ConnectingState); });
+
 	LOG(("MtsLink: calling session->start()..."));
 	_mtsLinkSession->start(token);
 	LOG(("MtsLink: session started, connecting to Main::Session..."));

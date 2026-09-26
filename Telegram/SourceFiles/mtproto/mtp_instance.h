@@ -92,6 +92,7 @@ public:
 	void restart();
 	void restart(ShiftedDcId shiftedDcId);
 	int32 dcstate(ShiftedDcId shiftedDcId = 0);
+	void setConnectionState(int32 state);
 	QString dctransport(ShiftedDcId shiftedDcId = 0);
 	void ping();
 	void cancel(mtpRequestId requestId);

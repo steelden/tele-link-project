@@ -1502,7 +1502,7 @@ void Reactions::send(
 		not_null<HistoryItem*> item,
 		bool addToRecent,
 		const ReactionId &removedReaction) {
-	if (MtsLink::isMtsLinkPeer(item->history()->peer->id)) {
+	if (MtsLink::hasChatId(item->history()->peer->id)) {
 		const auto mts = _owner->session().account().mtsLinkSession();
 		if (mts) {
 			const auto chatId = MtsLink::peerIdToChatId(

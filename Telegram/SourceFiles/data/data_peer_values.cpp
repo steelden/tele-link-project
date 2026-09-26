@@ -320,7 +320,7 @@ inline auto DefaultRestrictionValue(
 
 // This is duplicated in PeerData::canPinMessages().
 rpl::producer<bool> CanPinMessagesValue(not_null<PeerData*> peer) {
-	if (MtsLink::isMtsLinkPeer(peer->id)) {
+	if (MtsLink::hasChatId(peer->id)) {
 		return rpl::single(true);
 	}
 	using namespace rpl::mappers;

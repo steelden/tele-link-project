@@ -106,6 +106,7 @@ public:
 	void restart();
 	void restart(ShiftedDcId shiftedDcId);
 	[[nodiscard]] int32 dcstate(ShiftedDcId shiftedDcId = 0);
+	void setConnectionState(int32 state);
 	[[nodiscard]] QString dctransport(ShiftedDcId shiftedDcId = 0);
 	void ping();
 	void cancel(mtpRequestId requestId);
@@ -286,6 +287,8 @@ private:
 	Fn<void(const Error&, const Response&)> _globalFailHandler;
 	Fn<void(ShiftedDcId shiftedDcId, int32 state)> _stateChangedHandler;
 	Fn<void(ShiftedDcId shiftedDcId)> _sessionResetHandler;
+
+	int32 _connectionState = ConnectedState;
 
 	rpl::event_stream<mtpRequestId> _nonPremiumDelayedRequests;
 	rpl::event_stream<> _frozenErrorReceived;
@@ -609,7 +612,17 @@ void Instance::Private::restart(ShiftedDcId shiftedDcId) {
 }
 
 int32 Instance::Private::dcstate(ShiftedDcId shiftedDcId) {
-	return DisconnectedState;
+	return _connectionState;
+}
+
+void Instance::Private::setConnectionState(int32 state) {
+	if (_connectionState == state) {
+		return;
+	}
+	_connectionState = state;
+	if (_stateChangedHandler) {
+		_stateChangedHandler(mainDcId(), state);
+	}
 }
 
 QString Instance::Private::dctransport(ShiftedDcId shiftedDcId) {
@@ -1817,6 +1830,10 @@ void Instance::restart(ShiftedDcId shiftedDcId) {
 
 int32 Instance::dcstate(ShiftedDcId shiftedDcId) {
 	return _private->dcstate(shiftedDcId);
+}
+
+void Instance::setConnectionState(int32 state) {
+	_private->setConnectionState(state);
 }
 
 QString Instance::dctransport(ShiftedDcId shiftedDcId) {

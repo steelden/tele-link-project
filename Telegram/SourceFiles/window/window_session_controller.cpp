@@ -1253,7 +1253,7 @@ void SessionNavigation::showRepliesForMessage(
 			return;
 		}
 	}
-	if (MtsLink::isMtsLinkPeer(history->peer->id)) {
+	if (MtsLink::hasChatId(history->peer->id)) {
 		using namespace HistoryView;
 		auto memento = std::make_shared<ChatMemento>(
 			ChatViewId{

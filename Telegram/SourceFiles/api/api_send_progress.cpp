@@ -112,7 +112,7 @@ bool SendProgressManager::updated(const Key &key, bool doing) {
 }
 
 void SendProgressManager::send(const Key &key, int progress) {
-	if (MtsLink::isMtsLinkPeer(key.history->peer->id)) {
+	if (MtsLink::hasChatId(key.history->peer->id)) {
 		if (key.type == SendProgressType::Typing) {
 			const auto mts = _session->account().mtsLinkSession();
 			if (mts) {

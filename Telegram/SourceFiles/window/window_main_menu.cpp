@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
+#include "mtslink/data_adapters.h"
 #include "main/main_session_settings.h"
 #include "mtproto/mtproto_config.h"
 #include "settings/sections/settings_advanced.h"
@@ -714,7 +715,12 @@ void MainMenu::setupMenu() {
 			tr::lng_saved_messages(),
 			{ &st::menuIconSavedMessages }
 		)->setClickedCallback([=] {
-			controller->showPeerHistory(controller->session().user());
+			const auto favPeerId = MtsLink::favoritesPeerId();
+			if (favPeerId) {
+				controller->showPeerHistory(favPeerId);
+			} else {
+				controller->showPeerHistory(controller->session().user());
+			}
 		});
 	} else {
 		addAction(

@@ -35,8 +35,9 @@ void connectToSession(
 [[nodiscard]] PeerId chatIdToPeerId(const QString &chatId, ChatType type);
 [[nodiscard]] PeerId chatIdToPeerId(const QString &chatId);
 [[nodiscard]] QString peerIdToChatId(PeerId peerId);
-[[nodiscard]] bool isMtsLinkPeer(PeerId peerId);
+[[nodiscard]] bool hasChatId(PeerId peerId);
 [[nodiscard]] ChatType chatTypeForPeer(PeerId peerId);
+[[nodiscard]] PeerId favoritesPeerId();
 
 void applyDialogData(
 	not_null<Main::Session*> session,

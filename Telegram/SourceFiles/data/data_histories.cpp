@@ -421,7 +421,7 @@ void Histories::sendDialogRequests() {
 	}
 	for (auto it = _dialogRequestsPending.begin();
 			it != _dialogRequestsPending.end();) {
-		if (MtsLink::isMtsLinkPeer(it->first->peer->id)) {
+		if (MtsLink::hasChatId(it->first->peer->id)) {
 			for (auto &cb : it->second) {
 				if (cb) cb();
 			}
@@ -535,7 +535,7 @@ void Histories::changeDialogUnreadMark(
 		bool unread) {
 	history->setUnreadMark(unread);
 
-	if (MtsLink::isMtsLinkPeer(history->peer->id)) {
+	if (MtsLink::hasChatId(history->peer->id)) {
 		return;
 	}
 	using Flag = MTPmessages_MarkDialogUnread::Flag;
@@ -569,7 +569,7 @@ void Histories::requestFakeChatListMessage(
 	if (_fakeChatListRequests.contains(history)) {
 		return;
 	}
-	if (MtsLink::isMtsLinkPeer(history->peer->id)) {
+	if (MtsLink::hasChatId(history->peer->id)) {
 		return;
 	}
 
@@ -670,7 +670,7 @@ void Histories::reportPendingDeliveries() {
 	auto &pending = _pendingDeliveryReport;
 	for (auto i = begin(pending); i != end(pending);) {
 		auto &[peer, ids] = *i;
-		if (MtsLink::isMtsLinkPeer(peer->id)) {
+		if (MtsLink::hasChatId(peer->id)) {
 			i = pending.erase(i);
 			continue;
 		}
@@ -746,7 +746,7 @@ void Histories::sendReadRequest(not_null<History*> history, State &state) {
 	state.willReadWhen = 0;
 	state.sentReadDone = false;
 
-	if (MtsLink::isMtsLinkPeer(history->peer->id)) {
+	if (MtsLink::hasChatId(history->peer->id)) {
 		const auto mts = session().account().mtsLinkSession();
 		if (mts) {
 			const auto chatId = MtsLink::peerIdToChatId(history->peer->id);
@@ -833,7 +833,7 @@ void Histories::deleteMessages(
 		not_null<History*> history,
 		const QVector<MTPint> &ids,
 		bool revoke) {
-	if (MtsLink::isMtsLinkPeer(history->peer->id)) {
+	if (MtsLink::hasChatId(history->peer->id)) {
 		const auto mts = session().account().mtsLinkSession();
 		if (!mts) {
 			return;
@@ -875,7 +875,7 @@ void Histories::deleteAllMessages(
 		MsgId deleteTillId,
 		bool justClear,
 		bool revoke) {
-	if (MtsLink::isMtsLinkPeer(history->peer->id)) {
+	if (MtsLink::hasChatId(history->peer->id)) {
 		if (justClear) {
 			history->clear(History::ClearType::ClearHistory);
 		}
@@ -976,7 +976,7 @@ void Histories::deleteMessagesByDates(
 	TimeId minDate,
 	TimeId maxDate,
 	bool revoke) {
-	if (MtsLink::isMtsLinkPeer(history->peer->id)) {
+	if (MtsLink::hasChatId(history->peer->id)) {
 		return;
 	}
 	sendRequest(history, RequestType::Delete, [=](Fn<void()> finish) {

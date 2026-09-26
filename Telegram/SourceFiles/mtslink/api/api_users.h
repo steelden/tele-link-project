@@ -21,7 +21,7 @@ class Users final : public QObject {
 public:
 	explicit Users(Rpc *rpc, QObject *parent = nullptr);
 
-	void loadMember(const UserId &userId);
+	void loadMember(const UserId &userId, const QString &organizationId);
 	void loadOrganizationMembers(int offset = 0, int limit = 100);
 	void loadChatMembers(const ChatId &chatId);
 

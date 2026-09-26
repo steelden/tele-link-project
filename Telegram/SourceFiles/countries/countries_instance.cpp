@@ -262,6 +262,9 @@ const std::vector<Info> &CountriesInstance::list() const {
 }
 
 void CountriesInstance::setList(std::vector<Info> &&infos) {
+	if (infos.empty()) {
+		return;
+	}
 	_list = std::move(infos);
 	_byCode.clear();
 	_byISO2.clear();
@@ -353,6 +356,14 @@ FormatResult CountriesInstance::format(FormatArgs args) const {
 		for (auto &callingCode : country.codes) {
 			if (phoneNumber.startsWith(callingCode.callingCode)) {
 				const auto codeSize = callingCode.callingCode.size();
+				if (callingCode.prefixes.empty()) {
+					if (size_t(codeSize) > bestLength) {
+						bestCountryPtr = &country;
+						bestCallingCodePtr = &callingCode;
+						bestLength = codeSize;
+					}
+					isPrefix = true;
+				}
 				for (const auto &prefix : callingCode.prefixes) {
 					if (prefix.startsWith(base::StringViewMid(phoneNumber, codeSize))) {
 						isPrefix = true;

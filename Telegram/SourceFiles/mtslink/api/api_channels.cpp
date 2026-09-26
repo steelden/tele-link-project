@@ -98,23 +98,18 @@ void Channels::loadMyDialogsAndGroupChats() {
 			for (const auto &item : list) {
 				const auto obj = item.toObject();
 				auto ch = parseChat(obj);
+				const auto inner = obj.contains("value")
+					? obj.value("value").toObject()
+					: obj;
+				ch.interlocutorId = inner.value("interlocutorId").toString();
 				if (ch.type == ChatType::Favorites && ch.name.isEmpty()) {
 					ch.name = QString::fromUtf8("\xd0\x98\xd0\xb7\xd0\xb1\xd1\x80\xd0\xb0\xd0\xbd\xd0\xbd\xd0\xbe\xd0\xb5");
 				} else if (ch.name.isEmpty()) {
-					const auto inner = obj.contains("value")
-						? obj.value("value").toObject()
-						: obj;
-					const auto interlocutorId = inner.value("interlocutorId").toString();
-					ch.name = userNames.value(interlocutorId);
+					ch.name = userNames.value(ch.interlocutorId);
 				}
-				if (ch.avatarFileId.isEmpty()) {
-					const auto inner = obj.contains("value")
-						? obj.value("value").toObject()
-						: obj;
-					const auto interlocutorId = inner.value("interlocutorId").toString();
-					if (!interlocutorId.isEmpty()) {
-						ch.avatarFileId = userAvatars.value(interlocutorId);
-					}
+				if (ch.avatarFileId.isEmpty()
+					&& !ch.interlocutorId.isEmpty()) {
+					ch.avatarFileId = userAvatars.value(ch.interlocutorId);
 				}
 				dialogs.push_back(std::move(ch));
 			}

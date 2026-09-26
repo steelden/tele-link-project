@@ -4093,7 +4093,7 @@ void ToggleMessagePinned(
 		const auto session = &peer->session();
 		const auto callback = crl::guard(session, [=](Fn<void()> &&close) {
 			close();
-			if (MtsLink::isMtsLinkPeer(peer->id)) {
+			if (MtsLink::hasChatId(peer->id)) {
 				const auto mts = session->account().mtsLinkSession();
 				if (mts) {
 					const auto chatId = MtsLink::peerIdToChatId(peer->id);
@@ -4155,7 +4155,7 @@ void UnpinMessages(
 				continue;
 			}
 			const auto peer = item->history()->peer;
-			if (MtsLink::isMtsLinkPeer(peer->id)) {
+			if (MtsLink::hasChatId(peer->id)) {
 				anyMtsLink = true;
 				const auto mts = session->account().mtsLinkSession();
 				if (mts) {

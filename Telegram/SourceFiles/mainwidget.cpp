@@ -1677,7 +1677,7 @@ void MainWidget::showHistory(
 		ClearBotStartToken(_history->peer());
 	}
 	_history->showHistory(peerId, showAtMsgId, params);
-	if (peerId && MtsLink::isMtsLinkPeer(peerId)) {
+	if (peerId && MtsLink::hasChatId(peerId)) {
 		const auto chatId = MtsLink::peerIdToChatId(peerId);
 		if (const auto mts = _controller->session().account().mtsLinkSession()) {
 			LOG(("MtsLink: loading messages for chat %1").arg(chatId));

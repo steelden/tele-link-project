@@ -536,7 +536,7 @@ void RepliesList::loadAround(MsgId id) {
 	}
 
 	const auto peerId = _history->peer->id;
-	if (MtsLink::isMtsLinkPeer(peerId)) {
+	if (MtsLink::hasChatId(peerId)) {
 		_loadingAround = id;
 		const auto chatId = MtsLink::peerIdToChatId(peerId);
 		const auto parentId = MtsLink::msgIdToMtsLinkId(peerId, _rootId);
@@ -641,7 +641,7 @@ void RepliesList::loadAround(MsgId id) {
 void RepliesList::loadBefore() {
 	Expects(!_list.empty());
 
-	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+	if (MtsLink::hasChatId(_history->peer->id)) {
 		return;
 	}
 
@@ -691,7 +691,7 @@ void RepliesList::loadBefore() {
 void RepliesList::loadAfter() {
 	Expects(!_list.empty());
 
-	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+	if (MtsLink::hasChatId(_history->peer->id)) {
 		return;
 	}
 
@@ -987,7 +987,7 @@ std::optional<int> RepliesList::computeUnreadCountLocally(
 }
 
 void RepliesList::requestUnreadCount() {
-	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+	if (MtsLink::hasChatId(_history->peer->id)) {
 		return;
 	}
 	if (_reloadUnreadCountRequestId) {
@@ -1067,7 +1067,7 @@ void RepliesList::readTill(
 }
 
 void RepliesList::sendReadTillRequest() {
-	if (MtsLink::isMtsLinkPeer(_history->peer->id)) {
+	if (MtsLink::hasChatId(_history->peer->id)) {
 		return;
 	}
 	if (_readRequestTimer.isActive()) {

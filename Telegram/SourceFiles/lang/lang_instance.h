@@ -93,6 +93,7 @@ public:
 		return _values[key];
 	}
 	QString getNonDefaultValue(const QByteArray &key) const;
+	void overrideValue(const QByteArray &key, const QByteArray &value);
 	bool isNonDefaultPlural(ushort key) const {
 		Expects(key + 5 < _nonDefaultSet.size());
 
