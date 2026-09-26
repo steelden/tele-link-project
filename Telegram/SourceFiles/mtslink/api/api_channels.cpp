@@ -123,7 +123,27 @@ void Channels::loadChatInfo(const ChatId &chatId) {
 		QJsonObject{{"chatId", chatId}},
 		[this](const QJsonObject &result) {
 			const auto value = result.value("value").toObject();
-			Q_EMIT chatInfoLoaded(parseChat(value));
+			auto ch = parseChat(value);
+			if (ch.type == ChatType::Dialog && ch.name.isEmpty()) {
+				const auto profiles = value.value("memberProfiles").toArray();
+				for (const auto &p : profiles) {
+					const auto prof = p.toObject();
+					const auto uid = prof.value("userId").toString();
+					if (uid == ch.interlocutorId) {
+						auto name = prof.value("displayName").toString();
+						if (name.isEmpty()) {
+							name = (prof.value("firstName").toString()
+								+ " " + prof.value("lastName").toString()).trimmed();
+						}
+						ch.name = name;
+						if (ch.avatarFileId.isEmpty()) {
+							ch.avatarFileId = prof.value("avatarFileId").toString();
+						}
+						break;
+					}
+				}
+			}
+			Q_EMIT chatInfoLoaded(ch);
 		});
 }
 
@@ -164,6 +184,7 @@ ChannelData Channels::parseChat(const QJsonObject &obj) const {
 		.isPinned = src.value("pinPosition").toInt() > 0,
 		.pinnedMessageCount = src.value("pinnedMessageCount").toInt(),
 		.memberRole = src.value("memberRole").toString(),
+		.interlocutorId = src.value("interlocutorId").toString(),
 	};
 }
 

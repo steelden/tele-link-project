@@ -103,6 +103,11 @@ void saveThreadScroll(PeerId peerId, MsgId rootId, const ThreadScrollState &stat
 void cacheRepliesList(PeerId peerId, MsgId rootId, std::shared_ptr<Data::RepliesList> replies);
 [[nodiscard]] std::shared_ptr<Data::RepliesList> cachedRepliesList(PeerId peerId, MsgId rootId);
 
+void fetchThreadLastRead(
+	not_null<Main::Session*> session,
+	PeerId peerId,
+	MsgId rootId);
+
 void setPendingTempMessage(PeerId peerId, MsgId msgId);
 void addPendingThreadSend(const QString &clientId);
 [[nodiscard]] bool takePendingThreadSend(const QString &clientId);

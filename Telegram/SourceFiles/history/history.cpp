@@ -3450,6 +3450,16 @@ bool History::isUnknownMessageDeleted(MsgId messageId) const {
 bool History::isServerSideUnread(not_null<const HistoryItem*> item) const {
 	Expects(item->isRegular());
 
+	if (MtsLink::hasChatId(peer->id)) {
+		if (item->out()) {
+			return false;
+		}
+		if (!_inboxReadBefore || !_mtsLinkInboxReadDate) {
+			return true;
+		}
+		return item->date() > _mtsLinkInboxReadDate;
+	}
+
 	return item->out()
 		? (!_outboxReadBefore || (item->id >= *_outboxReadBefore))
 		: (!_inboxReadBefore || (item->id >= *_inboxReadBefore));
@@ -3759,11 +3769,25 @@ void History::validateMonoAndForumUnread(MsgId readTillId) {
 
 void History::setInboxReadTill(MsgId upTo) {
 	if (_inboxReadBefore) {
-		tryMarkForumIntervalRead(*_inboxReadBefore, upTo + 1);
-		tryMarkMonoforumIntervalRead(*_inboxReadBefore, upTo + 1);
-		accumulate_max(*_inboxReadBefore, upTo + 1);
+		if (MtsLink::hasChatId(peer->id)) {
+			*_inboxReadBefore = upTo + 1;
+			if (const auto item = owner().message(peer->id, upTo)) {
+				if (item->date() > _mtsLinkInboxReadDate) {
+					_mtsLinkInboxReadDate = item->date();
+				}
+			}
+		} else {
+			tryMarkForumIntervalRead(*_inboxReadBefore, upTo + 1);
+			tryMarkMonoforumIntervalRead(*_inboxReadBefore, upTo + 1);
+			accumulate_max(*_inboxReadBefore, upTo + 1);
+		}
 	} else {
 		_inboxReadBefore = upTo + 1;
+		if (MtsLink::hasChatId(peer->id)) {
+			if (const auto item = owner().message(peer->id, upTo)) {
+				_mtsLinkInboxReadDate = item->date();
+			}
+		}
 		for (const auto &item : _items) {
 			item->applyEffectWatchedOnUnreadKnown();
 		}

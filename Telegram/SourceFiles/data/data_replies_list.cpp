@@ -901,15 +901,27 @@ void RepliesList::setInboxReadTill(
 		MsgId readTillId,
 		std::optional<int> unreadCount) {
 	const auto newReadTillId = std::max(readTillId.bare, int64(1));
-	const auto ignore = (newReadTillId < _inboxReadTillId);
+	const auto isMtsLink = MtsLink::hasChatId(_history->peer->id);
+	const auto ignore = !isMtsLink && (newReadTillId < _inboxReadTillId);
 	if (ignore) {
 		return;
 	}
-	const auto changed = (newReadTillId > _inboxReadTillId);
+	const auto changed = isMtsLink
+		? (newReadTillId != _inboxReadTillId)
+		: (newReadTillId > _inboxReadTillId);
 	if (changed) {
 		_inboxReadTillId = newReadTillId;
+		if (isMtsLink) {
+			if (const auto item = _history->owner().message(
+					_history->peer->id, MsgId(newReadTillId))) {
+				if (item->date() > _mtsLinkInboxReadDate) {
+					_mtsLinkInboxReadDate = item->date();
+				}
+			}
+		}
 	}
-	if (_skippedAfter == 0
+	if (!isMtsLink
+		&& _skippedAfter == 0
 		&& !_list.empty()
 		&& _inboxReadTillId >= _list.front()) {
 		unreadCount = 0;
@@ -966,25 +978,51 @@ int RepliesList::displayedUnreadCount() const {
 	return (_inboxReadTillId > 1) ? unreadCountCurrent() : 0;
 }
 
+void RepliesList::setMtsLinkInboxReadDate(TimeId date) {
+	if (date > _mtsLinkInboxReadDate) {
+		_mtsLinkInboxReadDate = date;
+	}
+}
+
 bool RepliesList::isServerSideUnread(
 		not_null<const HistoryItem*> item) const {
 	const auto till = item->out()
 		? computeOutboxReadTillFull()
 		: computeInboxReadTillFull();
+	if (MtsLink::hasChatId(_history->peer->id)) {
+		if (!till || !_mtsLinkInboxReadDate) {
+			return true;
+		}
+		return item->date() > _mtsLinkInboxReadDate;
+	}
 	return (item->id > till);
 }
 
 void RepliesList::checkReadTillEnd() {
 	if (_unreadCount.current() != 0
 		&& _skippedAfter == 0
-		&& !_list.empty()
-		&& _inboxReadTillId >= _list.front()) {
-		setUnreadCount(0);
+		&& !_list.empty()) {
+		const auto isMtsLink = MtsLink::hasChatId(_history->peer->id);
+		if (isMtsLink) {
+			if (_mtsLinkInboxReadDate) {
+				const auto frontItem = _history->owner().message(
+					_history->peer->id, _list.front());
+				if (frontItem
+					&& _mtsLinkInboxReadDate >= frontItem->date()) {
+					setUnreadCount(0);
+				}
+			}
+		} else if (_inboxReadTillId >= _list.front()) {
+			setUnreadCount(0);
+		}
 	}
 }
 
 std::optional<int> RepliesList::computeUnreadCountLocally(
 		MsgId afterId) const {
+	if (MtsLink::hasChatId(_history->peer->id)) {
+		return std::nullopt;
+	}
 	Expects(afterId >= _inboxReadTillId);
 
 	const auto currentUnreadCountAfter = _unreadCount.current();
@@ -1088,19 +1126,27 @@ void RepliesList::readTill(
 	if (!IsServerMsgId(tillId)) {
 		return;
 	}
+	const auto isMtsLink = MtsLink::hasChatId(_history->peer->id);
 	const auto was = computeInboxReadTillFull();
 	const auto now = tillId;
-	if (now < was) {
+	if (!isMtsLink && now < was) {
 		return;
 	}
-	const auto unreadCount = computeUnreadCountLocally(now);
+	const auto unreadCount = isMtsLink
+		? std::optional<int>(std::nullopt)
+		: computeUnreadCountLocally(now);
 	const auto fast = (tillIdItem && tillIdItem->out()) || !unreadCount.has_value();
-	if (was < now || (fast && now == was)) {
+	const auto changed = isMtsLink
+		? (now != was)
+		: (was < now);
+	if (changed || (fast && now == was)) {
 		setInboxReadTill(now, unreadCount);
-		const auto rootFullId = FullMsgId(_history->peer->id, _rootId);
-		if (const auto root = _history->owner().message(rootFullId)) {
-			if (const auto post = root->lookupDiscussionPostOriginal()) {
-				post->setCommentsInboxReadTill(now);
+		if (!isMtsLink) {
+			const auto rootFullId = FullMsgId(_history->peer->id, _rootId);
+			if (const auto root = _history->owner().message(rootFullId)) {
+				if (const auto post = root->lookupDiscussionPostOriginal()) {
+					post->setCommentsInboxReadTill(now);
+				}
 			}
 		}
 		if (!_readRequestTimer.isActive()) {
@@ -1116,6 +1162,20 @@ void RepliesList::readTill(
 
 void RepliesList::sendReadTillRequest() {
 	if (MtsLink::hasChatId(_history->peer->id)) {
+		if (_readRequestTimer.isActive()) {
+			_readRequestTimer.cancel();
+		}
+		const auto mts = _history->session().account().mtsLinkSession();
+		if (mts) {
+			const auto chatId = MtsLink::peerIdToChatId(
+				_history->peer->id);
+			const auto tillId = computeInboxReadTillFull();
+			const auto mtsId = MtsLink::msgIdToMtsLinkId(
+				_history->peer->id, tillId);
+			if (!chatId.isEmpty() && !mtsId.isEmpty()) {
+				mts->sending()->readMessage(chatId, mtsId);
+			}
+		}
 		return;
 	}
 	if (_readRequestTimer.isActive()) {

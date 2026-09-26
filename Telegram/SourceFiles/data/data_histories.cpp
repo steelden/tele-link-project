@@ -258,6 +258,25 @@ void Histories::readInboxTill(
 		).arg(tillId.bare
 		).arg(Logs::b(force)));
 
+	if (MtsLink::hasChatId(history->peer->id)) {
+		if (!IsServerMsgId(tillId)) {
+			LOG(("READ-DBG: readInboxTill skip, not server msgId %1").arg(tillId.bare));
+			return;
+		}
+		LOG(("READ-DBG: readInboxTill MtsLink tillId=%1").arg(tillId.bare));
+		Core::App().notifications().clearIncomingFromHistory(history);
+		history->setInboxReadTill(tillId);
+		auto &state = _states[history];
+		if (state.willReadTill == tillId) {
+			LOG(("READ-DBG: readInboxTill skip, same willReadTill"));
+			return;
+		}
+		state.willReadTill = tillId;
+		state.willReadWhen = 0;
+		sendReadRequests();
+		return;
+	}
+
 	const auto syncGuard = gsl::finally([&] {
 		DEBUG_LOG(("Reading: in guard, unread %1."
 			).arg(history->unreadCount()));
@@ -752,9 +771,15 @@ void Histories::sendReadRequest(not_null<History*> history, State &state) {
 			const auto chatId = MtsLink::peerIdToChatId(history->peer->id);
 			const auto mtsId = MtsLink::msgIdToMtsLinkId(
 				history->peer->id, tillId);
+			LOG(("READ-DBG: sendReadRequest MtsLink chatId=%1 mtsId=%2 tillId=%3"
+				).arg(chatId, mtsId).arg(tillId.bare));
 			if (!chatId.isEmpty() && !mtsId.isEmpty()) {
 				mts->sending()->readMessage(chatId, mtsId);
+			} else {
+				LOG(("READ-DBG: sendReadRequest SKIP empty chatId or mtsId!"));
 			}
+		} else {
+			LOG(("READ-DBG: sendReadRequest SKIP no mtsLinkSession!"));
 		}
 		state.sentReadDone = true;
 		state.sentReadTill = 0;
