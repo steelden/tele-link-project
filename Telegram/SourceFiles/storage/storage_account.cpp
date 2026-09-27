@@ -1187,7 +1187,10 @@ void Account::readMtpData() {
 	applyReadContext(std::move(context));
 }
 
-void Account::writeMtsLinkToken(const QString &token, quint64 userId) {
+void Account::writeMtsLinkToken(
+		const QString &token,
+		quint64 userId,
+		const QString &refreshToken) {
 	const auto path = _basePath + u"mtslink_token"_q;
 	QFile file(path);
 	if (token.isEmpty()) {
@@ -1198,6 +1201,10 @@ void Account::writeMtsLinkToken(const QString &token, quint64 userId) {
 		file.write(QString::number(userId).toUtf8());
 		file.write("\n");
 		file.write(token.toUtf8());
+		if (!refreshToken.isEmpty()) {
+			file.write("\n");
+			file.write(refreshToken.toUtf8());
+		}
 	}
 }
 
@@ -1207,15 +1214,18 @@ Account::MtsLinkData Account::readMtsLinkData() const {
 	if (!file.open(QIODevice::ReadOnly)) {
 		return {};
 	}
-	const auto content = QString::fromUtf8(file.readAll()).trimmed();
-	const auto newline = content.indexOf('\n');
-	if (newline < 0) {
-		return { .token = content };
+	const auto lines = QString::fromUtf8(file.readAll()).trimmed().split('\n');
+	if (lines.isEmpty()) {
+		return {};
+	}
+	if (lines.size() == 1) {
+		return { .token = lines[0].trimmed() };
 	}
 	bool ok = false;
-	const auto userId = content.left(newline).trimmed().toULongLong(&ok);
+	const auto userId = lines[0].trimmed().toULongLong(&ok);
 	return {
-		.token = content.mid(newline + 1).trimmed(),
+		.token = lines[1].trimmed(),
+		.refreshToken = (lines.size() > 2) ? lines[2].trimmed() : QString(),
 		.userId = ok ? userId : 0,
 	};
 }

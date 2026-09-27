@@ -304,6 +304,10 @@ not_null<QNetworkReply*> WebLoadManager::send(int id, const QString &url) {
 	auto request = QNetworkRequest(url);
 	if (url.contains(u"mts-link.ru"_q)) {
 		request.setRawHeader("Referer", "https://my.mts-link.ru/");
+		request.setRawHeader("Origin", "https://my.mts-link.ru");
+		request.setRawHeader("sec-fetch-site", "same-site");
+		request.setRawHeader("sec-fetch-mode", "no-cors");
+		request.setRawHeader("sec-fetch-dest", "image");
 		const auto access = MtsLink::fileAuthToken();
 		const auto refresh = MtsLink::fileRefreshToken();
 		QByteArray cookieHeader;
@@ -363,6 +367,31 @@ void WebLoadManager::progress(
 		redirect(id, reply);
 	} else if (status == 425) {
 		// Handled by errorOccurred with retry logic.
+	} else if ((status == 401 || status == 403)
+		&& reply->url().toString().contains(u"mts-link.ru"_q)) {
+		if (const auto sent = findSent(id, reply)) {
+			if (sent->retriesLeft > 0) {
+				--sent->retriesLeft;
+				const auto url = sent->url;
+				LOG(("MtsLink: CDN auth failed (%1), refreshing token").arg(status));
+				MtsLink::requestTokenRefresh();
+				deleteDeferred(reply);
+				QTimer::singleShot(3000, _network.get(), [=] {
+					const auto it = _sent.find(id);
+					if (it != _sent.end()) {
+						it->second.data.clear();
+						it->second.ready = 0;
+						it->second.total = 0;
+						it->second.reply = send(id, url);
+					}
+				});
+				return;
+			}
+		}
+		failed(id, reply);
+	} else if (status == 404
+		&& reply->url().toString().contains(u"mts-link.ru"_q)) {
+		failed(id, reply);
 	} else if (status != 200 && status != 206 && status != 416) {
 		LOG(("Network Error: "
 			"Bad HTTP status received in WebLoadManager::onProgress() %1 url=%2"
@@ -476,6 +505,25 @@ void WebLoadManager::failed(
 				.arg(url).arg(sent->retriesLeft));
 			deleteDeferred(reply);
 			QTimer::singleShot(2000, _network.get(), [=] {
+				const auto it = _sent.find(id);
+				if (it != _sent.end()) {
+					it->second.data.clear();
+					it->second.ready = 0;
+					it->second.total = 0;
+					it->second.reply = send(id, url);
+				}
+			});
+			return;
+		}
+		if ((status == 401 || status == 403)
+			&& sent->url.contains(u"mts-link.ru"_q)
+			&& sent->retriesLeft > 0) {
+			--sent->retriesLeft;
+			const auto url = sent->url;
+			LOG(("MtsLink: CDN auth failed (%1), refreshing token").arg(status));
+			MtsLink::requestTokenRefresh();
+			deleteDeferred(reply);
+			QTimer::singleShot(3000, _network.get(), [=] {
 				const auto it = _sent.find(id);
 				if (it != _sent.end()) {
 					it->second.data.clear();

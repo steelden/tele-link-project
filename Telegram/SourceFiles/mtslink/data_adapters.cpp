@@ -8,6 +8,7 @@ based on Telegram Desktop.
 
 #include "main/main_session.h"
 #include "main/main_account.h"
+#include "storage/storage_account.h"
 #include "data/data_session.h"
 #include "data/data_channel.h"
 #include "data/data_chat_participant_status.h"
@@ -80,6 +81,8 @@ QHash<quint64, MsgId> ThreadRootMap;
 QString FileAuthTokenValue;
 QString FileRefreshTokenValue;
 QList<QNetworkCookie> FileAuthCookies;
+std::function<void()> TokenRefreshCallback;
+bool TokenRefreshInProgress = false;
 QHash<QString, QString> EmojiToIdMap;
 QHash<QString, QString> IdToEmojiMap;
 bool EmojiMapsInitialized = false;
@@ -959,6 +962,31 @@ void connectToSession(
 		not_null<Session*> mtsSession) {
 	loadCachedUserId();
 	loadChatListFromCache(mainSession);
+
+	setTokenRefreshCallback([mtsSession] {
+		mtsSession->auth()->refreshTokens();
+	});
+	QObject::connect(
+		mtsSession->auth(),
+		&Api::Auth::tokenRefreshed,
+		mtsSession,
+		[mainSession](const QString &newToken) {
+			MtsLink::setFileAuthToken(newToken);
+			TokenRefreshInProgress = false;
+			const auto userId = mainSession->userId().bare;
+			mainSession->account().local().writeMtsLinkToken(
+				newToken, userId, MtsLink::fileRefreshToken());
+			LOG(("MtsLink: token refreshed, CDN auth updated"));
+		});
+	QObject::connect(
+		mtsSession->auth(),
+		&Api::Auth::authFailed,
+		mtsSession,
+		[](const QString &error) {
+			TokenRefreshInProgress = false;
+			LOG(("MtsLink: token refresh failed: %1").arg(error));
+		});
+
 	QObject::connect(
 		mtsSession,
 		&Session::initialized,
@@ -1817,8 +1845,6 @@ HistoryItem *addMessage(
 		? buildFileMedia(session, src.files.first(), date)
 		: MTP_messageMediaEmpty();
 
-	LOG(("MtsLink addMessage: threadOnly=%1 batchItems=%2 msgId=%3")
-		.arg(threadOnly).arg(batchItems != nullptr).arg(qint64(fields.id.bare)));
 	const auto item = (threadOnly || batchItems)
 		? history->makeMessage(
 			std::move(fields),
@@ -1828,7 +1854,6 @@ HistoryItem *addMessage(
 			std::move(fields),
 			std::move(text),
 			media);
-	LOG(("MtsLink addMessage: result=%1").arg(item ? "ok" : "null"));
 	if (item && batchItems) {
 		batchItems->push_back(item);
 	}
@@ -3304,11 +3329,32 @@ QString fileRefreshToken() {
 
 void setFileAuthCookies(const QList<QNetworkCookie> &cookies) {
 	FileAuthCookies = cookies;
+	for (const auto &cookie : cookies) {
+		if (cookie.name() == "refresh") {
+			FileRefreshTokenValue = QString::fromUtf8(cookie.value());
+			LOG(("MtsLink: extracted refresh token from cookie"));
+		}
+	}
 	LOG(("MtsLink: stored %1 auth cookies").arg(cookies.size()));
 }
 
 QList<QNetworkCookie> fileAuthCookies() {
 	return FileAuthCookies;
+}
+
+void setTokenRefreshCallback(std::function<void()> callback) {
+	TokenRefreshCallback = std::move(callback);
+}
+
+void requestTokenRefresh() {
+	if (TokenRefreshInProgress) {
+		return;
+	}
+	TokenRefreshInProgress = true;
+	LOG(("MtsLink: requesting token refresh (CDN auth expired)"));
+	if (TokenRefreshCallback) {
+		TokenRefreshCallback();
+	}
 }
 
 QSet<ChatId> MessageCacheLoadedChats;

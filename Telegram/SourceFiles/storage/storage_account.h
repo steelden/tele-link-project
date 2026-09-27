@@ -89,9 +89,13 @@ public:
 
 	struct MtsLinkData {
 		QString token;
+		QString refreshToken;
 		quint64 userId = 0;
 	};
-	void writeMtsLinkToken(const QString &token, quint64 userId);
+	void writeMtsLinkToken(
+		const QString &token,
+		quint64 userId,
+		const QString &refreshToken = {});
 	[[nodiscard]] MtsLinkData readMtsLinkData() const;
 	[[nodiscard]] QString envConfigCachePath() const;
 

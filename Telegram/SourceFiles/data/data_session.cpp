@@ -1906,8 +1906,6 @@ void Session::setupUserIsContactViewer() {
 			}
 		}
 		if (!user->isLoaded()) {
-			LOG(("API Error: "
-				"userIsContactChanged() called for a not loaded user!"));
 			return;
 		}
 		if (user->isContact()) {

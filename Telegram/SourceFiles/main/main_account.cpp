@@ -520,6 +520,9 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 	}
 
 	if (!mtsLinkData.token.isEmpty() && maybeSession()) {
+		if (!mtsLinkData.refreshToken.isEmpty()) {
+			MtsLink::setFileRefreshToken(mtsLinkData.refreshToken);
+		}
 		startMtsLinkSession(mtsLinkData.token);
 	}
 
@@ -696,7 +699,7 @@ void Account::startMtsLinkSession(const QString &token) {
 	LOG(("MtsLink: session started, connecting to Main::Session..."));
 
 	const auto userId = sessionExists() ? session().userId().bare : 0;
-	local().writeMtsLinkToken(token, userId);
+	local().writeMtsLinkToken(token, userId, MtsLink::fileRefreshToken());
 
 	if (const auto s = maybeSession()) {
 		MtsLink::connectToSession(s, _mtsLinkSession.get());

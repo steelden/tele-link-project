@@ -161,6 +161,9 @@ void setFileRefreshToken(const QString &token);
 void setFileAuthCookies(const QList<QNetworkCookie> &cookies);
 [[nodiscard]] QList<QNetworkCookie> fileAuthCookies();
 
+void requestTokenRefresh();
+void setTokenRefreshCallback(std::function<void()> callback);
+
 struct MtsLinkMessageContent {
 	QString text;
 	QJsonArray blocks;
