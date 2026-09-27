@@ -98,6 +98,7 @@ public:
 		const QString &refreshToken = {});
 	[[nodiscard]] MtsLinkData readMtsLinkData() const;
 	[[nodiscard]] QString envConfigCachePath() const;
+	[[nodiscard]] QString basePath() const;
 
 	void registerDraftSource(
 		not_null<History*> history,

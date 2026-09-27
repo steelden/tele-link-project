@@ -90,9 +90,10 @@ bool EmojiMapsInitialized = false;
 QHash<PeerId, QString> ActiveCallLinks;
 rpl::event_stream<PeerId> ActiveCallChanges;
 QString CachedMyUserId;
+QString ProfileDataPath;
 
 QString myUserIdFilePath() {
-	return cWorkingDir() + u"tdata/mtslink_userid.txt"_q;
+	return ProfileDataPath + u"mtslink_userid"_q;
 }
 
 void saveCachedUserId(const QString &userId) {
@@ -111,7 +112,7 @@ void loadCachedUserId() {
 }
 
 QString emojiMapFilePath() {
-	return cWorkingDir() + u"tdata/mtslink_emoji_map.json"_q;
+	return ProfileDataPath + u"mtslink_emoji_map.json"_q;
 }
 
 void saveEmojiMaps() {
@@ -960,6 +961,7 @@ void handleNotificationEvent(
 void connectToSession(
 		not_null<Main::Session*> mainSession,
 		not_null<Session*> mtsSession) {
+	ProfileDataPath = mainSession->account().local().basePath();
 	loadCachedUserId();
 	loadChatListFromCache(mainSession);
 

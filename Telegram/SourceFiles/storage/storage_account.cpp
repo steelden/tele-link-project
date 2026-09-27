@@ -1197,6 +1197,7 @@ void Account::writeMtsLinkToken(
 		file.remove();
 		return;
 	}
+	QDir().mkpath(QFileInfo(path).absolutePath());
 	if (file.open(QIODevice::WriteOnly)) {
 		file.write(QString::number(userId).toUtf8());
 		file.write("\n");
@@ -1205,6 +1206,8 @@ void Account::writeMtsLinkToken(
 			file.write("\n");
 			file.write(refreshToken.toUtf8());
 		}
+	} else {
+		LOG(("MtsLink: FAILED to write token file: %1").arg(file.errorString()));
 	}
 }
 
@@ -1232,6 +1235,10 @@ Account::MtsLinkData Account::readMtsLinkData() const {
 
 QString Account::envConfigCachePath() const {
 	return _basePath + u"mtslink_env_config"_q;
+}
+
+QString Account::basePath() const {
+	return _basePath;
 }
 
 void Account::writeMtpConfig() {
