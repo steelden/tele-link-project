@@ -1923,8 +1923,19 @@ void History::addCreatedOlderSlice(
 void History::addCreatedNewerSlice(
 		const std::vector<not_null<HistoryItem*>> &items) {
 	Assert(!isBuildingFrontBlock());
-	for (const auto &item : items) {
-		addItemToBlock(item);
+	if (MtsLink::hasChatId(peer->id) && !isEmpty()) {
+		for (const auto &item : items) {
+			const auto lastDate = blocks.back()->messages.back()->data()->date();
+			if (item->date() < lastDate) {
+				insertMessageToBlocks(item);
+			} else {
+				addItemToBlock(item);
+			}
+		}
+	} else {
+		for (const auto &item : items) {
+			addItemToBlock(item);
+		}
 	}
 	if (loadedAtBottom()) {
 		addItemsToLists(items);

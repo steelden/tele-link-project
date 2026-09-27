@@ -967,19 +967,42 @@ void connectToSession(
 			mtsSession->messages()->retryFailedLoads();
 			saveCachedUserId(mtsSession->userId());
 		});
+	const auto refreshLastMessages = [mainSession, mtsSession](
+			const QList<Api::ChannelData> &list) {
+		for (const auto &ch : list) {
+			if (ch.lastMessageTimestamp <= 0) {
+				continue;
+			}
+			const auto peerId = chatIdToPeerId(ch.id);
+			const auto history = mainSession->data().historyLoaded(peerId);
+			if (!history) {
+				continue;
+			}
+			const auto currentLast = history->lastMessage();
+			if (!currentLast) {
+				continue;
+			}
+			const auto apiDate = TimeId(ch.lastMessageTimestamp / 1000);
+			if (apiDate > currentLast->date()) {
+				mtsSession->messages()->load(ch.id, {}, 1);
+			}
+		}
+	};
 	QObject::connect(
 		mtsSession->channels(),
 		&Api::Channels::channelsLoaded,
-		[mainSession](const QList<Api::ChannelData> &list) {
+		[mainSession, refreshLastMessages](const QList<Api::ChannelData> &list) {
 			applyChatList(mainSession, list);
 			saveChatListToCache(mainSession, list);
+			refreshLastMessages(list);
 		});
 	QObject::connect(
 		mtsSession->channels(),
 		&Api::Channels::dialogsLoaded,
-		[mainSession](const QList<Api::ChannelData> &list) {
+		[mainSession, refreshLastMessages](const QList<Api::ChannelData> &list) {
 			applyChatList(mainSession, list);
 			saveChatListToCache(mainSession, list);
+			refreshLastMessages(list);
 		});
 	QObject::connect(
 		mtsSession->channels(),
@@ -1459,7 +1482,6 @@ void applyDialogData(
 	if (src.unreadCount >= 0 && src.lastMessageTimestamp) {
 		history->setUnreadCount(src.unreadCount);
 	}
-
 	session->data().notifySettings().apply(
 		not_null<PeerData*>(user), makeMuteSettings(src.isMuted));
 
@@ -1529,7 +1551,6 @@ void applyChannelData(
 	if (src.unreadCount >= 0 && src.lastMessageTimestamp) {
 		history->setUnreadCount(src.unreadCount);
 	}
-
 	session->data().notifySettings().apply(
 		channel, makeMuteSettings(src.isMuted));
 }
@@ -1796,6 +1817,8 @@ HistoryItem *addMessage(
 		? buildFileMedia(session, src.files.first(), date)
 		: MTP_messageMediaEmpty();
 
+	LOG(("MtsLink addMessage: threadOnly=%1 batchItems=%2 msgId=%3")
+		.arg(threadOnly).arg(batchItems != nullptr).arg(qint64(fields.id.bare)));
 	const auto item = (threadOnly || batchItems)
 		? history->makeMessage(
 			std::move(fields),
@@ -1805,6 +1828,7 @@ HistoryItem *addMessage(
 			std::move(fields),
 			std::move(text),
 			media);
+	LOG(("MtsLink addMessage: result=%1").arg(item ? "ok" : "null"));
 	if (item && batchItems) {
 		batchItems->push_back(item);
 	}
@@ -2296,11 +2320,23 @@ void handleChatEvent(
 		const auto isThreadReply = takePendingThreadSend(clientId);
 		const auto chatPeerId = chatIdToPeerId(chatId);
 		const auto isThread = !msg.parentId.isEmpty();
+		const auto msgBareId = uuidToBareId(msg.id);
+		const auto msgIdVal = MsgId(msgBareId & 0x7FFFFFFFLL);
+		LOG(("MtsLink NewMsg: id=%1 msgId=%2 isThread=%3 isThreadReply=%4 "
+			"parentId=%5 text=%6")
+			.arg(msg.id).arg(qint64(msgIdVal.bare))
+			.arg(isThread).arg(isThreadReply)
+			.arg(msg.parentId).arg(msg.text.left(50)));
 		HistoryItem *newItem = nullptr;
 		if (isThreadReply) {
+			LOG(("MtsLink NewMsg: treating as thread reply"));
 			replacePendingWithReal(session, chatPeerId, msg);
 		} else if (!replacePendingWithReal(session, chatPeerId, msg)) {
 			newItem = addMessage(session, msg, isThread);
+			LOG(("MtsLink NewMsg: addMessage result=%1")
+				.arg(newItem ? "ok" : "null"));
+		} else {
+			LOG(("MtsLink NewMsg: replaced pending message"));
 		}
 		{
 			const auto mts = session->account().mtsLinkSession();
