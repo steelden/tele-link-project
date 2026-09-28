@@ -1534,7 +1534,7 @@ void applyChannelData(
 	flags &= ~ChannelDataFlag::Left;
 	flags &= ~ChannelDataFlag::Forbidden;
 
-	if (src.isPublic) {
+	if (src.isReadOnly) {
 		flags |= ChannelDataFlag::Broadcast;
 		flags &= ~ChannelDataFlag::Megagroup;
 	} else {
