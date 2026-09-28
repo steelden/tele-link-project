@@ -92,6 +92,7 @@ rpl::event_stream<PeerId> ActiveCallChanges;
 QString CachedMyUserId;
 QString ProfileDataPath;
 
+
 QString myUserIdFilePath() {
 	return ProfileDataPath + u"mtslink_userid"_q;
 }
@@ -2574,22 +2575,32 @@ void handleChatEvent(
 		if (!item) {
 			return;
 		}
-		QList<Api::ReactionData> reactions;
+		if (session->data().reactions().sending(item)) {
+			session->data().reactions().clearMtsLinkSending(item);
+			return;
+		}
 		const auto arr = value.value("reactions").toArray();
+		bool hasDoubleCount = false;
+		for (const auto &r : arr) {
+			if (r.toObject().value("count").toInt() >= 2) {
+				hasDoubleCount = true;
+				break;
+			}
+		}
+		if (!hasDoubleCount) {
+			return;
+		}
+		QList<Api::ReactionData> reactions;
 		for (const auto &r : arr) {
 			const auto ro = r.toObject();
-			const auto eid = ro.value("emojiId").toString();
-			const auto emj = ro.value("emoji").toString();
-			const auto cnt = ro.value("count").toInt();
-			const auto sel = ro.value("selected").toBool();
+			const auto count = ro.value("count").toInt();
 			reactions.push_back({
-				.emojiId = eid,
-				.emoji = emj,
-				.count = cnt,
-				.selected = sel,
+				.emojiId = ro.value("emojiId").toString(),
+				.emoji = ro.value("emoji").toString(),
+				.count = count,
+				.selected = (count >= 2),
 			});
 		}
-		session->data().reactions().clearMtsLinkSending(item);
 		const auto mtp = buildMtpReactions(reactions);
 		if (mtp) {
 			item->updateReactions(&*mtp);
@@ -2600,6 +2611,9 @@ void handleChatEvent(
 		|| type == "MessageReactionDeletedEvent") {
 		const auto emoji = value.value("emoji").toString();
 		const auto emojiId = value.value("emojiId").toString();
+		const auto reactionUserId = value.value("userId").toString();
+		const auto reactionMsgId = value.value("messageId").toString();
+		const auto isAdded = (type == "MessageReactionAddedEvent");
 		if (!emoji.isEmpty() && !emojiId.isEmpty()) {
 			const auto isNew = !IdToEmojiMap.contains(emojiId)
 				|| IdToEmojiMap[emojiId] != emoji;
@@ -2607,6 +2621,78 @@ void handleChatEvent(
 			EmojiToIdMap[emoji] = emojiId;
 			if (isNew) {
 				saveEmojiMaps();
+			}
+		}
+		if (!reactionMsgId.isEmpty() && !emojiId.isEmpty()) {
+			const auto chatPeerId = chatIdToPeerId(chatId);
+			const auto mapped = MtsLinkIdToMsgMap.constFind(reactionMsgId);
+			const auto msgId = (mapped != MtsLinkIdToMsgMap.constEnd())
+				? mapped.value().second
+				: MsgId(uuidToBareId(reactionMsgId) & 0x7FFFFFFFLL);
+			const auto item = session->data().message(chatPeerId, msgId);
+			if (!item) {
+				return;
+			}
+			{
+				const auto isMine =
+					(reactionUserId == CachedMyUserId);
+				const auto resolvedEmoji = emoji.isEmpty()
+					? IdToEmojiMap.value(emojiId)
+					: emoji;
+				if (resolvedEmoji.isEmpty()) {
+					return;
+				}
+				if (isMine) {
+					return;
+				}
+				const auto &existing = item->reactions();
+				QList<Api::ReactionData> reactions;
+				auto found = false;
+				for (const auto &r : existing) {
+					const auto rEmoji = r.id.emoji();
+					if (rEmoji == resolvedEmoji) {
+						found = true;
+						if (!isAdded) {
+							if (r.count <= 1) {
+								continue;
+							}
+							reactions.push_back({
+								.emojiId = emojiId,
+								.emoji = resolvedEmoji,
+								.count = r.count - 1,
+								.selected = r.my,
+							});
+						} else {
+							reactions.push_back({
+								.emojiId = emojiId,
+								.emoji = resolvedEmoji,
+								.count = r.count,
+								.selected = r.my,
+							});
+						}
+					} else if (!rEmoji.isEmpty()) {
+						reactions.push_back({
+							.emojiId = EmojiToIdMap.value(rEmoji),
+							.emoji = rEmoji,
+							.count = r.count,
+							.selected = r.my,
+						});
+					}
+				}
+				if (!found && isAdded) {
+					reactions.push_back({
+						.emojiId = emojiId,
+						.emoji = resolvedEmoji,
+						.count = 1,
+						.selected = false,
+					});
+				}
+				const auto mtp = buildMtpReactions(reactions);
+				if (mtp) {
+					item->updateReactions(&*mtp);
+				} else {
+					item->updateReactions(nullptr);
+				}
 			}
 		}
 	} else if (type == "MessageUpdatedEvent") {
@@ -3413,7 +3499,6 @@ MtsLinkMessageContent convertMentionsForSending(
 		{u"^^"_q, u"__"_q},
 		{u"~~"_q, u"~~"_q},
 		{u"`"_q, u"`"_q},
-		{u"```"_q, u"```"_q},
 		{u"||"_q, u"||"_q},
 	};
 
@@ -3477,13 +3562,23 @@ MtsLinkMessageContent convertMentionsForSending(
 				styleRanges.push_back({
 					tag.offset, tag.length, styleMap[tag.id]});
 			}
-			const auto mit = mdMap.constFind(tag.id);
-			if (mit != mdMap.constEnd()) {
-				allMdMarkers[tag.offset] += *mit;
-				allMdMarkers[tag.offset + tag.length] += *mit;
-				if (!styleMap.contains(tag.id)) {
-					blockMdMarkers[tag.offset] += *mit;
-					blockMdMarkers[tag.offset + tag.length] += *mit;
+			if (tag.id.startsWith(u"```"_q)) {
+				const auto lang = tag.id.mid(3);
+				const auto open = u"```"_q + lang + u"\n"_q;
+				const auto close = u"\n```"_q;
+				allMdMarkers[tag.offset] += open;
+				allMdMarkers[tag.offset + tag.length] += close;
+				blockMdMarkers[tag.offset] += open;
+				blockMdMarkers[tag.offset + tag.length] += close;
+			} else {
+				const auto mit = mdMap.constFind(tag.id);
+				if (mit != mdMap.constEnd()) {
+					allMdMarkers[tag.offset] += *mit;
+					allMdMarkers[tag.offset + tag.length] += *mit;
+					if (!styleMap.contains(tag.id)) {
+						blockMdMarkers[tag.offset] += *mit;
+						blockMdMarkers[tag.offset + tag.length] += *mit;
+					}
 				}
 			}
 		}

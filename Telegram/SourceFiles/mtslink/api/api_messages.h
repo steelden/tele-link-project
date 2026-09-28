@@ -156,7 +156,6 @@ Q_SIGNALS:
 		const MessageId &targetId,
 		const QList<MessageData> &messages,
 		const QList<MemberProfile> &profiles);
-
 private:
 	[[nodiscard]] MessageData parseMessage(const QJsonObject &obj) const;
 	[[nodiscard]] FileData parseFile(const QJsonObject &obj) const;

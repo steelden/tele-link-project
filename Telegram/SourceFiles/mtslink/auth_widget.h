@@ -34,6 +34,9 @@ Q_SIGNALS:
 	void authCompleted(const Api::AuthResult &result);
 	void authFailed(const QString &error);
 
+protected:
+	void keyPressEvent(QKeyEvent *e) override;
+
 private:
 	void createWebView();
 	bool onNavigationStart(const QString &url, bool newWindow);

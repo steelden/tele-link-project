@@ -11,6 +11,7 @@ based on Telegram Desktop.
 
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
+#include <QtGui/QKeyEvent>
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QPushButton>
@@ -52,6 +53,14 @@ AuthWidget::AuthWidget(QWidget *parent)
 }
 
 AuthWidget::~AuthWidget() = default;
+
+void AuthWidget::keyPressEvent(QKeyEvent *e) {
+	if (e->key() == Qt::Key_F12 && _webView) {
+		_webView->openDevTools();
+	} else {
+		QWidget::keyPressEvent(e);
+	}
+}
 
 void AuthWidget::startAuth() {
 	_statusLabel->hide();
@@ -106,6 +115,12 @@ void AuthWidget::createWebView() {
 				post({type:'console.warn', msg: args.join(' ')});
 				origWarn.apply(console, arguments);
 			};
+			var origLog = console.log;
+			console.log = function() {
+				var args = Array.prototype.slice.call(arguments);
+				post({type:'console.log', msg: args.join(' ')});
+				origLog.apply(console, arguments);
+			};
 			window.onerror = function(msg, src, line, col, err) {
 				post({type:'onerror', msg:msg, src:src, line:line});
 			};
@@ -119,6 +134,31 @@ void AuthWidget::createWebView() {
 						src: e.target.src || e.target.href || ''});
 				}
 			}, true);
+			window.addEventListener('securitypolicyviolation', function(e) {
+				post({type:'csp-violation',
+					blocked: e.blockedURI,
+					directive: e.violatedDirective,
+					policy: e.originalPolicy.substring(0, 200)});
+			});
+			var origFetch = window.fetch;
+			window.fetch = function() {
+				var url = arguments[0];
+				if (typeof url === 'object' && url.url) url = url.url;
+				post({type:'fetch', url: String(url).substring(0, 200)});
+				return origFetch.apply(this, arguments).then(function(r) {
+					if (!r.ok) post({type:'fetch-error', url: String(url).substring(0, 200), status: r.status});
+					return r;
+				}).catch(function(e) {
+					post({type:'fetch-fail', url: String(url).substring(0, 200), err: String(e)});
+					throw e;
+				});
+			};
+			var origXHROpen = XMLHttpRequest.prototype.open;
+			XMLHttpRequest.prototype.open = function(method, url) {
+				this._diagUrl = String(url).substring(0, 200);
+				post({type:'xhr', method: method, url: this._diagUrl});
+				return origXHROpen.apply(this, arguments);
+			};
 		})();
 	)JS");
 
@@ -135,6 +175,20 @@ void AuthWidget::createWebView() {
 		}
 		_webView->eval(R"JS(
 			(function() {
+				var post = function(obj) {
+					try { window.chrome.webview.postMessage(JSON.stringify(obj)); }
+					catch(e) {}
+				};
+				var stylesheets = document.querySelectorAll('link[rel=stylesheet]');
+				var ssInfo = [];
+				for (var i = 0; i < stylesheets.length; i++) {
+					var s = stylesheets[i];
+					ssInfo.push({
+						href: (s.href || '').substring(0, 200),
+						disabled: s.disabled,
+						loaded: s.sheet !== null
+					});
+				}
 				var info = {
 					type: 'page-info',
 					url: location.href,
@@ -143,12 +197,26 @@ void AuthWidget::createWebView() {
 						? document.body.innerText.length
 						: 0,
 					scripts: document.scripts.length,
-					links: document.querySelectorAll(
-						'link[rel=stylesheet]').length,
+					links: stylesheets.length,
+					stylesheets: ssInfo,
+					inlineStyles: document.querySelectorAll('style').length,
 				};
-				window.chrome.webview.postMessage(
-					JSON.stringify(info));
+				post(info);
 				setTimeout(function() {
+					var bodyStyle = document.body
+						? window.getComputedStyle(document.body)
+						: null;
+					var ssLoaded = [];
+					var ssFailed = [];
+					var sheets = document.querySelectorAll('link[rel=stylesheet]');
+					for (var i = 0; i < sheets.length; i++) {
+						var sh = sheets[i];
+						if (sh.sheet) {
+							ssLoaded.push((sh.href || '').substring(0, 150));
+						} else {
+							ssFailed.push((sh.href || '').substring(0, 150));
+						}
+					}
 					var delayed = {
 						type: 'page-info-delayed',
 						url: location.href,
@@ -158,9 +226,32 @@ void AuthWidget::createWebView() {
 						bodyText: document.body
 							? document.body.innerText.substring(0, 500)
 							: '(no body)',
+						bodyBg: bodyStyle
+							? bodyStyle.backgroundColor
+							: '(none)',
+						bodyDisplay: bodyStyle
+							? bodyStyle.display
+							: '(none)',
+						bodyVisibility: bodyStyle
+							? bodyStyle.visibility
+							: '(none)',
+						bodyOpacity: bodyStyle
+							? bodyStyle.opacity
+							: '(none)',
+						ssLoaded: ssLoaded,
+						ssFailed: ssFailed,
+						totalRules: (function() {
+							var count = 0;
+							try {
+								for (var i = 0; i < document.styleSheets.length; i++) {
+									try { count += document.styleSheets[i].cssRules.length; }
+									catch(e) {}
+								}
+							} catch(e) {}
+							return count;
+						})(),
 					};
-					window.chrome.webview.postMessage(
-						JSON.stringify(delayed));
+					post(delayed);
 				}, 5000);
 			})();
 		)JS");

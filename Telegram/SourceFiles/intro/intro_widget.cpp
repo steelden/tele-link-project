@@ -153,6 +153,7 @@ Widget::Widget(
 		}
 	}
 	_mtsLinkAuth = new MtsLink::AuthWidget(this);
+	_mtsLinkAuth->setGeometry(rect());
 	_mtsLinkAuth->show();
 	_mtsLinkAuth->startAuth();
 
