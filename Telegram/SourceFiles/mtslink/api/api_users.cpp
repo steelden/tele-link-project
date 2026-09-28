@@ -111,23 +111,51 @@ void Users::loadChatMembers(const ChatId &chatId) {
 		},
 		[this, chatId](const QJsonObject &result) {
 			const auto value = result.value("value").toObject();
-			const auto list = value.value("members").toArray();
-			QList<MemberProfile> members;
-			members.reserve(list.size());
-			for (const auto &item : list) {
-				const auto obj = item.toObject();
-				MemberProfile profile{
+			const auto membersList = value.value("members").toArray();
+			const auto adminsList = value.value("admins").toArray();
+
+			const auto parseEntry = [](const QJsonValue &item,
+					MemberRole defaultRole) -> MemberProfile {
+				const auto wrapper = item.toObject();
+				const auto obj = wrapper.value("profile").toObject();
+				const auto chatRole = wrapper.value("role").toString();
+				auto role = defaultRole;
+				if (chatRole.contains("Owner")) {
+					role = MemberRole::Owner;
+				} else if (chatRole.contains("Admin")) {
+					role = MemberRole::Admin;
+				}
+				return MemberProfile{
 					.userId = obj.value("userId").toString(),
+					.organizationId =
+						obj.value("organizationId").toString(),
+					.email = obj.value("email").toString(),
 					.firstName = obj.value("firstName").toString(),
 					.lastName = obj.value("lastName").toString(),
 					.displayName =
 						obj.value("displayName").toString(),
 					.avatarFileId =
 						obj.value("avatarFileId").toString(),
+					.role = role,
 				};
+			};
+
+			QList<MemberProfile> members;
+			members.reserve(adminsList.size() + membersList.size());
+			for (const auto &item : adminsList) {
+				auto profile = parseEntry(item, MemberRole::Admin);
 				if (profile.userId.isEmpty()) {
 					continue;
 				}
+				_cache.insert(profile.userId, profile);
+				members.push_back(std::move(profile));
+			}
+			for (const auto &item : membersList) {
+				auto profile = parseEntry(item, MemberRole::Member);
+				if (profile.userId.isEmpty()) {
+					continue;
+				}
+					.arg(int(profile.role)));
 				_cache.insert(profile.userId, profile);
 				members.push_back(std::move(profile));
 			}

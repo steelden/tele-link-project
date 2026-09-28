@@ -57,6 +57,9 @@ constexpr auto kParticipantsPerPage = 200;
 constexpr auto kSortByOnlineDelay = crl::time(1000);
 
 [[nodiscard]] bool SupportsMemberTags(not_null<PeerData*> peer) {
+	if (MtsLink::hasChatId(peer->id)) {
+		return false;
+	}
 	const auto channel = peer->asChannel();
 	return !channel || (!channel->isBroadcast() && !channel->isCommunity());
 }
@@ -1780,11 +1783,37 @@ void ParticipantsBoxController::loadMoreRows() {
 	}
 
 	if (MtsLink::hasChatId(_peer->id)) {
-		const auto users = MtsLink::chatMtsLinkUsers(
-			&_peer->session(), _peer->id);
-		for (const auto &user : users) {
-			if (appendRow(user)) {
+		_groupByRole = true;
+		const auto mega = channel->asMegagroup();
+		if (mega && mega->mgInfo
+			&& !mega->mgInfo->lastParticipants.empty()) {
+			_additional.fillFromPeer();
+			for (const auto &user : mega->mgInfo->lastParticipants) {
+				appendRow(user);
 			}
+		} else {
+			const auto users = MtsLink::chatMtsLinkUsers(
+				&_peer->session(), _peer->id);
+			for (const auto &user : users) {
+				appendRow(user);
+			}
+			using UpdateFlag = Data::PeerUpdate::Flag;
+			const auto done = std::make_shared<bool>(false);
+			channel->session().changes().peerUpdates(
+				channel,
+				UpdateFlag::Members
+			) | rpl::on_next([=](const Data::PeerUpdate &) {
+				if (*done) {
+					return;
+				}
+				*done = true;
+				_allLoaded = false;
+				while (delegate()->peerListFullRowsCount() > 0) {
+					delegate()->peerListRemoveRow(
+						delegate()->peerListRowAt(0));
+				}
+				loadMoreRows();
+			}, lifetime());
 		}
 		_allLoaded = true;
 		refreshDescription();

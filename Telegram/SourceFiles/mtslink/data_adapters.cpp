@@ -1038,7 +1038,7 @@ void connectToSession(
 	QObject::connect(
 		mtsSession->channels(),
 		&Api::Channels::chatInfoLoaded,
-		[mainSession](const Api::ChannelData &ch) {
+		[mainSession, mtsSession](const Api::ChannelData &ch) {
 			LOG(("MtsLink: chatInfoLoaded '%1' type=%2 id=%3")
 				.arg(ch.name)
 				.arg(int(ch.type))
@@ -1048,6 +1048,9 @@ void connectToSession(
 				applyDialogData(mainSession, ch);
 			} else {
 				applyChannelData(mainSession, ch);
+				if (!ch.isReadOnly) {
+					mtsSession->users()->loadChatMembers(ch.id);
+				}
 			}
 			const auto pending = PendingChatEvents.take(ch.id);
 			ChatInfoRequested.remove(ch.id);
@@ -1292,11 +1295,22 @@ void connectToSession(
 				if (const auto mega = channel->asMegagroup()) {
 					if (mega->mgInfo) {
 						mega->mgInfo->lastParticipants.clear();
-						for (const auto bareId : stored) {
-							if (const auto user = mainSession->data()
-									.userLoaded(::UserId(bareId))) {
-								mega->mgInfo->lastParticipants.push_back(
-									user);
+						mega->mgInfo->lastAdmins.clear();
+						for (const auto &m : members) {
+							const auto bareId = uuidToBareId(m.userId);
+							const auto user = mainSession->data()
+								.userLoaded(::UserId(bareId));
+							if (!user) {
+								continue;
+							}
+							mega->mgInfo->lastParticipants.push_back(
+								user);
+							if (m.role == MemberRole::Admin
+								|| m.role == MemberRole::Owner) {
+								mega->mgInfo->lastAdmins.emplace(
+									user,
+									MegagroupInfo::Admin(
+										ChatAdminRightsInfo()));
 							}
 						}
 						mega->mgInfo->lastParticipantsStatus
@@ -1533,6 +1547,7 @@ void applyChannelData(
 	auto flags = channel->flags();
 	flags &= ~ChannelDataFlag::Left;
 	flags &= ~ChannelDataFlag::Forbidden;
+	flags |= ChannelDataFlag::CanViewParticipants;
 
 	if (src.isReadOnly) {
 		flags |= ChannelDataFlag::Broadcast;
