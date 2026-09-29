@@ -1775,7 +1775,8 @@ void MainWidget::showMessage(
 	const auto itemId = item->id;
 	if (!v::is_null(params.origin)) {
 		if (_mainSection) {
-			if (_mainSection->showMessage(peerId, params, itemId)) {
+			const auto handled = _mainSection->showMessage(peerId, params, itemId);
+			if (handled) {
 				if (params.activation != anim::activation::background) {
 					_controller->window().activate();
 					_controller->window().hideSettingsAndLayer();

@@ -155,7 +155,6 @@ void Users::loadChatMembers(const ChatId &chatId) {
 				if (profile.userId.isEmpty()) {
 					continue;
 				}
-					.arg(int(profile.role)));
 				_cache.insert(profile.userId, profile);
 				members.push_back(std::move(profile));
 			}

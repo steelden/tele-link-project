@@ -1039,10 +1039,6 @@ void connectToSession(
 		mtsSession->channels(),
 		&Api::Channels::chatInfoLoaded,
 		[mainSession, mtsSession](const Api::ChannelData &ch) {
-			LOG(("MtsLink: chatInfoLoaded '%1' type=%2 id=%3")
-				.arg(ch.name)
-				.arg(int(ch.type))
-				.arg(ch.id));
 			if (ch.type == ChatType::Dialog
 				|| ch.type == ChatType::Favorites) {
 				applyDialogData(mainSession, ch);

@@ -3971,7 +3971,9 @@ bool ChatWidget::showMessage(
 	} else if (_repliesRootId
 		&& !message->inThread(_repliesRootId)
 		&& id.msg != _repliesRootId) {
-		return false;
+		if (!MtsLink::hasChatId(peerId)) {
+			return false;
+		}
 	} else if (_sublist && message->savedSublist() != _sublist) {
 		return false;
 	}
