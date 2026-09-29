@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qt/qt_key_modifiers.h"
 #include "base/unixtime.h"
 #include "core/application.h"
+#include "mtslink/data_adapters.h"
 #include "core/click_handler_types.h" // ClickHandlerContext
 #include "core/ui_integration.h"
 #include "core/update_checker.h"
@@ -5360,6 +5361,34 @@ ReplyButton::ButtonParameters Message::replyButtonParameters(
 	return result;
 }
 
+ReplyButton::ButtonParameters Message::threadButtonParameters(
+		QPoint position,
+		const TextState &replyState,
+		int threadButtonWidth) const {
+	using namespace ReplyButton;
+	if (!displayFastThread() || unwrapped()) {
+		return {};
+	}
+	auto result = ButtonParameters{ .context = data()->fullId() };
+	const auto geometry = countGeometry();
+	result.pointer = position;
+	const auto reactionInnerRight = st::reactionCornerCenter.x()
+		+ st::reactionCornerSize.width() / 2;
+	const auto replyInnerWidth = ReplyButton::ComputeInnerWidth();
+	const auto relativeCenter = QPoint(
+		geometry.width() + reactionInnerRight
+			- replyInnerWidth
+			- (replyInnerWidth + threadButtonWidth) / 2,
+		st::replyCornerCenter.y());
+	result.center = geometry.topLeft() + relativeCenter;
+	if (replyState.itemId != result.context
+		&& !geometry.contains(position)) {
+		result.outside = true;
+	}
+	result.link = fastThreadLink();
+	return result;
+}
+
 int Message::reactionsOptimalWidth() const {
 	return _reactions ? _reactions->countNiceWidth() : 0;
 }
@@ -5963,6 +5992,17 @@ bool Message::displayFastReply() const {
 		&& !delegate()->elementInSelectionMode(this).inSelectionMode;
 }
 
+bool Message::displayFastThread() const {
+	if (context() != Context::History) {
+		return false;
+	}
+	const auto peer = data()->history()->peer;
+	return MtsLink::hasChatId(peer->id)
+		&& peer->isMegagroup()
+		&& data()->isRegular()
+		&& displayFastReply();
+}
+
 bool Message::displayRightActionComments() const {
 	return !isPinnedContext()
 		&& (context() != Context::SavedSublist)
@@ -6255,6 +6295,25 @@ ClickHandlerPtr Message::fastReplyLink() const {
 		delegate()->elementReplyTo({ itemId });
 	}));
 	return _fastReplyLink;
+}
+
+ClickHandlerPtr Message::fastThreadLink() const {
+	if (_fastThreadLink) {
+		return _fastThreadLink;
+	}
+	const auto fullId = data()->fullId();
+	const auto sessionId = data()->history()->session().uniqueId();
+	_fastThreadLink = std::make_shared<LambdaClickHandler>([=](
+			ClickContext context) {
+		const auto controller = ExtractController(context);
+		if (!controller || controller->session().uniqueId() != sessionId) {
+			return;
+		}
+		if (const auto item = controller->session().data().message(fullId)) {
+			controller->showRepliesForMessage(item->history(), item->id);
+		}
+	});
+	return _fastThreadLink;
 }
 
 bool Message::isPinnedContext() const {

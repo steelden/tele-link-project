@@ -248,6 +248,10 @@ public:
 	ReplyButton::ButtonParameters replyButtonParameters(
 		QPoint position,
 		const TextState &replyState) const override;
+	ReplyButton::ButtonParameters threadButtonParameters(
+		QPoint position,
+		const TextState &replyState,
+		int threadButtonWidth) const;
 	int reactionsOptimalWidth() const override;
 
 	void unloadHeavyPart() override;
@@ -467,9 +471,11 @@ private:
 	[[nodiscard]] bool isPinnedContext() const;
 	[[nodiscard]] bool isCommentsRootView() const;
 
+	[[nodiscard]] bool displayFastThread() const;
 	[[nodiscard]] bool displayFastShare() const;
 	[[nodiscard]] bool displayGoToOriginal() const;
 	[[nodiscard]] ClickHandlerPtr fastReplyLink() const;
+	[[nodiscard]] ClickHandlerPtr fastThreadLink() const;
 	[[nodiscard]] ClickHandlerPtr prepareRightActionLink() const;
 
 	void ensureRightAction() const;
@@ -529,6 +535,7 @@ private:
 
 	mutable std::unique_ptr<RightAction> _rightAction;
 	mutable ClickHandlerPtr _fastReplyLink;
+	mutable ClickHandlerPtr _fastThreadLink;
 	mutable std::unique_ptr<ViewButton> _viewButton;
 	std::unique_ptr<TopicButton> _topicButton;
 	mutable std::unique_ptr<LinkRipple> _linkRipple;

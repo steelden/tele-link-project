@@ -391,6 +391,10 @@ HistoryInner::HistoryInner(
 , _replyButtonManager(
 	std::make_unique<HistoryView::ReplyButton::Manager>(
 		[=](QRect updated) { update(updated); }))
+, _threadButtonManager(
+	std::make_unique<HistoryView::ReplyButton::Manager>(
+		[=](QRect updated) { update(updated); },
+		tr::lng_replies_view_thread(tr::now)))
 , _touchSelectTimer([=] { onTouchSelect(); })
 , _touchScrollTimer([=] { onTouchScrollTimer(); })
 , _middleClickAutoscroll(
@@ -528,6 +532,7 @@ HistoryInner::HistoryInner(
 		_useCornerReply = value;
 		if (!value) {
 			_replyButtonManager->updateButton({});
+			_threadButtonManager->updateButton({});
 		}
 	}, lifetime());
 
@@ -1850,6 +1855,7 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 		return true;
 	});
 
+	_threadButtonManager->paint(p, context);
 	_replyButtonManager->paint(p, context);
 	_reactionsManager->paint(p, context);
 }
@@ -2468,6 +2474,7 @@ void HistoryInner::performDrag() {
 		// This call enters event loop and can destroy any QObject.
 		_reactionsManager->updateButton({});
 		_replyButtonManager->updateButton({});
+		_threadButtonManager->updateButton({});
 		_controller->widget()->launchDrag(
 			std::move(mimeData),
 			crl::guard(this, [=] { mouseActionUpdate(QCursor::pos()); }));
@@ -2487,6 +2494,7 @@ void HistoryInner::itemRemoved(not_null<const HistoryItem*> item) {
 	_animatedStickersPlayed.remove(item);
 	_reactionsManager->remove(item->fullId());
 	_replyButtonManager->remove(item->fullId());
+	_threadButtonManager->remove(item->fullId());
 
 	if (_selectedTextItem == item) {
 		clearTextSelection();
@@ -4863,6 +4871,7 @@ void HistoryInner::enterEventHook(QEnterEvent *e) {
 void HistoryInner::leaveEventHook(QEvent *e) {
 	_reactionsManager->updateButton({ .cursorLeft = true });
 	_replyButtonManager->updateButton({});
+	_threadButtonManager->updateButton({});
 	if (auto item = Element::Hovered()) {
 		repaintItem(item);
 		Element::Hovered(nullptr);
@@ -5417,6 +5426,36 @@ auto HistoryInner::replyButtonParameters(
 	return result;
 }
 
+auto HistoryInner::threadButtonParameters(
+	not_null<const Element*> view,
+	QPoint position,
+	const HistoryView::TextState &replyState) const
+-> HistoryView::ReplyButton::ButtonParameters {
+	if (!_useCornerReply) {
+		return {};
+	}
+	const auto top = itemTop(view);
+	if (top < 0
+		|| _mouseAction == MouseAction::Dragging
+		|| inSelectionMode().inSelectionMode) {
+		return {};
+	}
+	const auto message = dynamic_cast<const HistoryView::Message*>(
+		view.get());
+	if (!message) {
+		return {};
+	}
+	auto result = message->threadButtonParameters(
+		position,
+		replyState,
+		_threadButtonManager->innerWidth()
+	).translated({ 0, top });
+	result.visibleTop = _visibleAreaTop;
+	result.visibleBottom = _visibleAreaBottom;
+	result.globalPointer = _mousePosition;
+	return result;
+}
+
 void HistoryInner::mouseActionUpdate() {
 	if (hasPendingResizedItems()
 		|| (!_mouseActive && !window()->isActiveWindow())) {
@@ -5437,10 +5476,17 @@ void HistoryInner::mouseActionUpdate() {
 		: _replyButtonManager->buttonTextState(point);
 	const auto replyBtnItem = session().data().message(replyBtnState.itemId);
 	const auto replyBtnView = viewByItem(replyBtnItem);
+	const auto threadBtnState = (reactionView || replyBtnView)
+		? HistoryView::TextState()
+		: _threadButtonManager->buttonTextState(point);
+	const auto threadBtnItem = session().data().message(threadBtnState.itemId);
+	const auto threadBtnView = viewByItem(threadBtnItem);
 	const auto view = reactionView
 		? reactionView
 		: replyBtnView
 		? replyBtnView
+		: threadBtnView
+		? threadBtnView
 		: (_aboutView
 			&& _aboutView->view()
 			&& point.y() >= _aboutView->top
@@ -5466,6 +5512,10 @@ void HistoryInner::mouseActionUpdate() {
 			view,
 			m,
 			replyBtnState));
+		_threadButtonManager->updateButton(threadButtonParameters(
+			view,
+			m,
+			threadBtnState));
 		if (changed) {
 			_reactionsItem = item;
 		}
@@ -5486,6 +5536,7 @@ void HistoryInner::mouseActionUpdate() {
 		}
 		_reactionsManager->updateButton({});
 		_replyButtonManager->updateButton({});
+		_threadButtonManager->updateButton({});
 	}
 	if (_mouseActionItem && !viewByItem(_mouseActionItem)) {
 		mouseActionCancel();
@@ -5500,12 +5551,16 @@ void HistoryInner::mouseActionUpdate() {
 		&& hasSelectedText();
 	const auto overReaction = reactionView && reactionState.link;
 	const auto overReplyBtn = replyBtnView && replyBtnState.link;
+	const auto overThreadBtn = threadBtnView && threadBtnState.link;
 	if (overReaction) {
 		dragState = reactionState;
 		lnkhost = reactionView;
 	} else if (overReplyBtn) {
 		dragState = replyBtnState;
 		lnkhost = _replyButtonManager.get();
+	} else if (overThreadBtn) {
+		dragState = threadBtnState;
+		lnkhost = _threadButtonManager.get();
 	} else if (item) {
 		if (item != _mouseActionItem || (m - _dragStartPosition).manhattanLength() >= QApplication::startDragDistance()) {
 			if (_mouseAction == MouseAction::PrepareDrag) {

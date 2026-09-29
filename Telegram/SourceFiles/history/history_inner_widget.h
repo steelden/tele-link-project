@@ -550,6 +550,11 @@ private:
 		QPoint position,
 		const HistoryView::TextState &replyState) const
 	-> HistoryView::ReplyButton::ButtonParameters;
+	[[nodiscard]] auto threadButtonParameters(
+		not_null<const Element*> view,
+		QPoint position,
+		const HistoryView::TextState &replyState) const
+	-> HistoryView::ReplyButton::ButtonParameters;
 	void toggleFavoriteReaction(not_null<Element*> view) const;
 	void reactionChosen(const ChosenReaction &reaction);
 
@@ -645,6 +650,7 @@ private:
 	std::unique_ptr<HistoryView::Reactions::Manager> _reactionsManager;
 	rpl::variable<HistoryItem*> _reactionsItem;
 	std::unique_ptr<HistoryView::ReplyButton::Manager> _replyButtonManager;
+	std::unique_ptr<HistoryView::ReplyButton::Manager> _threadButtonManager;
 	HistoryItem *_pinnedItem = nullptr;
 
 	MouseAction _mouseAction = MouseAction::None;

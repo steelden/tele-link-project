@@ -98,12 +98,14 @@ class Manager final
 	: public base::has_weak_ptr
 	, public ClickHandlerHost {
 public:
-	Manager(Fn<void(QRect)> buttonUpdate);
+	Manager(Fn<void(QRect)> buttonUpdate,
+		const QString &text = QString());
 	~Manager();
 
 	void updateButton(ButtonParameters parameters);
 	void paint(QPainter &p, const PaintContext &context);
 	[[nodiscard]] TextState buttonTextState(QPoint position) const;
+	[[nodiscard]] int innerWidth() const;
 	void remove(FullMsgId context);
 
 protected:

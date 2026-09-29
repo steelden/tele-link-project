@@ -158,17 +158,27 @@ void Button::applyState(ButtonState state, Fn<void(QRect)> update) {
 	_state = state;
 }
 
-Manager::Manager(Fn<void(QRect)> buttonUpdate)
-: _outer(ComputeOuterSize())
-, _inner(QRect(QPoint(), ComputeInnerSize()))
+Manager::Manager(Fn<void(QRect)> buttonUpdate, const QString &text)
+: _outer([&] {
+	const auto &t = text.isEmpty() ? tr::lng_fast_reply(tr::now) : text;
+	const auto &p = st::replyCornerTextPadding;
+	const auto w = p.left() + st::msgDateTextStyle.font->width(t) + p.right();
+	return QRect(QPoint(), QSize(w, st::replyCornerHeight))
+		.marginsAdded(st::replyCornerShadow).size();
+}())
+, _inner(QRect(QPoint(), QSize(
+	_outer.width() - st::replyCornerShadow.left() - st::replyCornerShadow.right(),
+	st::replyCornerHeight)))
 , _cachedRound(
-	ComputeInnerSize(),
+	_inner.size(),
 	st::replyCornerShadow,
-	ComputeInnerSize().height())
+	_inner.height())
 , _buttonShowTimer([=] { showButtonDelayed(); })
 , _buttonUpdate(std::move(buttonUpdate))
-, _text(st::msgDateTextStyle.font->width(tr::lng_fast_reply(tr::now))) {
-	_text.setText(st::msgDateTextStyle, tr::lng_fast_reply(tr::now));
+, _text(st::msgDateTextStyle.font->width(
+	text.isEmpty() ? tr::lng_fast_reply(tr::now) : text)) {
+	_text.setText(st::msgDateTextStyle,
+		text.isEmpty() ? tr::lng_fast_reply(tr::now) : text);
 	_inner.translate(
 		QRect(QPoint(), _outer).center() - _inner.center());
 }
@@ -312,6 +322,10 @@ void Manager::paintButton(
 	if (opacity != 1.) {
 		p.setOpacity(1.);
 	}
+}
+
+int Manager::innerWidth() const {
+	return _inner.width();
 }
 
 TextState Manager::buttonTextState(QPoint position) const {
