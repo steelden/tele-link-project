@@ -1014,6 +1014,7 @@ void handleNotificationEvent(
 QList<Api::ChannelData> PendingChannelsList;
 QList<Api::ChannelData> LoadedDialogsList;
 bool DialogsApplied = false;
+bool ActiveChatRestored = false;
 
 void connectToSession(
 		not_null<Main::Session*> mainSession,
@@ -1023,6 +1024,7 @@ void connectToSession(
 	PendingChannelsList.clear();
 	LoadedDialogsList.clear();
 	DialogsApplied = false;
+	ActiveChatRestored = false;
 	loadChatListFromCache(mainSession);
 
 	setTokenRefreshCallback([mtsSession] {
@@ -3669,6 +3671,20 @@ void applyChatList(
 		if (!MessageCacheLoadedChats.contains(ch.id)) {
 			MessageCacheLoadedChats.insert(ch.id);
 			loadMessagesFromCache(session, ch.id);
+		}
+	}
+	if (!ActiveChatRestored && DialogsApplied) {
+		ActiveChatRestored = true;
+		const auto savedChatId =
+			session->account().local().readMtsLinkActiveChat();
+		if (!savedChatId.isEmpty()) {
+			const auto peerId = chatIdToPeerId(savedChatId);
+			if (peerId && session->data().historyLoaded(peerId)) {
+				const auto &windows = session->windows();
+				if (!windows.empty()) {
+					windows.front()->showPeerHistory(peerId);
+				}
+			}
 		}
 	}
 }

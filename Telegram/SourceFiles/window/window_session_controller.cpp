@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 
 #include "apiwrap.h"
+#include "main/main_account.h"
 #include "mtslink/data_adapters.h"
 #include "api/api_cloud_password.h"
 #include "api/api_text_entities.h"
@@ -2380,6 +2381,12 @@ void SessionController::setActiveChatEntry(Dialogs::RowDescriptor row) {
 	}
 	if (const auto thread = row.key.thread()) {
 		session().recentPeers().chatOpenPush(thread);
+	}
+	if (nowHistory) {
+		const auto chatId = MtsLink::peerIdToChatId(nowHistory->peer->id);
+		if (!chatId.isEmpty()) {
+			session().account().local().writeMtsLinkActiveChat(chatId);
+		}
 	}
 	if (session().supportMode()) {
 		pushToChatEntryHistory(row);

@@ -97,6 +97,8 @@ public:
 		quint64 userId,
 		const QString &refreshToken = {});
 	[[nodiscard]] MtsLinkData readMtsLinkData() const;
+	void writeMtsLinkActiveChat(const QString &chatId);
+	[[nodiscard]] QString readMtsLinkActiveChat() const;
 	[[nodiscard]] QString envConfigCachePath() const;
 	[[nodiscard]] QString basePath() const;
 
