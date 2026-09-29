@@ -559,7 +559,12 @@ mtpRequestId EditTextMessage(
 					content.text,
 					content.blocks,
 					content.mentionsMeta);
-				item->setText(caption);
+				const auto localText = MtsLink::parseMentionedText(
+					content.text,
+					content.text,
+					{},
+					&item->history()->session());
+				item->setText(localText);
 				item->setEditDate(base::unixtime::now());
 				item->history()->owner().requestItemViewRefresh(
 					item);

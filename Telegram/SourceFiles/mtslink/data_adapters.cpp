@@ -489,6 +489,8 @@ qint64 parseTimestamp(const QJsonObject &obj, const char *msKey, const char *key
 	return (v > 0 && v < 10000000000LL) ? v * 1000 : v;
 }
 
+} // namespace
+
 TextWithEntities parseMentionedText(
 		const QString &text,
 		const QString &markdown,
@@ -932,6 +934,8 @@ TextWithEntities parseMentionedText(
 	TextUtilities::ParseEntities(parsed, TextParseLinks);
 	return parsed;
 }
+
+namespace {
 
 QString markdownFromBlocks(const QJsonArray &blocks) {
 	QString md;
@@ -3744,6 +3748,9 @@ MtsLinkMessageContent convertMentionsForSending(
 	QMap<int, QString> allMdMarkers;
 	QMap<int, QString> blockMdMarkers;
 
+	struct BlockquoteRange { int offset, length; };
+	QList<BlockquoteRange> blockquoteRanges;
+
 	for (const auto &tag : tags) {
 		if (TextUtilities::IsMentionLink(tag.id)) {
 			const auto data = TextUtilities::MentionEntityData(tag.id);
@@ -3774,6 +3781,8 @@ MtsLinkMessageContent convertMentionsForSending(
 			hit.type = HitType::Link;
 			hit.url = tag.id;
 			hits.push_back(std::move(hit));
+		} else if (tag.id == u">"_q || tag.id == u">^"_q) {
+			blockquoteRanges.push_back({tag.offset, tag.length});
 		} else {
 			if (styleMap.contains(tag.id)) {
 				styleRanges.push_back({
@@ -3802,7 +3811,7 @@ MtsLinkMessageContent convertMentionsForSending(
 	}
 
 	if (hits.isEmpty() && styleRanges.isEmpty()
-		&& allMdMarkers.isEmpty()) {
+		&& allMdMarkers.isEmpty() && blockquoteRanges.isEmpty()) {
 		MtsLinkMessageContent plain;
 		plain.text = text;
 		return plain;
@@ -3845,6 +3854,24 @@ MtsLinkMessageContent convertMentionsForSending(
 			pos = hit.offset + hit.length;
 		}
 		mtsText += insertMarkers(allMdMarkers, pos, text.size());
+	}
+
+	if (!blockquoteRanges.isEmpty()) {
+		QSet<int> quotedLines;
+		for (const auto &bq : blockquoteRanges) {
+			const auto startLine = text.left(bq.offset).count('\n');
+			const auto endLine = text.left(bq.offset + bq.length).count('\n');
+			for (int l = startLine; l <= endLine; ++l) {
+				quotedLines.insert(l);
+			}
+		}
+		auto lines = mtsText.split('\n');
+		for (int i = 0; i < lines.size(); ++i) {
+			if (quotedLines.contains(i)) {
+				lines[i] = u"> "_q + lines[i];
+			}
+		}
+		mtsText = lines.join('\n');
 	}
 
 	// Build blocks: split text by style and special boundaries.

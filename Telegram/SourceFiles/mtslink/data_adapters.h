@@ -178,6 +178,12 @@ struct MtsLinkMessageContent {
 	const TextWithTags &textWithTags,
 	not_null<Main::Session*> session);
 
+[[nodiscard]] TextWithEntities parseMentionedText(
+	const QString &text,
+	const QString &markdown,
+	const QList<Api::MentionInfo> &mentions,
+	not_null<Main::Session*> session);
+
 [[nodiscard]] QString userBareIdToUuid(uint64 bareId);
 
 void setEmojiMapping(const QHash<QString, QString> &emojiToId);
