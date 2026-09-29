@@ -1126,6 +1126,7 @@ ChatWidget::~ChatWidget() {
 		if (_replies) {
 			MtsLink::cacheRepliesList(_peer->id, _repliesRootId, _replies);
 		}
+		MtsLink::clearCurrentOpenThread(_peer->id);
 	}
 	if (const auto reserved = base::take(_creatingBotTopic)) {
 		if (reserved->creating()) {
@@ -4315,6 +4316,9 @@ void ChatWidget::restoreState(not_null<ChatMemento*> memento) {
 	const auto mtsLinkThread = !memento->highlightId()
 		&& _repliesRootId
 		&& MtsLink::hasChatId(_peer->id);
+	if (mtsLinkThread) {
+		MtsLink::setCurrentOpenThread(_peer->id, _repliesRootId);
+	}
 	const auto mtsLinkSaved = mtsLinkThread
 		? MtsLink::threadScroll(_peer->id, _repliesRootId)
 		: std::nullopt;

@@ -115,6 +115,10 @@ struct ThreadScrollState {
 void saveThreadScroll(PeerId peerId, MsgId rootId, const ThreadScrollState &state);
 [[nodiscard]] std::optional<ThreadScrollState> threadScroll(PeerId peerId, MsgId rootId);
 
+void setCurrentOpenThread(PeerId peerId, MsgId rootId);
+void clearCurrentOpenThread(PeerId peerId);
+[[nodiscard]] bool isThreadOpen(PeerId peerId, MsgId rootId);
+
 void cacheRepliesList(PeerId peerId, MsgId rootId, std::shared_ptr<Data::RepliesList> replies);
 [[nodiscard]] std::shared_ptr<Data::RepliesList> cachedRepliesList(PeerId peerId, MsgId rootId);
 

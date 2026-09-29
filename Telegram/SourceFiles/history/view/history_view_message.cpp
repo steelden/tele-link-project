@@ -5973,7 +5973,10 @@ bool Message::hasFastReply() const {
 		return false;
 	}
 	const auto peer = data()->history()->peer;
-	return !hasOutLayout() && (peer->isChat() || peer->isMegagroup());
+	return !hasOutLayout()
+		&& (peer->isChat()
+			|| peer->isMegagroup()
+			|| MtsLink::hasChatId(peer->id));
 }
 
 bool Message::displayFastReply() const {
@@ -5998,7 +6001,6 @@ bool Message::displayFastThread() const {
 	}
 	const auto peer = data()->history()->peer;
 	return MtsLink::hasChatId(peer->id)
-		&& peer->isMegagroup()
 		&& data()->isRegular()
 		&& displayFastReply();
 }

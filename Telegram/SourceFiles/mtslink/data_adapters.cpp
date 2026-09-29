@@ -204,6 +204,7 @@ QSet<QString> ChatInfoRequested;
 QSet<QString> UserProfileRequested;
 QSet<QString> ReadRequestSentChats;
 QMap<QPair<PeerId, MsgId>, int> PendingThreadUnread;
+QHash<PeerId, MsgId> PendingChatThreadScroll;
 
 [[nodiscard]] QString privateCdnThumbBase() {
 	return EnvConfig::instance().privateCdnMediaUrl() + u"/thumb_"_q;
@@ -511,7 +512,9 @@ TextWithEntities parseMentionedText(
 		|| source.contains('`')
 		|| source.contains('_')
 		|| source.contains('|')
-		|| source.contains('[');
+		|| source.contains('[')
+		|| source.startsWith('>')
+		|| source.contains(u"\n>"_q);
 	const bool needsMarkdownParse = !markdown.isEmpty()
 		|| hasMarkdownChars;
 
@@ -577,6 +580,8 @@ TextWithEntities parseMentionedText(
 	int preStart = -1;
 	QString preLang;
 	bool inPre = false;
+	int quoteStart = -1;
+	bool atLineStart = true;
 
 	QString unescaped;
 	unescaped.reserve(source.size());
@@ -620,6 +625,7 @@ TextWithEntities parseMentionedText(
 				pos += 3;
 				if (pos < len && unescaped[pos] == '\n') {
 					++pos;
+					atLineStart = true;
 				}
 				continue;
 			} else {
@@ -664,6 +670,35 @@ TextWithEntities parseMentionedText(
 			result += unescaped[pos];
 			++pos;
 			continue;
+		}
+
+		if (atLineStart) {
+			if (quoteStart >= 0 && unescaped[pos] != '>') {
+				auto quoteLen = result.size() - quoteStart;
+				if (quoteLen > 0
+					&& result[quoteStart + quoteLen - 1] == '\n') {
+					--quoteLen;
+				}
+				if (quoteLen > 0) {
+					entities.push_back(EntityInText(
+						EntityType::Blockquote,
+						quoteStart,
+						quoteLen));
+				}
+				quoteStart = -1;
+			}
+			if (unescaped[pos] == '>') {
+				if (quoteStart < 0) {
+					quoteStart = result.size();
+				}
+				++pos;
+				if (pos < len && unescaped[pos] == ' ') {
+					++pos;
+				}
+				atLineStart = false;
+				continue;
+			}
+			atLineStart = false;
 		}
 
 		if (pos + 3 < len
@@ -828,8 +863,25 @@ TextWithEntities parseMentionedText(
 			continue;
 		}
 
+		if (unescaped[pos] == '\n') {
+			atLineStart = true;
+		}
 		result += unescaped[pos];
 		++pos;
+	}
+
+	if (quoteStart >= 0) {
+		auto quoteLen = result.size() - quoteStart;
+		if (quoteLen > 0
+			&& result[quoteStart + quoteLen - 1] == '\n') {
+			--quoteLen;
+		}
+		if (quoteLen > 0) {
+			entities.push_back(EntityInText(
+				EntityType::Blockquote,
+				quoteStart,
+				quoteLen));
+		}
 	}
 
 	struct UnmatchedMarker {
@@ -1130,6 +1182,24 @@ void connectToSession(
 				}
 			}
 			mainSession->data().sendHistoryChangeNotifications();
+			if (PendingChatThreadScroll.contains(peerId)) {
+				const auto scrollMsgId = PendingChatThreadScroll.value(peerId);
+				const auto scrollTarget = mainSession->data().message(
+					peerId, scrollMsgId);
+				if (scrollTarget) {
+					if (const auto ctrl = mainSession->tryResolveWindow()) {
+						const auto active = ctrl->activeChatCurrent();
+						const auto activePeer = active.peer();
+						if (activePeer && activePeer->id == peerId) {
+							ctrl->showPeerHistory(
+								peerId,
+								Window::SectionShow::Way::ClearStack,
+								scrollMsgId);
+							PendingChatThreadScroll.remove(peerId);
+						}
+					}
+				}
+			}
 			saveMessagesToCache(mainSession, chatId, messages, profiles);
 			if (!rawLastId.isEmpty()
 				&& oldestLoadedMessageId(peerId).isEmpty()) {
@@ -2408,11 +2478,62 @@ void handleChatEvent(
 			const auto parentMsgId = MsgId(parentBareId & 0x7FFFFFFFLL);
 			const auto parent = session->data().message(
 				chatPeerId, parentMsgId);
+			const auto threadIsOpen = isThreadOpen(chatPeerId, parentMsgId);
 			if (parent) {
 				session->data().requestItemViewRefresh(parent);
 			} else {
 				const auto key = qMakePair(chatPeerId, parentMsgId);
 				PendingThreadUnread[key]++;
+			}
+			if (threadIsOpen) {
+				// Thread view is open — no scroll to parent needed.
+			} else {
+				PendingChatThreadScroll[chatPeerId] = parentMsgId;
+				if (const auto ctrl = session->tryResolveWindow()) {
+					const auto active = ctrl->activeChatCurrent();
+					const auto activePeer = active.peer();
+					if (activePeer && activePeer->id == chatPeerId) {
+						PendingChatThreadScroll.remove(chatPeerId);
+						if (!parent) {
+							const auto mts = session->account().mtsLinkSession();
+							if (mts) {
+								const auto parentUuid = msg.parentId;
+								const auto weakCtrl = base::make_weak(ctrl);
+								const auto scrollPeerId = chatPeerId;
+								const auto scrollMsgId = parentMsgId;
+								const auto conn = std::make_shared<QMetaObject::Connection>();
+								*conn = QObject::connect(
+									mts->messages(),
+									&Api::Messages::aroundMessagesLoaded,
+									[session, weakCtrl, scrollPeerId, scrollMsgId, parentUuid, conn](
+											const ChatId &cid,
+											const MessageId &,
+											const QList<Api::MessageData> &msgs,
+											const QList<Api::MemberProfile> &profs) {
+										QObject::disconnect(*conn);
+										for (const auto &p : profs) {
+											applyUserData(session, p);
+										}
+										for (const auto &src : msgs) {
+											addMessage(session, src);
+										}
+										const auto loaded = session->data().message(
+											scrollPeerId, scrollMsgId);
+										if (loaded) {
+											if (const auto c = weakCtrl.get()) {
+												c->showPeerHistory(
+													scrollPeerId,
+													Window::SectionShow::Way::ClearStack,
+													scrollMsgId);
+											}
+										}
+										PendingChatThreadScroll.remove(scrollPeerId);
+									});
+								mts->messages()->loadAround(chatId, parentUuid, 50);
+							}
+						}
+					}
+				}
 			}
 			const auto history = session->data().history(chatPeerId);
 			const auto last = history->lastMessage();
@@ -3012,6 +3133,21 @@ std::optional<ThreadScrollState> threadScroll(PeerId peerId, MsgId rootId) {
 		return *it;
 	}
 	return std::nullopt;
+}
+
+static QHash<PeerId, MsgId> CurrentOpenThreads;
+
+void setCurrentOpenThread(PeerId peerId, MsgId rootId) {
+	CurrentOpenThreads[peerId] = rootId;
+}
+
+void clearCurrentOpenThread(PeerId peerId) {
+	CurrentOpenThreads.remove(peerId);
+}
+
+bool isThreadOpen(PeerId peerId, MsgId rootId) {
+	const auto it = CurrentOpenThreads.constFind(peerId);
+	return it != CurrentOpenThreads.constEnd() && it.value() == rootId;
 }
 
 using RepliesKey = std::pair<PeerId, MsgId>;
