@@ -3138,6 +3138,9 @@ void MainWidget::handleAdaptiveLayoutUpdate() {
 }
 
 void MainWidget::handleHistoryBack() {
+	if (_thirdSection && _thirdSection->showBackInternal()) {
+		return;
+	}
 	if (_mainSection && _mainSection->showBackInternal()) {
 		return;
 	}
