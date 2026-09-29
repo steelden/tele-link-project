@@ -2409,13 +2409,6 @@ void handleChatEvent(
 			const auto parent = session->data().message(
 				chatPeerId, parentMsgId);
 			if (parent) {
-				if (const auto views = parent->Get<HistoryMessageViews>()) {
-					auto data = HistoryMessageRepliesData();
-					data.isNull = false;
-					data.repliesCount = views->replies.count + 1;
-					data.maxId = MsgId(data.repliesCount);
-					parent->setReplies(std::move(data));
-				}
 				session->data().requestItemViewRefresh(parent);
 			} else {
 				const auto key = qMakePair(chatPeerId, parentMsgId);
