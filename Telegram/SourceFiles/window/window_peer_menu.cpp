@@ -137,6 +137,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_premium.h"
 #include "mtslink/data_adapters.h"
 #include "mtslink/session.h"
+#include "mtslink/api/api_channels.h"
 #include "main/main_account.h"
 
 #include <QAction>
@@ -446,6 +447,25 @@ void TogglePinnedThread(
 
 	owner->setChatPinned(entry, FilterId(), isPinned);
 	if (const auto history = entry->asHistory()) {
+		if (MtsLink::hasChatId(history->peer->id)) {
+			const auto mts = owner->session().account().mtsLinkSession();
+			if (mts) {
+				const auto chatId = MtsLink::peerIdToChatId(
+					history->peer->id);
+				if (isPinned) {
+					mts->channels()->pinChat(chatId);
+				} else {
+					mts->channels()->unpinChat(chatId);
+				}
+			}
+			owner->notifyPinnedDialogsOrderUpdated();
+			if (isPinned) {
+				controller->content()->dialogsToUp();
+			}
+			if (onToggled) {
+				onToggled();
+			}
+		} else {
 		const auto flags = isPinned
 			? MTPmessages_ToggleDialogPin::Flag::f_pinned
 			: MTPmessages_ToggleDialogPin::Flag(0);
@@ -464,6 +484,7 @@ void TogglePinnedThread(
 		}).send();
 		if (isPinned) {
 			controller->content()->dialogsToUp();
+		}
 		}
 	} else if (const auto topic = entry->asTopic()) {
 		const auto peer = topic->peer();

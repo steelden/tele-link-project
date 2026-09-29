@@ -1011,11 +1011,18 @@ void handleNotificationEvent(
 	not_null<Main::Session*> session,
 	const QJsonObject &param);
 
+QList<Api::ChannelData> PendingChannelsList;
+QList<Api::ChannelData> LoadedDialogsList;
+bool DialogsApplied = false;
+
 void connectToSession(
 		not_null<Main::Session*> mainSession,
 		not_null<Session*> mtsSession) {
 	ProfileDataPath = mainSession->account().local().basePath();
 	loadCachedUserId();
+	PendingChannelsList.clear();
+	LoadedDialogsList.clear();
+	DialogsApplied = false;
 	loadChatListFromCache(mainSession);
 
 	setTokenRefreshCallback([mtsSession] {
@@ -1075,17 +1082,30 @@ void connectToSession(
 		mtsSession->channels(),
 		&Api::Channels::channelsLoaded,
 		[mainSession, refreshLastMessages](const QList<Api::ChannelData> &list) {
-			applyChatList(mainSession, list);
-			saveChatListToCache(mainSession, list);
-			refreshLastMessages(list);
+			if (DialogsApplied) {
+				applyChatList(mainSession, list);
+				refreshLastMessages(list);
+				auto combined = LoadedDialogsList + list;
+				saveChatListToCache(mainSession, combined);
+			} else {
+				PendingChannelsList = list;
+			}
 		});
 	QObject::connect(
 		mtsSession->channels(),
 		&Api::Channels::dialogsLoaded,
 		[mainSession, refreshLastMessages](const QList<Api::ChannelData> &list) {
+			DialogsApplied = true;
+			LoadedDialogsList = list;
 			applyChatList(mainSession, list);
-			saveChatListToCache(mainSession, list);
 			refreshLastMessages(list);
+			if (!PendingChannelsList.isEmpty()) {
+				applyChatList(mainSession, PendingChannelsList);
+				refreshLastMessages(PendingChannelsList);
+				auto combined = list + PendingChannelsList;
+				saveChatListToCache(mainSession, combined);
+				PendingChannelsList.clear();
+			}
 		});
 	QObject::connect(
 		mtsSession->channels(),
@@ -1598,8 +1618,12 @@ void applyDialogData(
 
 	if (src.type == ChatType::Favorites) {
 		FavoritesPeerIdValue = peerId;
-		session->data().setChatPinned(history, FilterId(), true);
+		session->data().setPinnedFromEntryList(
+			Dialogs::Key(history), true);
 		session->data().setChatPinned(history, FilterId(2), true);
+	} else if (src.isPinned) {
+		session->data().setPinnedFromEntryList(
+			Dialogs::Key(history), true);
 	}
 }
 
@@ -1665,6 +1689,11 @@ void applyChannelData(
 	}
 	session->data().notifySettings().apply(
 		channel, makeMuteSettings(src.isMuted));
+
+	if (src.isPinned) {
+		session->data().setPinnedFromEntryList(
+			Dialogs::Key(history), true);
+	}
 }
 
 void applyUserData(
@@ -2654,6 +2683,32 @@ void handleChatEvent(
 		if (const auto last = history->lastMessage()) {
 			last->invalidateChatListEntry();
 		}
+	} else if (type == "PinnedChatEvent") {
+		const auto eventChatId = value.value("chatId").toString();
+		if (eventChatId.isEmpty()) {
+			return;
+		}
+		const auto peerId = chatIdToPeerId(eventChatId);
+		if (!hasChatId(peerId)) {
+			return;
+		}
+		const auto history = session->data().historyLoaded(peerId);
+		if (history) {
+			session->data().setChatPinned(history, FilterId(), true);
+		}
+	} else if (type == "UnpinnedChatEvent") {
+		const auto eventChatId = value.value("chatId").toString();
+		if (eventChatId.isEmpty()) {
+			return;
+		}
+		const auto peerId = chatIdToPeerId(eventChatId);
+		if (!hasChatId(peerId)) {
+			return;
+		}
+		const auto history = session->data().historyLoaded(peerId);
+		if (history) {
+			session->data().setChatPinned(history, FilterId(), false);
+		}
 	} else if (type == "ChatNotificationsSettedEvent") {
 		const auto eventChatId = value.value("chatId").toString();
 		if (eventChatId.isEmpty()) {
@@ -3590,14 +3645,20 @@ QSet<ChatId> MessageCacheLoadedChats;
 void applyChatList(
 		not_null<Main::Session*> session,
 		const QList<Api::ChannelData> &channels) {
-	LOG(("MtsLink Data: applyChatList count=%1").arg(channels.size()));
+	const auto isDialogType = [](const Api::ChannelData &ch) {
+		return ch.type == ChatType::Dialog
+			|| ch.type == ChatType::Favorites;
+	};
 	for (const auto &ch : channels) {
-		LOG(("MtsLink Data: chat '%1' type=%2 id=%3")
-			.arg(ch.name)
-			.arg(int(ch.type))
-			.arg(ch.id));
-		if (ch.type == ChatType::Dialog
-			|| ch.type == ChatType::Favorites) {
+		if (isDialogType(ch) && (ch.isPinned || ch.type == ChatType::Favorites)) {
+			applyDialogData(session, ch);
+		}
+	}
+	for (const auto &ch : channels) {
+		if (isDialogType(ch) && (ch.isPinned || ch.type == ChatType::Favorites)) {
+			continue;
+		}
+		if (isDialogType(ch)) {
 			applyDialogData(session, ch);
 		} else {
 			applyChannelData(session, ch);

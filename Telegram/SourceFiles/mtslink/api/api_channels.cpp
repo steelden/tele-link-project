@@ -170,6 +170,26 @@ ChannelData Channels::parseChat(const QJsonObject &obj) const {
 	};
 }
 
+void Channels::pinChat(const ChatId &chatId) {
+	_rpc->call(
+		"Chat.PinChat",
+		QJsonObject{{"chatId", chatId}},
+		[this, chatId](const QJsonObject &result) {
+			const auto value = result.value("value").toObject();
+			const auto pinPosition = value.value("pinPosition").toInt();
+			Q_EMIT chatPinned(chatId, pinPosition);
+		});
+}
+
+void Channels::unpinChat(const ChatId &chatId) {
+	_rpc->call(
+		"Chat.UnpinChat",
+		QJsonObject{{"chatId", chatId}},
+		[this, chatId](const QJsonObject &) {
+			Q_EMIT chatUnpinned(chatId);
+		});
+}
+
 ChatType Channels::parseChatType(const QString &type) const {
 	if (type == "Dialog") return ChatType::Dialog;
 	if (type == "Channel") return ChatType::Channel;

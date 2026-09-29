@@ -47,11 +47,15 @@ public:
 	void loadMyChannels();
 	void loadMyDialogsAndGroupChats();
 	void loadChatInfo(const ChatId &chatId);
+	void pinChat(const ChatId &chatId);
+	void unpinChat(const ChatId &chatId);
 
 Q_SIGNALS:
 	void channelsLoaded(const QList<ChannelData> &channels);
 	void dialogsLoaded(const QList<ChannelData> &dialogs);
 	void chatInfoLoaded(const ChannelData &chat);
+	void chatPinned(const ChatId &chatId, int pinPosition);
+	void chatUnpinned(const ChatId &chatId);
 
 private:
 	[[nodiscard]] ChannelData parseChat(const QJsonObject &obj) const;
