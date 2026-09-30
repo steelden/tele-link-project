@@ -447,6 +447,7 @@ MainWidget::MainWidget(
 	orderWidgets();
 
 	if (!Core::UpdaterDisabled()) {
+		cSetLastUpdateCheck(0);
 		Core::UpdateChecker checker;
 		checker.start();
 	}

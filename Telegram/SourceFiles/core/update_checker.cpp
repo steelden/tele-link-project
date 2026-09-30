@@ -1942,7 +1942,6 @@ void Updater::start(bool forceWait) {
 		}
 	}
 	if (cManyInstance() && !Logs::DebugEnabled()) {
-		// Only main instance is updating.
 		return;
 	}
 

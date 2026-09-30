@@ -421,19 +421,8 @@ int Launcher::exec() {
 	// Must be started before Sandbox is created.
 	Platform::start();
 	ThirdParty::start();
+
 	auto result = executeApplication();
-
-	DEBUG_LOG(("Telegram finished, result: %1").arg(result));
-
-	if (!UpdaterDisabled() && cRestartingUpdate()) {
-		DEBUG_LOG(("Sandbox Info: executing updater to install update."));
-		if (!launchUpdater(UpdaterLaunch::PerformUpdate)) {
-			base::Platform::DeleteDirectory(cWorkingDir() + u"tupdates/temp"_q);
-		}
-	} else if (cRestarting()) {
-		DEBUG_LOG(("Sandbox Info: executing Telegram because of restart."));
-		launchUpdater(UpdaterLaunch::JustRelaunch);
-	}
 
 	CrashReports::Finish();
 	ThirdParty::finish();
@@ -462,6 +451,14 @@ void Launcher::workingFolderReady() {
 	ComputeExternalUpdater();
 	ComputeInstallBetaVersions();
 	ComputeInstallationTag();
+}
+
+void Launcher::launchUpdaterOnQuit() {
+	if (!UpdaterDisabled() && cRestartingUpdate()) {
+		launchUpdater(UpdaterLaunch::PerformUpdate);
+	} else if (cRestarting()) {
+		launchUpdater(UpdaterLaunch::JustRelaunch);
+	}
 }
 
 void Launcher::writeDebugModeSetting() {

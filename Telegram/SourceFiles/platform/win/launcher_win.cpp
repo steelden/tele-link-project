@@ -206,11 +206,6 @@ bool Launcher::launch(
 	const auto nativeWorkingDir = convertPath(cWorkingDir());
 	const auto arguments = argumentsList.join(' ');
 
-	DEBUG_LOG(("Application Info: executing %1 %2"
-		).arg(binaryPath
-		).arg(arguments
-		));
-
 	Logs::closeMain();
 	CrashReports::Finish();
 
@@ -222,15 +217,7 @@ bool Launcher::launch(
 		arguments.toStdWString().c_str(),
 		nativeWorkingDir.empty() ? nullptr : nativeWorkingDir.c_str(),
 		SW_SHOWNORMAL);
-	if (int64(result) < 32) {
-		DEBUG_LOG(("Application Error: failed to execute %1, working directory: '%2', result: %3"
-			).arg(binaryPath
-			).arg(cWorkingDir()
-			).arg(int64(result)
-			));
-		return false;
-	}
-	return true;
+	return (int64(result) >= 32);
 }
 
 } // namespace Platform

@@ -421,10 +421,6 @@ void Account::setMtpAuthorization(const QByteArray &serialized) {
 	};
 	readKeys(_mtpFields.keys);
 	readKeys(_mtpKeysToDestroy);
-	LOG(("MTP Info: "
-		"read keys, current: %1, to destroy: %2"
-		).arg(_mtpFields.keys.size()
-		).arg(_mtpKeysToDestroy.size()));
 }
 
 void Account::startMtp(std::unique_ptr<MTP::Config> config) {
@@ -613,7 +609,6 @@ void Account::destroyMtpKeys(MTP::AuthKeysList &&keys) {
 	}, _mtpForKeysDestroy->lifetime());
 	_mtpForKeysDestroy->allKeysDestroyed(
 	) | rpl::on_next([=] {
-		LOG(("MTP Info: all keys scheduled for destroy are destroyed."));
 		crl::on_main(this, [=] {
 			_mtpForKeysDestroy = nullptr;
 			local().writeMtpData();
@@ -637,8 +632,6 @@ void Account::destroyStaleAuthorizationKeys() {
 		// Disable this for now.
 		if (key->type() == MTP::AuthKey::Type::ReadFromFile) {
 			_mtpKeysToDestroy = _mtp->getKeysForWrite();
-			LOG(("MTP Info: destroying stale keys, count: %1"
-				).arg(_mtpKeysToDestroy.size()));
 			resetAuthorizationKeys();
 			return;
 		}

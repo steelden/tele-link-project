@@ -42,6 +42,8 @@ public:
 	void writeDebugModeSetting();
 	void writeInstallBetaVersionsSetting();
 
+	void launchUpdaterOnQuit();
+
 	virtual ~Launcher();
 
 protected:

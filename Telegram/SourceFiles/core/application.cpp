@@ -2095,15 +2095,15 @@ void SetLaunchState(LaunchState state) {
 }
 
 void Restart() {
-   const auto updateReady = !UpdaterDisabled()
-	   && (UpdateChecker().state() == UpdateChecker::State::Ready);
-   if (updateReady) {
-	   cSetRestartingUpdate(true);
-   } else {
-	   cSetRestarting(true);
-	   cSetRestartingToSettings(true);
-   }
-   Quit();
+	const auto updateReady = !UpdaterDisabled()
+		&& (UpdateChecker().state() == UpdateChecker::State::Ready);
+	if (updateReady) {
+		cSetRestartingUpdate(true);
+	} else {
+		cSetRestarting(true);
+		cSetRestartingToSettings(true);
+	}
+	Quit();
 }
 
 } // namespace Core

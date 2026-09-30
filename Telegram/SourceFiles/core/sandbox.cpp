@@ -821,6 +821,8 @@ void Sandbox::closeApplication() {
 	}
 	SetLaunchState(LaunchState::QuitProcessed);
 
+	Launcher::Instance().launchUpdaterOnQuit();
+
 	_application = nullptr;
 
 	_localServer.close();
