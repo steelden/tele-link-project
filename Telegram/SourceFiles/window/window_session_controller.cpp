@@ -1361,6 +1361,13 @@ void SessionNavigation::showRepliesForMessage(
 void SessionNavigation::showPeerInfo(
 		PeerId peerId,
 		const SectionShow &params) {
+	if (MtsLink::isThreadPeer(peerId)) {
+		const auto authorPeerId = MtsLink::threadAuthorPeerId(peerId);
+		if (authorPeerId) {
+			showPeerInfo(_session->data().peer(authorPeerId), params);
+			return;
+		}
+	}
 	showPeerInfo(_session->data().peer(peerId), params);
 }
 
@@ -1414,6 +1421,14 @@ void SessionNavigation::showPeerInfo(
 	//	Core::App().settings().setThirdSectionInfoEnabled(true);
 	//	Core::App().saveSettingsDelayed();
 	//}
+	if (MtsLink::isThreadPeer(peer->id)) {
+		const auto authorPeerId = MtsLink::threadAuthorPeerId(peer->id);
+		if (authorPeerId) {
+			showSection(std::make_shared<Info::Memento>(
+				_session->data().peer(authorPeerId)), params);
+			return;
+		}
+	}
 	showSection(std::make_shared<Info::Memento>(peer), params);
 }
 
@@ -3176,6 +3191,7 @@ void SessionController::showPeerHistory(
 		const auto [parentPeerId, rootId] =
 			MtsLink::threadParentInfo(peerId);
 		if (parentPeerId && rootId) {
+			MtsLink::setCurrentOpenThread(parentPeerId, rootId);
 			const auto parentHistory =
 				session().data().history(parentPeerId);
 			showRepliesForMessage(parentHistory, rootId, MsgId(0), params);

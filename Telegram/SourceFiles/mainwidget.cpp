@@ -2985,6 +2985,18 @@ auto MainWidget::thirdSectionForCurrentMainSection(
 		; sublist && sublist->parentChat()) {
 		return std::make_shared<Info::Memento>(sublist);
 	} else if (const auto peer = key.peer()) {
+		if (MtsLink::isThreadPeer(peer->id)) {
+			const auto authorPeerId = MtsLink::threadAuthorPeerId(peer->id);
+			if (authorPeerId) {
+				return Info::Memento::Default(
+					peer->owner().peer(authorPeerId));
+			}
+		}
+		const auto threadAuthor = MtsLink::currentOpenThreadAuthor(peer->id);
+		if (threadAuthor) {
+			return Info::Memento::Default(
+				peer->owner().peer(threadAuthor));
+		}
 		return Info::Memento::Default(peer);
 	} else if (const auto sublist = key.sublist()) {
 		return Info::Memento::Default(sublist->owningHistory()->peer);
@@ -2995,6 +3007,8 @@ auto MainWidget::thirdSectionForCurrentMainSection(
 void MainWidget::updateThirdColumnToCurrentChat(
 		Dialogs::Key key,
 		bool canWrite) {
+
+
 	auto saveOldThirdSection = [&] {
 		if (saveThirdSectionToStackBack()) {
 			_stack.back()->setThirdSectionMemento(

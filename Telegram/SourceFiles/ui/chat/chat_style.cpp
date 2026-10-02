@@ -171,7 +171,7 @@ int ColorPatternIndex(
 		const ColorIndicesCompressed &indices,
 		uint8 colorIndex,
 		bool dark) {
-	Expects(colorIndex >= 0 && colorIndex < kColorIndexCount);
+	if (colorIndex >= kColorIndexCount) { colorIndex = colorIndex % kSimpleColorIndexCount; }
 
 	if (!indices.colors
 		|| colorIndex < kSimpleColorIndexCount) {
@@ -818,7 +818,7 @@ const MessageImageStyle &ChatStyle::imageStyle(bool selected) const {
 }
 
 int ChatStyle::colorPatternIndex(uint8 colorIndex) const {
-	Expects(colorIndex >= 0 && colorIndex < kColorIndexCount);
+	if (colorIndex >= kColorIndexCount) { colorIndex = colorIndex % kSimpleColorIndexCount; }
 
 	if (!_colorIndices.colors
 		|| colorIndex < kSimpleColorIndexCount) {
@@ -918,7 +918,7 @@ not_null<Text::QuotePaintCache*> ChatStyle::serviceReplyCache(
 const ColorIndexValues &ChatStyle::coloredValues(
 		bool selected,
 		uint8 colorIndex) const {
-	Expects(colorIndex >= 0 && colorIndex < kColorIndexCount);
+	if (colorIndex >= kColorIndexCount) { colorIndex = colorIndex % kSimpleColorIndexCount; }
 
 	const auto shift = (selected ? kColorIndexCount : 0);
 	auto &result = _coloredValues[shift + colorIndex];
@@ -938,7 +938,7 @@ QColor ChatStyle::collectibleNameColor(
 const style::TextPalette &ChatStyle::coloredTextPalette(
 		bool selected,
 		uint8 colorIndex) const {
-	Expects(colorIndex >= 0 && colorIndex < kColorIndexCount);
+	if (colorIndex >= kColorIndexCount) { colorIndex = colorIndex % kSimpleColorIndexCount; }
 
 	const auto shift = (selected ? kColorIndexCount : 0);
 	auto &result = _coloredTextPalettes[shift + colorIndex];
@@ -1014,7 +1014,7 @@ not_null<Text::QuotePaintCache*> ChatStyle::coloredCache(
 		ColoredQuotePaintCaches &caches,
 		bool selected,
 		uint8 colorIndex) const {
-	Expects(colorIndex >= 0 && colorIndex < kColorIndexCount);
+	if (colorIndex >= kColorIndexCount) { colorIndex = colorIndex % kSimpleColorIndexCount; }
 
 	const auto shift = (selected ? kColorIndexCount : 0);
 	auto &cache = caches[shift + colorIndex];
@@ -1468,7 +1468,9 @@ uint8 DecideColorIndex(uint64 id) {
 }
 
 uint8 ColorIndexToPaletteIndex(uint8 colorIndex) {
-	Expects(colorIndex >= 0 && colorIndex < kColorIndexCount);
+	if (colorIndex >= kColorIndexCount) {
+		colorIndex = colorIndex % kSimpleColorIndexCount;
+	}
 
 	const int8 map[] = { 0, 7, 4, 1, 6, 3, 5 };
 	return map[colorIndex % kSimpleColorIndexCount];

@@ -53,6 +53,14 @@ void markReadRequestSent(const QString &chatId);
 [[nodiscard]] QPair<PeerId, MsgId> threadParentInfo(PeerId threadPeerId);
 [[nodiscard]] QPair<ChatId, MessageId> threadTopicInfo(MsgId rootId);
 [[nodiscard]] const QHash<PeerId, QPair<PeerId, MsgId>> &threadPeerMap();
+[[nodiscard]] PeerId threadAuthorPeerId(PeerId threadPeerId);
+[[nodiscard]] PeerId currentOpenThreadAuthor(PeerId parentPeerId);
+
+void updateThreadParticipants(
+	not_null<Main::Session*> session,
+	PeerId parentPeerId,
+	MsgId rootId,
+	const std::vector<MsgId> &messageIds);
 
 void applyThreadsList(
 	not_null<Main::Session*> session,

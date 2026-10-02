@@ -95,6 +95,21 @@ QString ProfileDataPath;
 
 QHash<MsgId, QPair<ChatId, MessageId>> ThreadTopicMap;
 QHash<PeerId, QPair<PeerId, MsgId>> ThreadPeerInfoMap;
+QHash<PeerId, PeerId> ThreadAuthorMap;
+
+struct PeerMsgKey {
+	PeerId peer;
+	MsgId msg;
+	bool operator==(const PeerMsgKey &o) const {
+		return peer == o.peer && msg == o.msg;
+	}
+};
+
+[[nodiscard]] inline size_t qHash(const PeerMsgKey &k, size_t seed = 0) {
+	return ::qHash(k.peer.value, seed) ^ ::qHash(k.msg.bare, seed);
+}
+
+QHash<PeerMsgKey, PeerId> ThreadReverseMap;
 
 
 QString myUserIdFilePath() {
@@ -1105,6 +1120,14 @@ void applyThreadsList(
 		const auto parentPeerId = chatIdToPeerId(thread.chatId);
 		ThreadTopicMap.insert(rootId, { thread.chatId, thread.id });
 		ThreadPeerInfoMap.insert(peerId, { parentPeerId, rootId });
+		ThreadReverseMap.insert({ parentPeerId, rootId }, peerId);
+
+		const auto authorUuidForMap =
+			thread.message.value("authorId").toString();
+		if (!authorUuidForMap.isEmpty()) {
+			const auto authorBare = uuidToBareId(authorUuidForMap);
+			ThreadAuthorMap.insert(peerId, PeerId(::UserId(authorBare)));
+		}
 
 		session->data().refreshChatListEntry(
 			Dialogs::Key(history));
@@ -1722,6 +1745,53 @@ QPair<ChatId, MessageId> threadTopicInfo(MsgId rootId) {
 
 const QHash<PeerId, QPair<PeerId, MsgId>> &threadPeerMap() {
 	return ThreadPeerInfoMap;
+}
+
+PeerId threadAuthorPeerId(PeerId threadPeerId) {
+	return ThreadAuthorMap.value(threadPeerId);
+}
+
+void updateThreadParticipants(
+		not_null<Main::Session*> session,
+		PeerId parentPeerId,
+		MsgId rootId,
+		const std::vector<MsgId> &messageIds) {
+	const auto it = ThreadReverseMap.constFind({ parentPeerId, rootId });
+	if (it == ThreadReverseMap.constEnd()) {
+		return;
+	}
+	const auto threadPeerId = it.value();
+	const auto channel = session->data().channelLoaded(
+		peerToChannel(threadPeerId));
+	if (!channel) {
+		return;
+	}
+	const auto mega = channel->asMegagroup();
+	if (!mega || !mega->mgInfo) {
+		return;
+	}
+
+	base::flat_set<not_null<UserData*>> seen;
+	for (const auto &msgId : messageIds) {
+		const auto item = session->data().message(parentPeerId, msgId);
+		if (item) {
+			if (const auto user = item->from()->asUser()) {
+				seen.emplace(user);
+			}
+		}
+	}
+
+	mega->mgInfo->lastParticipants.clear();
+	for (const auto &user : seen) {
+		mega->mgInfo->lastParticipants.push_back(user);
+	}
+	mega->setMembersCount(int(seen.size()));
+	mega->mgInfo->lastParticipantsStatus
+		= MegagroupInfo::LastParticipantsUpToDate
+		| MegagroupInfo::LastParticipantsOnceReceived;
+	mega->mgInfo->lastParticipantsCount = int(seen.size());
+	session->changes().peerUpdated(
+		mega, Data::PeerUpdate::Flag::Members);
 }
 
 MTPPeerNotifySettings makeMuteSettings(bool muted) {
@@ -3366,6 +3436,19 @@ void clearCurrentOpenThread(PeerId peerId) {
 bool isThreadOpen(PeerId peerId, MsgId rootId) {
 	const auto it = CurrentOpenThreads.constFind(peerId);
 	return it != CurrentOpenThreads.constEnd() && it.value() == rootId;
+}
+
+PeerId currentOpenThreadAuthor(PeerId parentPeerId) {
+	const auto it = CurrentOpenThreads.constFind(parentPeerId);
+	if (it == CurrentOpenThreads.constEnd()) {
+		return PeerId(0);
+	}
+	const auto rootId = it.value();
+	const auto rev = ThreadReverseMap.constFind({ parentPeerId, rootId });
+	if (rev == ThreadReverseMap.constEnd()) {
+		return PeerId(0);
+	}
+	return ThreadAuthorMap.value(rev.value());
 }
 
 using RepliesKey = std::pair<PeerId, MsgId>;
