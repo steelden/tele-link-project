@@ -100,6 +100,9 @@ namespace {
 constexpr auto kNextForUpgradeGiftTimeout = 5 * crl::time(1000);
 constexpr auto kMaxServiceNotificationMessageSize = 4096;
 
+// MTS Link has no pinned chats limit.
+constexpr auto kMtsLinkPinnedChatsLimit = 1000;
+
 using ViewElement = HistoryView::Element;
 
 // s: box 100x100
@@ -2925,15 +2928,11 @@ bool Session::pinnedCanPin(
 }
 
 int Session::pinnedChatsLimit(Data::Folder *folder) const {
-	const auto limits = Data::PremiumLimits(_session);
-	return folder
-		? limits.dialogsFolderPinnedCurrent()
-		: limits.dialogsPinnedCurrent();
+	return kMtsLinkPinnedChatsLimit;
 }
 
 int Session::pinnedChatsLimit(FilterId filterId) const {
-	const auto limits = Data::PremiumLimits(_session);
-	return limits.dialogFiltersChatsCurrent();
+	return kMtsLinkPinnedChatsLimit;
 }
 
 int Session::pinnedChatsLimit(not_null<Data::Forum*> forum) const {
@@ -2951,28 +2950,12 @@ int Session::pinnedChatsLimit(not_null<Data::SavedMessages*> saved) const {
 
 rpl::producer<int> Session::maxPinnedChatsLimitValue(
 		Data::Folder *folder) const {
-	// Premium limit from appconfig.
-	// We always use premium limit in the MainList limit producer,
-	// because it slices the list to that limit. We don't want to slice
-	// premium-ly added chats from the pinned list because of sync issues.
-	return _session->appConfig().value(
-	) | rpl::map([folder, limits = Data::PremiumLimits(_session)] {
-		return folder
-			? limits.dialogsFolderPinnedPremium()
-			: limits.dialogsPinnedPremium();
-	});
+	return rpl::single(kMtsLinkPinnedChatsLimit);
 }
 
 rpl::producer<int> Session::maxPinnedChatsLimitValue(
 		FilterId filterId) const {
-	// Premium limit from appconfig.
-	// We always use premium limit in the MainList limit producer,
-	// because it slices the list to that limit. We don't want to slice
-	// premium-ly added chats from the pinned list because of sync issues.
-	return _session->appConfig().value(
-	) | rpl::map([limits = Data::PremiumLimits(_session)] {
-		return limits.dialogFiltersChatsPremium();
-	});
+	return rpl::single(kMtsLinkPinnedChatsLimit);
 }
 
 rpl::producer<int> Session::maxPinnedChatsLimitValue(
