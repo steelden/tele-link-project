@@ -4057,12 +4057,6 @@ MtsLinkMessageContent convertMentionsForSending(
 	const auto &text = textWithTags.text;
 	const auto &tags = textWithTags.tags;
 
-	if (tags.isEmpty()) {
-		MtsLinkMessageContent plain;
-		plain.text = text;
-		return plain;
-	}
-
 	static const auto styleMap = QHash<QString, QString>{
 		{u"**"_q, u"bold"_q},
 		{u"__"_q, u"italic"_q},
@@ -4160,6 +4154,38 @@ MtsLinkMessageContent convertMentionsForSending(
 						blockMdMarkers[tag.offset + tag.length] += *mit;
 					}
 				}
+			}
+		}
+	}
+
+	{
+		auto parsed = TextWithEntities{ text };
+		TextUtilities::ParseEntities(parsed, TextParseLinks);
+		for (const auto &entity : parsed.entities) {
+			if (entity.type() != EntityType::Url) {
+				continue;
+			}
+			const auto eo = entity.offset();
+			const auto el = entity.length();
+			bool overlaps = false;
+			for (const auto &h : hits) {
+				if (eo < h.offset + h.length && eo + el > h.offset) {
+					overlaps = true;
+					break;
+				}
+			}
+			if (!overlaps) {
+				auto url = text.mid(eo, el);
+				if (!url.startsWith(u"http://"_q, Qt::CaseInsensitive)
+					&& !url.startsWith(u"https://"_q, Qt::CaseInsensitive)) {
+					url = u"https://"_q + url;
+				}
+				TagHit hit;
+				hit.offset = eo;
+				hit.length = el;
+				hit.type = HitType::Link;
+				hit.url = url;
+				hits.push_back(std::move(hit));
 			}
 		}
 	}
