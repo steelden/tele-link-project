@@ -726,11 +726,15 @@ not_null<Ui::VerticalLayout*> SetupFoldersList(
 				session,
 				next,
 				updated,
+				order = std::move(order),
 				updates = std::move(updates)
 			] {
 				const auto filters = &session->data().chatsFilters();
 				for (const auto &update : updates) {
 					filters->apply(update);
+				}
+				if (!order.empty()) {
+					filters->saveOrder(order);
 				}
 				if (next) {
 					Assert(updated.id() != 0);

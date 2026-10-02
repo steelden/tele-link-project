@@ -165,6 +165,11 @@ void saveChatListToCache(
 void loadChatListFromCache(
 	not_null<Main::Session*> session);
 
+void saveFiltersToCache(not_null<Main::Session*> session);
+void loadFiltersFromCache(
+	not_null<Main::Session*> session,
+	Fn<void(bool loaded)> done);
+
 void setFileAuthToken(const QString &token);
 [[nodiscard]] QString fileAuthToken();
 

@@ -227,6 +227,8 @@ private:
 	};
 
 	void load(bool force);
+	void loadMtsLinkDefaults();
+	void maybeSaveToCache();
 	void received(const QVector<MTPDialogFilter> &list);
 	bool applyOrder(const QVector<MTPint> &order);
 	bool applyChange(ChatFilter &filter, ChatFilter &&updated);

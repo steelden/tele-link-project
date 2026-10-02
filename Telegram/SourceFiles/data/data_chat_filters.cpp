@@ -456,43 +456,14 @@ void ChatFilters::load(bool force) {
 		if (_loaded && !force) {
 			return;
 		}
-		using Flag = ChatFilter::Flag;
-		const auto allTypes = Flag::Contacts
-			| Flag::NonContacts
-			| Flag::Groups
-			| Flag::Channels;
-
-		set(ChatFilter(
-			FilterId(1),
-			{ { tr::lng_filters_name_unread(tr::now) } },
-			QString(),
-			std::nullopt,
-			allTypes | Flag::NoRead,
-			{}, {}, {}));
-		set(ChatFilter(
-			FilterId(2),
-			{ { tr::lng_filters_name_people(tr::now) } },
-			QString(),
-			std::nullopt,
-			Flag::Contacts | Flag::NonContacts,
-			{}, {}, {}));
-		set(ChatFilter(
-			FilterId(3),
-			{ { tr::lng_filters_type_groups(tr::now) } },
-			QString(),
-			std::nullopt,
-			Flag::Groups,
-			{}, {}, {}));
-		set(ChatFilter(
-			FilterId(4),
-			{ { tr::lng_filters_type_channels(tr::now) } },
-			QString(),
-			std::nullopt,
-			Flag::Channels,
-			{}, {}, {}));
-
-		_loaded = true;
-		_listChanged.fire({});
+		const auto session = &_owner->session();
+		MtsLink::loadFiltersFromCache(session, [=](bool loaded) {
+			if (!loaded) {
+				loadMtsLinkDefaults();
+			}
+			_loaded = true;
+			_listChanged.fire({});
+		});
 		return;
 	}
 	auto &api = _owner->session().api();
@@ -509,6 +480,49 @@ void ChatFilters::load(bool force) {
 			_listChanged.fire({});
 		}
 	}).send();
+}
+
+void ChatFilters::loadMtsLinkDefaults() {
+	using Flag = ChatFilter::Flag;
+	const auto allTypes = Flag::Contacts
+		| Flag::NonContacts
+		| Flag::Groups
+		| Flag::Channels;
+
+	set(ChatFilter(
+		FilterId(1),
+		{ { tr::lng_filters_name_unread(tr::now) } },
+		QString(),
+		std::nullopt,
+		allTypes | Flag::NoRead,
+		{}, {}, {}));
+	set(ChatFilter(
+		FilterId(2),
+		{ { tr::lng_filters_name_people(tr::now) } },
+		QString(),
+		std::nullopt,
+		Flag::Contacts | Flag::NonContacts,
+		{}, {}, {}));
+	set(ChatFilter(
+		FilterId(3),
+		{ { tr::lng_filters_type_groups(tr::now) } },
+		QString(),
+		std::nullopt,
+		Flag::Groups,
+		{}, {}, {}));
+	set(ChatFilter(
+		FilterId(4),
+		{ { tr::lng_filters_type_channels(tr::now) } },
+		QString(),
+		std::nullopt,
+		Flag::Channels,
+		{}, {}, {}));
+}
+
+void ChatFilters::maybeSaveToCache() {
+	if (_loaded && _owner->session().account().mtsLinkSession()) {
+		MtsLink::saveFiltersToCache(&_owner->session());
+	}
 }
 
 bool ChatFilters::tagsEnabled() const {
@@ -712,8 +726,10 @@ void ChatFilters::set(ChatFilter filter) {
 	if (i == end(_list)) {
 		applyInsert(std::move(filter), _list.size());
 		_listChanged.fire({});
+		maybeSaveToCache();
 	} else if (applyChange(*i, std::move(filter))) {
 		_listChanged.fire({});
+		maybeSaveToCache();
 	}
 }
 
@@ -733,6 +749,7 @@ void ChatFilters::remove(FilterId id) {
 	}
 	applyRemove(i - begin(_list));
 	_listChanged.fire({});
+	maybeSaveToCache();
 }
 
 void ChatFilters::moveAllToFront() {
@@ -888,6 +905,7 @@ bool ChatFilters::applyOrder(const QVector<MTPint> &order) {
 	}
 	if (changed) {
 		_listChanged.fire({});
+		maybeSaveToCache();
 	}
 	return true;
 }
@@ -927,12 +945,6 @@ const ChatFilter &ChatFilters::applyUpdatedPinned(
 void ChatFilters::saveOrder(
 		const std::vector<FilterId> &order,
 		mtpRequestId after) {
-	if (after) {
-		_saveOrderAfterId = after;
-	}
-	const auto api = &_owner->session().api();
-	api->request(_saveOrderRequestId).cancel();
-
 	auto ids = QVector<MTPint>();
 	ids.reserve(order.size());
 	for (const auto id : order) {
@@ -941,9 +953,17 @@ void ChatFilters::saveOrder(
 	const auto wrapped = MTP_vector<MTPint>(ids);
 
 	apply(MTP_updateDialogFilterOrder(wrapped));
-	_saveOrderRequestId = api->request(MTPmessages_UpdateDialogFiltersOrder(
-		wrapped
-	)).afterRequest(_saveOrderAfterId).send();
+
+	if (!_owner->session().account().mtsLinkSession()) {
+		if (after) {
+			_saveOrderAfterId = after;
+		}
+		const auto api = &_owner->session().api();
+		api->request(_saveOrderRequestId).cancel();
+		_saveOrderRequestId = api->request(
+			MTPmessages_UpdateDialogFiltersOrder(wrapped)
+		).afterRequest(_saveOrderAfterId).send();
+	}
 }
 
 bool ChatFilters::archiveNeeded() const {
@@ -966,7 +986,9 @@ FilterId ChatFilters::defaultId() const {
 FilterId ChatFilters::lookupId(int index) const {
 	Expects(index >= 0 && index < _list.size());
 
-	if (_owner->session().user()->isPremium() || !_list.front().id()) {
+	if (_owner->session().user()->isPremium()
+		|| _owner->session().account().mtsLinkSession()
+		|| !_list.front().id()) {
 		return _list[index].id();
 	}
 	const auto i = ranges::find(_list, FilterId(0), &ChatFilter::id);

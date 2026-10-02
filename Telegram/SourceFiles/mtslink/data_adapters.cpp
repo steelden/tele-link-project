@@ -3692,6 +3692,78 @@ std::optional<QList<Api::ChannelData>> deserializeChatList(
 	return result;
 }
 
+constexpr auto kMtsLinkFiltersTag = uint64(0xBC03'0000'0000'0000ULL);
+
+Storage::Cache::Key filtersCacheKey() {
+	return { kMtsLinkFiltersTag, 0 };
+}
+
+QByteArray serializeFilters(
+		const std::vector<Data::ChatFilter> &filters) {
+	QByteArray result;
+	QDataStream s(&result, QIODevice::WriteOnly);
+	s.setVersion(QDataStream::Qt_5_1);
+
+	s << qint32(1); // format version
+	s << qint32(int(filters.size()));
+	for (const auto &f : filters) {
+		s << qint32(f.id())
+			<< f.titleText().text
+			<< f.iconEmoji()
+			<< qint32(f.colorIndex().value_or(-1))
+			<< quint16(f.flags().value());
+	}
+	return result;
+}
+
+struct CachedFilter {
+	FilterId id = 0;
+	QString title;
+	QString iconEmoji;
+	std::optional<uint8> colorIndex;
+	Data::ChatFilter::Flags flags;
+};
+
+std::optional<std::vector<CachedFilter>> deserializeFilters(
+		const QByteArray &data) {
+	if (data.isEmpty()) {
+		return std::nullopt;
+	}
+	QDataStream s(data);
+	s.setVersion(QDataStream::Qt_5_1);
+
+	qint32 version = 0;
+	s >> version;
+	if (version != 1) {
+		return std::nullopt;
+	}
+
+	qint32 count = 0;
+	s >> count;
+	if (s.status() != QDataStream::Ok || count < 0) {
+		return std::nullopt;
+	}
+
+	std::vector<CachedFilter> result;
+	result.reserve(count);
+	for (int i = 0; i < count; ++i) {
+		CachedFilter f;
+		qint32 id = 0, colorIdx = 0;
+		quint16 flags = 0;
+		s >> id >> f.title >> f.iconEmoji >> colorIdx >> flags;
+		if (s.status() != QDataStream::Ok) {
+			return std::nullopt;
+		}
+		f.id = FilterId(id);
+		f.colorIndex = (colorIdx >= 0)
+			? std::make_optional(uint8(colorIdx))
+			: std::nullopt;
+		f.flags = Data::ChatFilter::Flags::from_raw(flags);
+		result.push_back(std::move(f));
+	}
+	return result;
+}
+
 } // anonymous namespace
 
 void saveMessagesToCache(
@@ -3753,6 +3825,48 @@ void loadChatListFromCache(
 			LOG(("MtsLink Cache: loaded %1 chats from cache")
 				.arg(cached->size()));
 			applyChatList(strong, *cached);
+		});
+	});
+}
+
+void saveFiltersToCache(not_null<Main::Session*> session) {
+	const auto &filters = session->data().chatsFilters().list();
+	auto data = serializeFilters(filters);
+	session->data().cache().put(filtersCacheKey(), std::move(data));
+}
+
+void loadFiltersFromCache(
+		not_null<Main::Session*> session,
+		Fn<void(bool loaded)> done) {
+	const auto weak = base::make_weak(session);
+	session->data().cache().get(filtersCacheKey(), [=](QByteArray &&data) {
+		crl::on_main(weak, [=, data = std::move(data)]() mutable {
+			auto cached = deserializeFilters(data);
+			if (!cached || cached->empty()) {
+				done(false);
+				return;
+			}
+			const auto strong = weak.get();
+			auto &chatFilters = strong->data().chatsFilters();
+			for (const auto &f : *cached) {
+				if (!f.id) {
+					continue;
+				}
+				chatFilters.set(Data::ChatFilter(
+					f.id,
+					{ { f.title } },
+					f.iconEmoji,
+					f.colorIndex,
+					f.flags,
+					{}, {}, {}));
+			}
+			auto order = std::vector<FilterId>();
+			order.reserve(cached->size());
+			for (const auto &f : *cached) {
+				order.push_back(f.id);
+			}
+			chatFilters.saveOrder(order);
+			done(true);
 		});
 	});
 }

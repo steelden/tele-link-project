@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "menu/menu_mark_as_read.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
 #include "settings/sections/settings_folders.h"
 #include "ui/widgets/menu/menu_action.h"
 #include "ui/filter_icons.h"
@@ -262,7 +263,8 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 
 			const auto filters = &session->data().chatsFilters();
 			const auto &list = filters->list();
-			if (!session->user()->isPremium()) {
+			if (!session->user()->isPremium()
+				&& !session->account().mtsLinkSession()) {
 				if (list[0].id() != FilterId()) {
 					filters->moveAllToFront();
 				}
@@ -408,7 +410,8 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 		state->rebuildLifetime.destroy();
 		slider->fitWidthToSections();
 		{
-			const auto reorderAll = session->user()->isPremium();
+			const auto reorderAll = session->user()->isPremium()
+				|| session->account().mtsLinkSession();
 			const auto maxLimit = (reorderAll ? 1 : 0)
 				+ Data::PremiumLimits(session).dialogFiltersCurrent();
 			const auto premiumFrom = (reorderAll ? 0 : 1) + maxLimit;

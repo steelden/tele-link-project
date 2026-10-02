@@ -353,7 +353,8 @@ void FiltersMenu::refresh() {
 		return;
 	}
 	const auto oldTop = _scroll.scrollTop();
-	const auto reorderAll = premium();
+	const auto isMtsLink = _session->session().account().mtsLinkSession();
+	const auto reorderAll = premium() || isMtsLink;
 	if (!_list) {
 		setupList();
 	}
@@ -814,7 +815,7 @@ void FiltersMenu::applyReorder(
 
 	const auto filters = &_session->session().data().chatsFilters();
 	const auto &list = filters->list();
-	if (!premium()) {
+	if (!premium() && !_session->session().account().mtsLinkSession()) {
 		if (list[0].id() != FilterId()) {
 			filters->moveAllToFront();
 		}
