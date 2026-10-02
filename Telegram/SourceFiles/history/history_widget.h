@@ -662,7 +662,8 @@ private:
 	// destroys _history and _migrated unread bars
 	void destroyUnreadBar();
 	void destroyUnreadBarOnClose();
-	[[nodiscard]] HistoryItem *findFirstUnreadHighlight() const;
+	[[nodiscard]] HistoryItem *findFirstUnreadHighlight(
+		bool dateOnly = false) const;
 	void createUnreadBarIfBelowVisibleArea(int withScrollTop);
 	[[nodiscard]] bool insideJumpToEndInsteadOfToUnread() const;
 	void createUnreadBarAndResize();

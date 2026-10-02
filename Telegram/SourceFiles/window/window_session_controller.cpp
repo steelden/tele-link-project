@@ -3198,6 +3198,12 @@ void SessionController::showPeerHistory(
 			return;
 		}
 	}
+	if (MtsLink::hasChatId(peerId)
+		&& params.way == SectionShow::Way::ClearStack
+		&& (msgId == ShowAtUnreadMsgId || msgId == ShowAtTheEndMsgId)
+		&& content()->handleMtsLinkThreadReClick(peerId)) {
+		return;
+	}
 	if (const auto peer = session().data().peerLoaded(peerId)) {
 		if (const auto channel = peer->asChannel()) {
 			if (channel->isCommunity()) {

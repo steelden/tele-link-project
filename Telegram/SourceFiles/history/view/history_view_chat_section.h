@@ -123,6 +123,7 @@ public:
 	}
 	Dialogs::RowDescriptor activeChat() const override;
 	bool preventsClose(Fn<void()> &&continueCallback) const override;
+	void scrollToBottom();
 
 	bool hasTopBarShadow() const override {
 		return true;

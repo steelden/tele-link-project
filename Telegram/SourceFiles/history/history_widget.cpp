@@ -3064,8 +3064,26 @@ void HistoryWidget::showHistory(
 	controller()->sendingAnimation().clear();
 	_topToast.hide(anim::type::instant);
 	_hiddenSenderTooltip.hide();
+	if (_history && MtsLink::hasChatId(peerId)) {
+		LOG(("MtsLink showHistory: curPeer=%1 targetPeer=%2 way=%3 "
+			"showAt=%4 isThread=%5")
+			.arg(_peer ? _peer->id.value : 0)
+			.arg(peerId.value)
+			.arg(int(params.way))
+			.arg(showAtMsgId.bare)
+			.arg(MtsLink::isThreadPeer(_peer->id)));
+	}
 	if (_history) {
-		if (_peer->id == peerId) {
+		const auto isThreadOfTarget = (_peer->id != peerId)
+			&& params.way != Window::SectionShow::Way::Backward
+			&& MtsLink::isThreadPeer(_peer->id)
+			&& MtsLink::threadParentInfo(_peer->id).first == peerId;
+		if (MtsLink::isThreadPeer(_peer->id) && _peer->id != peerId) {
+			LOG(("MtsLink showHistory: from thread peer=%1 to=%2 way=%3 isThreadOfTarget=%4")
+				.arg(_peer->id.value).arg(peerId.value)
+				.arg(int(params.way)).arg(isThreadOfTarget));
+		}
+		if (_peer->id == peerId || isThreadOfTarget) {
 			updateForwarding();
 
 			if (params.reapplyLocalDraft) {
@@ -3073,9 +3091,184 @@ void HistoryWidget::showHistory(
 			} else if (_historyInited
 				&& (showAtMsgId == ShowAtUnreadMsgId
 					|| showAtMsgId == ShowAtTheEndMsgId)) {
-				const auto target = findFirstUnreadHighlight();
-				if (target) {
-					enqueueMessageHighlight({ target });
+				if (MtsLink::hasChatId(_peer->id)) {
+					MtsLink::applyPendingThreadUnreads(
+						&session(), _peer->id);
+					HistoryItem *threadParent = nullptr;
+					const auto loadedBottom = _history
+						&& _history->loadedAtBottom();
+					int totalScanned = 0;
+					if (loadedBottom) {
+						for (const auto &block : _history->blocks) {
+							for (const auto &msg : block->messages) {
+								const auto item = msg->data();
+								++totalScanned;
+								if (item->isRegular()) {
+									const auto views = item->Get<
+										HistoryMessageViews>();
+									if (views && views->commentsMaxId) {
+										LOG(("MtsLink ReClick: msg=%1 "
+											"maxId=%2 readTill=%3 "
+											"unread=%4")
+											.arg(item->id.bare)
+											.arg(views->commentsMaxId
+												.bare)
+											.arg(views
+												->commentsInboxReadTillId
+												.bare)
+											.arg(item
+												->areCommentsUnread()));
+									}
+									if (item->areCommentsUnread()) {
+										threadParent = item;
+										break;
+									}
+								}
+							}
+							if (threadParent) break;
+						}
+					}
+					LOG(("MtsLink ReClick: loadedBottom=%1 "
+						"scanned=%2 found=%3 pending=%4")
+						.arg(loadedBottom)
+						.arg(totalScanned)
+						.arg(threadParent ? 1 : 0)
+						.arg(MtsLink::pendingThreadUnreadCount(
+							_peer->id)));
+					if (threadParent && threadParent->mainView()) {
+						const auto msgTop = _list->itemTop(
+							threadParent->mainView());
+						if (msgTop >= 0) {
+							const auto top = _scroll->scrollTop();
+							const auto bottom = top
+								+ _scroll->height();
+							if (msgTop < top || msgTop >= bottom) {
+								enqueueMessageHighlight({
+									threadParent });
+								animatedScrollToY(
+									std::clamp(
+										msgTop,
+										0,
+										_scroll->scrollTopMax()),
+									threadParent);
+							} else {
+								enqueueMessageHighlight({
+									threadParent });
+							}
+						}
+					} else if (const auto pendingParent
+						= MtsLink::firstPendingThreadUnreadParent(
+							_peer->id)) {
+						const auto parentUuid =
+							MtsLink::firstPendingThreadUnreadUuid(
+								_peer->id);
+						LOG(("MtsLink ReClick: loadAround "
+							"parent=%1 uuid=%2")
+							.arg(pendingParent.bare)
+							.arg(parentUuid));
+						const auto chatId =
+							MtsLink::peerIdToChatId(_peer->id);
+						const auto peerId = _peer->id;
+						const auto mts = session().account()
+							.mtsLinkSession();
+						if (mts && !parentUuid.isEmpty()) {
+							const auto weak = base::make_weak(
+								controller());
+							const auto conn = std::make_shared<
+								QMetaObject::Connection>();
+							*conn = QObject::connect(
+								mts->messages(),
+								&MtsLink::Api::Messages
+									::aroundMessagesLoaded,
+								[weak, peerId, pendingParent,
+									chatId, conn](
+									const QString &cid,
+									const QString &,
+									const QList<MtsLink::Api
+										::MessageData> &messages,
+									const QList<MtsLink::Api
+										::MemberProfile> &profiles) {
+								QObject::disconnect(*conn);
+								if (cid != chatId) return;
+								const auto ctrl = weak.get();
+								if (!ctrl) return;
+								for (const auto &p : profiles) {
+									MtsLink::applyUserData(
+										&ctrl->session(), p);
+								}
+								for (const auto &src : messages) {
+									MtsLink::addMessage(
+										&ctrl->session(), src);
+								}
+								const auto w = Window::SectionShow
+									::Way::ClearStack;
+								const auto loaded =
+									ctrl->session().data().message(
+										peerId, pendingParent);
+								if (loaded) {
+									ctrl->showPeerHistory(
+										peerId, w, pendingParent);
+								}
+							});
+							mts->messages()->loadAround(
+								chatId, parentUuid, 50);
+						}
+					} else if (const auto barTop = unreadBarTop()) {
+						const auto top = _scroll->scrollTop();
+						if (*barTop < top
+							|| *barTop >= top + _scroll->height()) {
+							animatedScrollToY(
+								std::clamp(
+									*barTop,
+									0,
+									_scroll->scrollTopMax()),
+								nullptr);
+						}
+						if (const auto bar
+							= _history->unreadBar()) {
+							enqueueMessageHighlight({
+								bar->data() });
+						}
+					} else {
+						animatedScrollToY(
+							_scroll->scrollTopMax(), nullptr);
+					}
+				} else if (const auto barTop = unreadBarTop()) {
+					const auto top = _scroll->scrollTop();
+					if (*barTop < top
+						|| *barTop >= top + _scroll->height()) {
+						animatedScrollToY(
+							std::clamp(
+								*barTop,
+								0,
+								_scroll->scrollTopMax()),
+							nullptr);
+					}
+				} else {
+					const auto target = findFirstUnreadHighlight(
+						true);
+					if (target && target->mainView()) {
+						const auto msgTop = _list->itemTop(
+							target->mainView());
+						if (msgTop >= 0) {
+							const auto top = _scroll->scrollTop();
+							const auto bottom = top
+								+ _scroll->height();
+							if (msgTop < top || msgTop >= bottom) {
+								enqueueMessageHighlight({
+									target });
+								animatedScrollToY(
+									std::clamp(
+										msgTop,
+										0,
+										_scroll->scrollTopMax()),
+									target);
+							} else {
+								enqueueMessageHighlight({
+									target });
+							}
+						}
+					}
 				}
 				return;
 			} else if (showAtMsgId == ShowAtUnreadMsgId
@@ -4504,6 +4697,8 @@ void HistoryWidget::newItemAdded(not_null<HistoryItem*> item) {
 
 	if (item->isSending()) {
 		synteticScrollToY(_scroll->scrollTopMax());
+	} else if (MtsLink::hasChatId(_history->peer->id)) {
+		return;
 	} else if (_scroll->scrollTop() < _scroll->scrollTopMax()) {
 		return;
 	}
@@ -8442,6 +8637,8 @@ int HistoryWidget::countInitialScrollTop() {
 		&& (!_migrated || !_migrated->unreadCount())) {
 		return 0;
 	} else {
+		const auto isMtsLink = MtsLink::hasChatId(
+			_history->peer->id);
 		_history->calculateFirstUnreadMessage();
 		const auto unread = _history->firstUnreadMessage();
 		if (unread) {
@@ -8449,7 +8646,9 @@ int HistoryWidget::countInitialScrollTop() {
 		}
 		const auto highlightTarget = findFirstUnreadHighlight();
 		if (highlightTarget) {
-			enqueueMessageHighlight({ highlightTarget });
+			if (!isMtsLink) {
+				enqueueMessageHighlight({ highlightTarget });
+			}
 			const auto view = highlightTarget->mainView();
 			if (view) {
 				const auto msgTop = _list->itemTop(view);
@@ -8458,20 +8657,27 @@ int HistoryWidget::countInitialScrollTop() {
 				if (msgTop >= 0
 					&& msgTop >= maxScroll
 					&& msgTop < maxScroll + visH) {
+					if (isMtsLink) {
+						enqueueMessageHighlight({
+							highlightTarget });
+					}
 					return ScrollMax;
 				}
 			}
 		}
-		if (const auto top = unreadBarTop()) {
-			return *top;
-		} else if (unread) {
-			return itemTopForHighlight(unread);
+		if (!isMtsLink) {
+			if (const auto top = unreadBarTop()) {
+				return *top;
+			} else if (unread) {
+				return itemTopForHighlight(unread);
+			}
 		}
 		return ScrollMax;
 	}
 }
 
-HistoryItem *HistoryWidget::findFirstUnreadHighlight() const {
+HistoryItem *HistoryWidget::findFirstUnreadHighlight(
+		bool dateOnly) const {
 	if (!_history || !_history->loadedAtBottom()) {
 		return nullptr;
 	}
@@ -8488,7 +8694,8 @@ HistoryItem *HistoryWidget::findFirstUnreadHighlight() const {
 			const bool isUnreadMsg = readDate
 				&& !item->out()
 				&& (item->date() > readDate);
-			if (isUnreadMsg || item->areCommentsUnread()) {
+			if (isUnreadMsg
+				|| (!dateOnly && item->areCommentsUnread())) {
 				return item;
 			}
 		}
@@ -8722,7 +8929,8 @@ void HistoryWidget::updateHistoryGeometry(
 		newScrollTop = countInitialScrollTop();
 		_historyInited = true;
 		_scrollToAnimation.stop();
-	} else if (wasAtBottom && !loadedDown && !_history->unreadBar()) {
+	} else if (wasAtBottom && !loadedDown && !_history->unreadBar()
+		&& !MtsLink::hasChatId(_history->peer->id)) {
 		newScrollTop = countAutomaticScrollTop();
 	} else {
 		newScrollTop = std::min(
@@ -8783,7 +8991,8 @@ void HistoryWidget::revealItemsCallback() {
 		_itemsRevealHeight = height;
 		_list->changeItemsRevealHeight(_itemsRevealHeight);
 
-		const auto newScrollTop = (wasAtBottom && !_history->unreadBar())
+		const auto newScrollTop = (wasAtBottom && !_history->unreadBar()
+			&& !MtsLink::hasChatId(_history->peer->id))
 			? countAutomaticScrollTop()
 			: _list->historyScrollTop();
 		const auto toY = std::clamp(newScrollTop, 0, _scroll->scrollTopMax());

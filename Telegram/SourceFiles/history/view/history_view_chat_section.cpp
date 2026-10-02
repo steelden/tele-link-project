@@ -4578,6 +4578,12 @@ void ChatWidget::onScroll() {
 	updateInnerVisibleArea();
 }
 
+void ChatWidget::scrollToBottom() {
+	if (_scroll) {
+		listScrollTo(_scroll->scrollTopMax());
+	}
+}
+
 void ChatWidget::scrollToCurrentVoiceMessage(
 		FullMsgId fromId,
 		FullMsgId toId) {

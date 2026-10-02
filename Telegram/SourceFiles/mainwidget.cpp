@@ -1434,6 +1434,23 @@ bool MainWidget::showHistoryInDifferentWindow(
 	return true;
 }
 
+bool MainWidget::handleMtsLinkThreadReClick(PeerId parentPeerId) {
+	if (!_mainSection) {
+		return false;
+	}
+	auto *chatWidget = dynamic_cast<HistoryView::ChatWidget*>(
+		_mainSection.data());
+	if (!chatWidget) {
+		return false;
+	}
+	const auto id = chatWidget->id();
+	if (id.history->peer->id != parentPeerId || !id.repliesRootId) {
+		return false;
+	}
+	chatWidget->scrollToBottom();
+	return true;
+}
+
 void MainWidget::showHistory(
 		PeerId peerId,
 		const SectionShow &params,

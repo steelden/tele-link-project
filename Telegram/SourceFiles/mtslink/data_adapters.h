@@ -62,6 +62,13 @@ void updateThreadParticipants(
 	MsgId rootId,
 	const std::vector<MsgId> &messageIds);
 
+void applyPendingThreadUnreads(
+	not_null<Main::Session*> session,
+	PeerId chatPeerId);
+[[nodiscard]] int pendingThreadUnreadCount(PeerId chatPeerId);
+[[nodiscard]] MsgId firstPendingThreadUnreadParent(PeerId chatPeerId);
+[[nodiscard]] QString firstPendingThreadUnreadUuid(PeerId chatPeerId);
+
 void applyThreadsList(
 	not_null<Main::Session*> session,
 	const QList<Api::ThreadData> &threads);

@@ -208,6 +208,7 @@ public:
 		PeerId peer,
 		const SectionShow &params,
 		MsgId msgId);
+	bool handleMtsLinkThreadReClick(PeerId parentPeerId);
 	bool handleDrawToReplyRequest(Data::DrawToReplyRequest request);
 	void showMessage(
 		not_null<const HistoryItem*> item,

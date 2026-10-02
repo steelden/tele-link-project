@@ -222,7 +222,11 @@ QHash<QString, QList<PendingChatEvent>> PendingUserEvents;
 QSet<QString> ChatInfoRequested;
 QSet<QString> UserProfileRequested;
 QSet<QString> ReadRequestSentChats;
-QMap<QPair<PeerId, MsgId>, int> PendingThreadUnread;
+struct PendingThreadUnreadInfo {
+	int count = 0;
+	QString parentUuid;
+};
+QMap<QPair<PeerId, MsgId>, PendingThreadUnreadInfo> PendingThreadUnread;
 QHash<PeerId, MsgId> PendingChatThreadScroll;
 
 [[nodiscard]] QString privateCdnThumbBase() {
@@ -1331,24 +1335,6 @@ void connectToSession(
 				}
 			}
 			mainSession->data().sendHistoryChangeNotifications();
-			if (PendingChatThreadScroll.contains(peerId)) {
-				const auto scrollMsgId = PendingChatThreadScroll.value(peerId);
-				const auto scrollTarget = mainSession->data().message(
-					peerId, scrollMsgId);
-				if (scrollTarget) {
-					if (const auto ctrl = mainSession->tryResolveWindow()) {
-						const auto active = ctrl->activeChatCurrent();
-						const auto activePeer = active.peer();
-						if (activePeer && activePeer->id == peerId) {
-							ctrl->showPeerHistory(
-								peerId,
-								Window::SectionShow::Way::ClearStack,
-								scrollMsgId);
-							PendingChatThreadScroll.remove(peerId);
-						}
-					}
-				}
-			}
 			saveMessagesToCache(mainSession, chatId, messages, profiles);
 			if (!rawLastId.isEmpty()
 				&& oldestLoadedMessageId(peerId).isEmpty()) {
@@ -1749,6 +1735,75 @@ const QHash<PeerId, QPair<PeerId, MsgId>> &threadPeerMap() {
 
 PeerId threadAuthorPeerId(PeerId threadPeerId) {
 	return ThreadAuthorMap.value(threadPeerId);
+}
+
+void applyPendingThreadUnreads(
+		not_null<Main::Session*> session,
+		PeerId chatPeerId) {
+	auto it = PendingThreadUnread.begin();
+	while (it != PendingThreadUnread.end()) {
+		if (it.key().first != chatPeerId) {
+			++it;
+			continue;
+		}
+		const auto parentMsgId = it.key().second;
+		const auto &info = it.value();
+		const auto parent = session->data().message(
+			chatPeerId, parentMsgId);
+		if (parent) {
+			if (const auto views
+				= parent->Get<HistoryMessageViews>()) {
+				HistoryMessageRepliesData repliesData;
+				repliesData.isNull = false;
+				repliesData.repliesCount =
+					views->replies.count + info.count;
+				repliesData.maxId =
+					views->commentsMaxId + MsgId(info.count);
+				LOG(("MtsLink applyPending: parent=%1 "
+					"count=%2 newMax=%3")
+					.arg(parentMsgId.bare)
+					.arg(info.count)
+					.arg((views->commentsMaxId
+						+ MsgId(info.count)).bare));
+				parent->setReplies(std::move(repliesData));
+				session->data().requestItemViewRefresh(parent);
+			}
+			it = PendingThreadUnread.erase(it);
+		} else {
+			++it;
+		}
+	}
+}
+
+int pendingThreadUnreadCount(PeerId chatPeerId) {
+	int count = 0;
+	for (auto it = PendingThreadUnread.constBegin();
+		it != PendingThreadUnread.constEnd(); ++it) {
+		if (it.key().first == chatPeerId) {
+			++count;
+		}
+	}
+	return count;
+}
+
+MsgId firstPendingThreadUnreadParent(PeerId chatPeerId) {
+	for (auto it = PendingThreadUnread.constBegin();
+		it != PendingThreadUnread.constEnd(); ++it) {
+		if (it.key().first == chatPeerId) {
+			return it.key().second;
+		}
+	}
+	return MsgId(0);
+}
+
+QString firstPendingThreadUnreadUuid(PeerId chatPeerId) {
+	for (auto it = PendingThreadUnread.constBegin();
+		it != PendingThreadUnread.constEnd(); ++it) {
+		if (it.key().first == chatPeerId) {
+			return it.value().parentUuid;
+		}
+	}
+	return {};
 }
 
 void updateThreadParticipants(
@@ -2246,7 +2301,7 @@ HistoryItem *addMessage(
 		const auto pendingIt = PendingThreadUnread.find(key);
 		if (pendingIt != PendingThreadUnread.end()) {
 			repliesData.readMaxId = MsgId(
-				src.threadChildrenCount - pendingIt.value());
+				src.threadChildrenCount - pendingIt.value().count);
 			PendingThreadUnread.erase(pendingIt);
 		} else {
 			repliesData.readMaxId = MsgId(src.threadChildrenCount);
@@ -2742,60 +2797,47 @@ void handleChatEvent(
 				chatPeerId, parentMsgId);
 			const auto threadIsOpen = isThreadOpen(chatPeerId, parentMsgId);
 			if (parent) {
+				if (const auto views
+					= parent->Get<HistoryMessageViews>()) {
+					HistoryMessageRepliesData repliesData;
+					repliesData.isNull = false;
+					repliesData.repliesCount =
+						views->replies.count + 1;
+					repliesData.maxId =
+						views->commentsMaxId + MsgId(1);
+					LOG(("MtsLink ThreadUnread: parent=%1 "
+						"oldMax=%2 newMax=%3 readTill=%4")
+						.arg(parentMsgId.bare)
+						.arg(views->commentsMaxId.bare)
+						.arg((views->commentsMaxId + MsgId(1)).bare)
+						.arg(views->commentsInboxReadTillId.bare));
+					parent->setReplies(std::move(repliesData));
+				} else {
+					LOG(("MtsLink ThreadUnread: parent=%1 "
+						"has NO views component")
+						.arg(parentMsgId.bare));
+				}
 				session->data().requestItemViewRefresh(parent);
 			} else {
+				const auto history = session->data().history(
+					chatPeerId);
+				const auto history2 = session->data().history(
+					chatPeerId);
+				LOG(("MtsLink ThreadUnread: parent msg %1 "
+					"NOT loaded, chat=%2 blocks=%3 "
+					"loadedAtBottom=%4 parentUuid=%5")
+					.arg(parentMsgId.bare)
+					.arg(chatPeerId.value)
+					.arg(int(history2->blocks.size()))
+					.arg(history2->loadedAtBottom())
+					.arg(msg.parentId));
 				const auto key = qMakePair(chatPeerId, parentMsgId);
-				PendingThreadUnread[key]++;
+				auto &info = PendingThreadUnread[key];
+				info.count++;
+				info.parentUuid = msg.parentId;
 			}
 			if (threadIsOpen) {
 				// Thread view is open — no scroll to parent needed.
-			} else {
-				PendingChatThreadScroll[chatPeerId] = parentMsgId;
-				if (const auto ctrl = session->tryResolveWindow()) {
-					const auto active = ctrl->activeChatCurrent();
-					const auto activePeer = active.peer();
-					if (activePeer && activePeer->id == chatPeerId) {
-						PendingChatThreadScroll.remove(chatPeerId);
-						if (!parent) {
-							const auto mts = session->account().mtsLinkSession();
-							if (mts) {
-								const auto parentUuid = msg.parentId;
-								const auto weakCtrl = base::make_weak(ctrl);
-								const auto scrollPeerId = chatPeerId;
-								const auto scrollMsgId = parentMsgId;
-								const auto conn = std::make_shared<QMetaObject::Connection>();
-								*conn = QObject::connect(
-									mts->messages(),
-									&Api::Messages::aroundMessagesLoaded,
-									[session, weakCtrl, scrollPeerId, scrollMsgId, parentUuid, conn](
-											const ChatId &cid,
-											const MessageId &,
-											const QList<Api::MessageData> &msgs,
-											const QList<Api::MemberProfile> &profs) {
-										QObject::disconnect(*conn);
-										for (const auto &p : profs) {
-											applyUserData(session, p);
-										}
-										for (const auto &src : msgs) {
-											addMessage(session, src);
-										}
-										const auto loaded = session->data().message(
-											scrollPeerId, scrollMsgId);
-										if (loaded) {
-											if (const auto c = weakCtrl.get()) {
-												c->showPeerHistory(
-													scrollPeerId,
-													Window::SectionShow::Way::ClearStack,
-													scrollMsgId);
-											}
-										}
-										PendingChatThreadScroll.remove(scrollPeerId);
-									});
-								mts->messages()->loadAround(chatId, parentUuid, 50);
-							}
-						}
-					}
-				}
 			}
 			const auto history = session->data().history(chatPeerId);
 			const auto last = history->lastMessage();
