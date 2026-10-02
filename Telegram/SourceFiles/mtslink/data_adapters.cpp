@@ -29,6 +29,8 @@ based on Telegram Desktop.
 #include "lang/lang_keys.h"
 #include "history/view/history_view_send_action.h"
 #include "dialogs/dialogs_main_list.h"
+#include "dialogs/dialogs_pinned_list.h"
+#include "dialogs/dialogs_key.h"
 #include "data/data_lastseen_status.h"
 #include "data/data_types.h"
 #include "data/notify/data_notify_settings.h"
@@ -227,7 +229,56 @@ struct PendingThreadUnreadInfo {
 	QString parentUuid;
 };
 QMap<QPair<PeerId, MsgId>, PendingThreadUnreadInfo> PendingThreadUnread;
+constexpr auto kPreviewRetryLimit = 20;
 QHash<PeerId, MsgId> PendingChatThreadScroll;
+bool FolderPinsSyncScheduled = false;
+
+// MTS Link pins are global, so every folder pins the globally pinned
+// chats it contains, in the main list order.
+void syncFolderPins(not_null<Main::Session*> session) {
+	using Flag = Data::ChatFilter::Flag;
+	auto &filters = session->data().chatsFilters();
+	const auto &mainOrder = session->data().chatsList()->pinned()->order();
+	auto updates = std::vector<Data::ChatFilter>();
+	for (const auto &filter : filters.list()) {
+		if (!filter.id() || (filter.flags() & Flag::Threads)) {
+			continue;
+		}
+		auto pinned = std::vector<not_null<History*>>();
+		for (const auto &key : mainOrder) {
+			if (const auto history = key.history()) {
+				if (filter.contains(history)) {
+					pinned.push_back(history);
+				}
+			}
+		}
+		if (pinned != filter.pinned()) {
+			updates.push_back(Data::ChatFilter(
+				filter.id(),
+				filter.title(),
+				filter.iconEmoji(),
+				filter.colorIndex(),
+				filter.flags(),
+				filter.always(),
+				std::move(pinned),
+				filter.never()));
+		}
+	}
+	for (auto &filter : updates) {
+		filters.set(std::move(filter));
+	}
+}
+
+void scheduleFolderPinsSync(not_null<Main::Session*> session) {
+	if (FolderPinsSyncScheduled) {
+		return;
+	}
+	FolderPinsSyncScheduled = true;
+	crl::on_main(session, [=] {
+		FolderPinsSyncScheduled = false;
+		syncFolderPins(session);
+	});
+}
 
 [[nodiscard]] QString privateCdnThumbBase() {
 	return EnvConfig::instance().privateCdnMediaUrl() + u"/thumb_"_q;
@@ -1157,6 +1208,13 @@ void connectToSession(
 	ActiveChatRestored = false;
 	loadChatListFromCache(mainSession);
 
+	rpl::merge(
+		mainSession->data().chatsFilters().changed(),
+		mainSession->data().pinnedDialogsOrderUpdated()
+	) | rpl::on_next([=] {
+		scheduleFolderPinsSync(mainSession);
+	}, mainSession->lifetime());
+
 	setTokenRefreshCallback([mtsSession] {
 		mtsSession->auth()->refreshTokens();
 	});
@@ -1196,17 +1254,18 @@ void connectToSession(
 			if (ch.lastMessageTimestamp <= 0) {
 				continue;
 			}
+			if (mtsSession->messages()->isLoading(ch.id)) {
+				continue;
+			}
 			const auto peerId = chatIdToPeerId(ch.id);
 			const auto history = mainSession->data().historyLoaded(peerId);
-			if (!history) {
-				continue;
-			}
-			const auto currentLast = history->lastMessage();
-			if (!currentLast) {
-				continue;
-			}
+			const auto currentLast = history
+				? history->lastMessage()
+				: nullptr;
 			const auto apiDate = TimeId(ch.lastMessageTimestamp / 1000);
-			if (apiDate > currentLast->date()) {
+			if (!currentLast) {
+				mtsSession->messages()->loadPreview(ch.id, 1);
+			} else if (apiDate > currentLast->date()) {
 				mtsSession->messages()->load(ch.id, {}, 1);
 			}
 		}
@@ -1258,6 +1317,42 @@ void connectToSession(
 			for (const auto &ev : pending) {
 				handleChatEvent(mainSession, ev.dst, ev.param);
 			}
+		});
+	QObject::connect(
+		mtsSession->messages(),
+		&Api::Messages::previewLoaded,
+		[mainSession, mtsSession](
+				const ChatId &chatId,
+				const QList<Api::MessageData> &messages,
+				const QList<Api::MemberProfile> &profiles,
+				int rawCount,
+				int limit) {
+			const auto peerId = chatIdToPeerId(chatId);
+			const auto history = mainSession->data().history(peerId);
+			if (!history->isEmpty() || history->lastMessage()) {
+				return;
+			}
+			if (messages.isEmpty()) {
+				// The newest messages may all be deleted, look deeper.
+				if (rawCount == limit && limit < kPreviewRetryLimit) {
+					mtsSession->messages()->loadPreview(
+						chatId,
+						kPreviewRetryLimit);
+				}
+				return;
+			}
+			for (const auto &p : profiles) {
+				applyUserData(mainSession, p);
+			}
+			// Chat list preview only: create the item outside of blocks,
+			// the full history loads when the chat opens.
+			const auto &newest = messages.front();
+			std::vector<not_null<HistoryItem*>> created;
+			addMessage(mainSession, newest, false, &created);
+			if (!created.empty()) {
+				history->applyDialogTopMessage(created.back()->id);
+			}
+			saveMessagesToCache(mainSession, chatId, { newest }, profiles);
 		});
 	QObject::connect(
 		mtsSession->messages(),
@@ -2055,6 +2150,34 @@ void applyUserData(
 	session->changes().peerUpdated(user, flags);
 }
 
+void applyThreadChildrenCount(
+		not_null<HistoryItem*> item,
+		PeerId chatPeerId,
+		MsgId msgId,
+		const Api::MessageData &src) {
+	if (src.threadChildrenCount <= 0) {
+		return;
+	}
+	const auto views = item->Get<HistoryMessageViews>();
+	auto unread = views
+		? std::max(int(views->commentsMaxId.bare
+			- views->commentsInboxReadTillId.bare), 0)
+		: 0;
+	const auto key = qMakePair(chatPeerId, msgId);
+	const auto pendingIt = PendingThreadUnread.find(key);
+	if (pendingIt != PendingThreadUnread.end()) {
+		unread = std::max(unread, pendingIt.value().count);
+		PendingThreadUnread.erase(pendingIt);
+	}
+	auto repliesData = HistoryMessageRepliesData();
+	repliesData.isNull = false;
+	repliesData.repliesCount = src.threadChildrenCount;
+	repliesData.maxId = MsgId(src.threadChildrenCount);
+	repliesData.readMaxId = MsgId(
+		std::max(src.threadChildrenCount - unread, 1));
+	item->setReplies(std::move(repliesData));
+}
+
 HistoryItem *addMessage(
 		not_null<Main::Session*> session,
 		const Api::MessageData &src,
@@ -2197,6 +2320,7 @@ HistoryItem *addMessage(
 				existing->updateReactions(&*mtp);
 			}
 		}
+		applyThreadChildrenCount(existing, chatPeerId, msgId, src);
 		if (!existing->mainView() && !threadOnly) {
 			if (batchItems) {
 				batchItems->push_back(existing);
@@ -2292,21 +2416,8 @@ HistoryItem *addMessage(
 			}
 		}
 	}
-	if (item && src.threadChildrenCount > 0) {
-		auto repliesData = HistoryMessageRepliesData();
-		repliesData.isNull = false;
-		repliesData.repliesCount = src.threadChildrenCount;
-		repliesData.maxId = MsgId(src.threadChildrenCount);
-		const auto key = qMakePair(chatPeerId, msgId);
-		const auto pendingIt = PendingThreadUnread.find(key);
-		if (pendingIt != PendingThreadUnread.end()) {
-			repliesData.readMaxId = MsgId(
-				src.threadChildrenCount - pendingIt.value().count);
-			PendingThreadUnread.erase(pendingIt);
-		} else {
-			repliesData.readMaxId = MsgId(src.threadChildrenCount);
-		}
-		item->setReplies(std::move(repliesData));
+	if (item) {
+		applyThreadChildrenCount(item, chatPeerId, msgId, src);
 	}
 	if (item && src.updatedAt > 0 && src.updatedAt != src.createdAt) {
 		item->setEditDate(TimeId(src.updatedAt / 1000));
@@ -2796,41 +2907,25 @@ void handleChatEvent(
 			const auto parent = session->data().message(
 				chatPeerId, parentMsgId);
 			const auto threadIsOpen = isThreadOpen(chatPeerId, parentMsgId);
+			const auto mts = session->account().mtsLinkSession();
+			const auto myUserId = (mts && !mts->userId().isEmpty())
+				? mts->userId()
+				: CachedMyUserId;
+			const auto isOwn = !myUserId.isEmpty()
+				&& (msg.authorId == myUserId);
 			if (parent) {
-				if (const auto views
-					= parent->Get<HistoryMessageViews>()) {
-					HistoryMessageRepliesData repliesData;
+				// The count itself comes from MessageChildrenCountUpdatedEvent.
+				const auto views = parent->Get<HistoryMessageViews>();
+				if (isOwn && views && views->commentsMaxId) {
+					auto repliesData = HistoryMessageRepliesData();
 					repliesData.isNull = false;
-					repliesData.repliesCount =
-						views->replies.count + 1;
-					repliesData.maxId =
-						views->commentsMaxId + MsgId(1);
-					LOG(("MtsLink ThreadUnread: parent=%1 "
-						"oldMax=%2 newMax=%3 readTill=%4")
-						.arg(parentMsgId.bare)
-						.arg(views->commentsMaxId.bare)
-						.arg((views->commentsMaxId + MsgId(1)).bare)
-						.arg(views->commentsInboxReadTillId.bare));
+					repliesData.repliesCount = views->replies.count;
+					repliesData.maxId = views->commentsMaxId;
+					repliesData.readMaxId = views->commentsMaxId;
 					parent->setReplies(std::move(repliesData));
-				} else {
-					LOG(("MtsLink ThreadUnread: parent=%1 "
-						"has NO views component")
-						.arg(parentMsgId.bare));
 				}
 				session->data().requestItemViewRefresh(parent);
-			} else {
-				const auto history = session->data().history(
-					chatPeerId);
-				const auto history2 = session->data().history(
-					chatPeerId);
-				LOG(("MtsLink ThreadUnread: parent msg %1 "
-					"NOT loaded, chat=%2 blocks=%3 "
-					"loadedAtBottom=%4 parentUuid=%5")
-					.arg(parentMsgId.bare)
-					.arg(chatPeerId.value)
-					.arg(int(history2->blocks.size()))
-					.arg(history2->loadedAtBottom())
-					.arg(msg.parentId));
+			} else if (!isOwn) {
 				const auto key = qMakePair(chatPeerId, parentMsgId);
 				auto &info = PendingThreadUnread[key];
 				info.count++;
@@ -2970,6 +3065,7 @@ void handleChatEvent(
 		const auto history = session->data().historyLoaded(peerId);
 		if (history) {
 			session->data().setChatPinned(history, FilterId(), true);
+			scheduleFolderPinsSync(session);
 		}
 	} else if (type == "UnpinnedChatEvent") {
 		const auto eventChatId = value.value("chatId").toString();
@@ -2983,6 +3079,7 @@ void handleChatEvent(
 		const auto history = session->data().historyLoaded(peerId);
 		if (history) {
 			session->data().setChatPinned(history, FilterId(), false);
+			scheduleFolderPinsSync(session);
 		}
 	} else if (type == "ChatNotificationsSettedEvent") {
 		const auto eventChatId = value.value("chatId").toString();
@@ -4067,6 +4164,7 @@ void applyChatList(
 		}
 	}
 	session->data().chatsList()->setLoaded();
+	scheduleFolderPinsSync(session);
 	for (const auto &ch : channels) {
 		if (!MessageCacheLoadedChats.contains(ch.id)) {
 			MessageCacheLoadedChats.insert(ch.id);

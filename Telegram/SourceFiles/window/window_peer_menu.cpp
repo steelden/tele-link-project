@@ -4659,6 +4659,10 @@ void TogglePinnedThread(
 	if (!history) {
 		return;
 	}
+	if (MtsLink::hasChatId(history->peer->id)) {
+		// MTS Link pins are global, folders mirror them.
+		return TogglePinnedThread(controller, entry, onToggled);
+	}
 	const auto owner = &history->owner();
 
 	// This can happen when you remove this filter from another client.

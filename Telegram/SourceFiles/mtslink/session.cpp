@@ -112,13 +112,15 @@ void Session::stop() {
 	_manualStop = true;
 	_reconnectTimer.stop();
 	_active = false;
+	// Pending RPC fail handlers capture the API objects, cancel them first.
+	_rpc.disconnect();
 	_channels.reset();
 	_messages.reset();
 	_users.reset();
 	_sending.reset();
 	_typing.reset();
 	_files.reset();
-	_rpc.disconnect();
+	_threads.reset();
 }
 
 Rpc *Session::rpc() { return &_rpc; }

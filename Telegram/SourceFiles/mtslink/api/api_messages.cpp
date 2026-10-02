@@ -27,19 +27,24 @@ void Messages::load(
 
 	const auto isOlder = !fromMessageId.isEmpty();
 	_loadingChats.insert(chatId);
-	auto *timer = new QTimer(this);
+	const auto timer = QPointer<QTimer>(new QTimer(this));
 	timer->setSingleShot(true);
 	timer->start(10000);
 	QObject::connect(timer, &QTimer::timeout, this, [this, chatId, timer] {
 		_loadingChats.remove(chatId);
 		timer->deleteLater();
 	});
+	const auto finishTimer = [timer] {
+		if (timer) {
+			timer->stop();
+			timer->deleteLater();
+		}
+	};
 	_rpc->call(
 		"Chat.GetMessagesV2",
 		param,
-		[this, chatId, isOlder, timer](const QJsonObject &result) {
-			timer->stop();
-			timer->deleteLater();
+		[this, chatId, isOlder, finishTimer](const QJsonObject &result) {
+			finishTimer();
 			_loadingChats.remove(chatId);
 			const auto value = result.value("value").toObject();
 			const auto msgArray = value.value("messages").toArray();
@@ -80,11 +85,41 @@ void Messages::load(
 					chatId, messages, profiles, rawLastId, rawCount);
 			}
 		},
-		[this, chatId, timer](const QString &) {
-			timer->stop();
-			timer->deleteLater();
+		[this, chatId, finishTimer](const QString &) {
+			finishTimer();
 			_loadingChats.remove(chatId);
 			_failedChats.insert(chatId);
+		});
+}
+
+void Messages::loadPreview(const ChatId &chatId, int limit) {
+	_rpc->call(
+		"Chat.GetMessagesV2",
+		QJsonObject{ { "chatId", chatId }, { "limit", limit } },
+		[this, chatId, limit](const QJsonObject &result) {
+			const auto value = result.value("value").toObject();
+			const auto msgArray = value.value("messages").toArray();
+			QList<MessageData> messages;
+			for (const auto &item : msgArray) {
+				auto msg = parseMessage(item.toObject());
+				if (msg.isDeleted) {
+					continue;
+				}
+				if (msg.chatId.isEmpty()) {
+					msg.chatId = chatId;
+				}
+				messages.push_back(std::move(msg));
+			}
+			QList<MemberProfile> profiles;
+			for (const auto &item : value.value("memberProfiles").toArray()) {
+				profiles.push_back(parseProfile(item.toObject()));
+			}
+			Q_EMIT previewLoaded(
+				chatId,
+				messages,
+				profiles,
+				int(msgArray.size()),
+				limit);
 		});
 }
 

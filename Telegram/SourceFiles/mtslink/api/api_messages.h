@@ -101,6 +101,8 @@ public:
 		const MessageId &fromMessageId = {},
 		int limit = 50);
 
+	void loadPreview(const ChatId &chatId, int limit);
+
 	[[nodiscard]] bool isLoading(const ChatId &chatId) const;
 	void retryFailedLoads();
 
@@ -136,6 +138,12 @@ Q_SIGNALS:
 		const QList<MemberProfile> &profiles,
 		const QString &rawLastId,
 		int rawCount);
+	void previewLoaded(
+		const ChatId &chatId,
+		const QList<MessageData> &messages,
+		const QList<MemberProfile> &profiles,
+		int rawCount,
+		int limit);
 	void searchCompleted(
 		const ChatId &chatId,
 		const QList<MessageData> &messages,

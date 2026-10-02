@@ -5349,8 +5349,9 @@ ReplyButton::ButtonParameters Message::replyButtonParameters(
 	const auto reactionInnerRight = st::reactionCornerCenter.x()
 		+ st::reactionCornerSize.width() / 2;
 	const auto replyInnerWidth = ReplyButton::ComputeInnerWidth();
+	const auto outward = reactionInnerRight - replyInnerWidth;
 	const auto relativeCenter = QPoint(
-		geometry.width() + reactionInnerRight - replyInnerWidth,
+		hasRightLayout() ? -outward : (geometry.width() + outward),
 		st::replyCornerCenter.y());
 	result.center = geometry.topLeft() + relativeCenter;
 	if (replyState.itemId != result.context
@@ -5375,10 +5376,11 @@ ReplyButton::ButtonParameters Message::threadButtonParameters(
 	const auto reactionInnerRight = st::reactionCornerCenter.x()
 		+ st::reactionCornerSize.width() / 2;
 	const auto replyInnerWidth = ReplyButton::ComputeInnerWidth();
+	const auto outward = reactionInnerRight
+		- replyInnerWidth
+		- (replyInnerWidth + threadButtonWidth) / 2;
 	const auto relativeCenter = QPoint(
-		geometry.width() + reactionInnerRight
-			- replyInnerWidth
-			- (replyInnerWidth + threadButtonWidth) / 2,
+		hasRightLayout() ? -outward : (geometry.width() + outward),
 		st::replyCornerCenter.y());
 	result.center = geometry.topLeft() + relativeCenter;
 	if (replyState.itemId != result.context
@@ -5973,10 +5975,8 @@ bool Message::hasFastReply() const {
 		return false;
 	}
 	const auto peer = data()->history()->peer;
-	return !hasOutLayout()
-		&& (peer->isChat()
-			|| peer->isMegagroup()
-			|| MtsLink::hasChatId(peer->id));
+	return MtsLink::hasChatId(peer->id)
+		|| (!hasOutLayout() && (peer->isChat() || peer->isMegagroup()));
 }
 
 bool Message::displayFastReply() const {

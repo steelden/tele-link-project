@@ -909,13 +909,18 @@ void Application::setCurrentProxy(
 }
 
 void Application::proxyRotationSettingsChanged() {
-	_private->proxyRotation->settingsChanged();
+	if (_private->proxyRotation) {
+		_private->proxyRotation->settingsChanged();
+	}
 }
 
 void Application::checkProxyRotation(
 		not_null<Main::Account*> account,
 		int32 state) {
-	_private->proxyRotation->handleConnectionStateChanged(account, state);
+	// Destroyed before accounts on quit, accounts still report state.
+	if (_private->proxyRotation) {
+		_private->proxyRotation->handleConnectionStateChanged(account, state);
+	}
 }
 
 auto Application::proxyChanges() const -> rpl::producer<ProxyChange> {
