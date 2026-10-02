@@ -92,44 +92,104 @@ void Auth::loginByAuthCode(const QString &authCode) {
 }
 
 void Auth::refreshTokens() {
-	QJsonObject clientMeta;
-	clientMeta["appVersion"] = "1.0.0";
-	clientMeta["platform"] = "Desktop";
-	clientMeta["device"] = "MtsLinkDesktop";
-	clientMeta["os"] =
-#ifdef Q_OS_WIN
-		"Windows";
-#elif defined(Q_OS_MACOS)
-		"macOS";
-#else
-		"Linux";
-#endif
+	auto *jar = _network.cookieJar();
+	const auto host = QUrl(EnvConfig::instance().httpsServerUrl()).host();
+	const auto cookieDomain = host.section('.', 1);
+	const auto dotDomain = cookieDomain.startsWith('.')
+		? cookieDomain
+		: u"."_q + cookieDomain;
 
-	postJson(
-		"/Account/RefreshUserTokensV2",
-		QJsonObject{{"clientMeta", clientMeta}},
-		[this](const QJsonObject &response) {
+	const auto inMemory = MtsLink::fileAuthCookies();
+	if (!inMemory.isEmpty()) {
+		for (auto cookie : inMemory) {
+			if (cookie.name() != "refresh") {
+				continue;
+			}
+			auto d = cookie.domain();
+			if (!d.startsWith('.')) {
+				cookie.setDomain(u"."_q + d);
+			}
+			jar->insertCookie(cookie);
+		}
+		LOG(("MtsLink Auth: loaded refresh cookie from memory"));
+	} else {
+		const auto savedRefresh = MtsLink::fileRefreshToken();
+		if (!savedRefresh.isEmpty()) {
+			QNetworkCookie c("refresh", savedRefresh.toUtf8());
+			c.setDomain(dotDomain);
+			c.setPath("/");
+			c.setHttpOnly(true);
+			jar->insertCookie(c);
+			LOG(("MtsLink Auth: loaded refresh cookie from saved token"));
+		} else {
+			LOG(("MtsLink Auth: no refresh token available"));
+			Q_EMIT authFailed("No refresh token");
+			return;
+		}
+	}
+
+	const auto bodyBytes = QByteArray(
+		R"({"clientMeta":{"appVersion":"1.5.5","platform":"Web","device":"Opera 135","os":"Windows NT 10.0"}})");
+
+	QNetworkRequest request(QUrl(
+		EnvConfig::instance().httpsServerUrl()
+		+ u"/Account/RefreshUserTokensV2"_q));
+	request.setHeader(
+		QNetworkRequest::ContentTypeHeader,
+		"application/json");
+
+	auto *reply = _network.post(request, bodyBytes);
+
+	QObject::connect(reply, &QNetworkReply::finished, this,
+		[this, reply]() {
+			reply->deleteLater();
+			const auto statusCode = reply->attribute(
+				QNetworkRequest::HttpStatusCodeAttribute).toInt();
+			LOG(("MtsLink Auth: RefreshUserTokensV2 status=%1")
+				.arg(statusCode));
+
+			const auto cookies = reply->header(
+				QNetworkRequest::SetCookieHeader)
+				.value<QList<QNetworkCookie>>();
+			if (!cookies.isEmpty()) {
+				MtsLink::setFileAuthCookies(cookies);
+			}
+
+			if (reply->error() != QNetworkReply::NoError) {
+				const auto body = reply->readAll();
+				LOG(("MtsLink Auth: refresh error: %1")
+					.arg(QString::fromUtf8(body.left(200))));
+				Q_EMIT authFailed(
+					"RefreshTokens failed: " + reply->errorString());
+				return;
+			}
+
+			const auto data = reply->readAll();
+			const auto doc = QJsonDocument::fromJson(data);
+			if (doc.isNull()) {
+				Q_EMIT authFailed("RefreshTokens: invalid JSON");
+				return;
+			}
+
+			const auto response = doc.object();
 			const auto value = response.value("value").toObject();
 			_accessToken = value.value("accessToken").toString();
 			_userId = value.value("userId").toString();
 			_clientId = value.value("clientId").toString();
-			const auto email = value.value("userEmail").toString();
 
 			if (_accessToken.isEmpty()) {
-				Q_EMIT authFailed("No access token in response");
+				Q_EMIT authFailed("No access token in refresh response");
 				return;
 			}
 
+			LOG(("MtsLink Auth: token refreshed successfully"));
 			Q_EMIT authSuccess({
 				.accessToken = _accessToken,
 				.userId = _userId,
 				.clientId = _clientId,
-				.userEmail = email,
+				.userEmail = value.value("userEmail").toString(),
 			});
 			Q_EMIT tokenRefreshed(_accessToken);
-		},
-		[this](const QString &error) {
-			Q_EMIT authFailed("RefreshTokens failed: " + error);
 		});
 }
 
@@ -153,6 +213,10 @@ void Auth::setDeviceId(const QString &deviceId) {
 	_deviceId = deviceId;
 }
 
+QString Auth::deviceId() const {
+	return _deviceId;
+}
+
 void Auth::postJson(
 		const QString &path,
 		const QJsonObject &body,
@@ -163,6 +227,7 @@ void Auth::postJson(
 	request.setHeader(
 		QNetworkRequest::ContentTypeHeader,
 		"application/json");
+	request.setRawHeader("Origin", "https://my.mts-link.ru");
 	request.setRawHeader("X-Platform", "Desktop");
 	request.setRawHeader("X-App-Version", "1.0.0");
 	request.setRawHeader("X-Device", "MtsLinkDesktop");
@@ -175,11 +240,10 @@ void Auth::postJson(
 	request.setRawHeader("X-Os", "Linux");
 #endif
 
+	const auto bodyBytes = QJsonDocument(body).toJson(QJsonDocument::Compact);
 	LOG(("MtsLink Auth: POST %1").arg(path));
 
-	auto *reply = _network.post(
-		request,
-		QJsonDocument(body).toJson(QJsonDocument::Compact));
+	auto *reply = _network.post(request, bodyBytes);
 
 	QObject::connect(reply, &QNetworkReply::finished, this,
 		[this, reply, done, fail, path]() {
@@ -192,21 +256,14 @@ void Auth::postJson(
 			const auto cookies = reply->header(
 				QNetworkRequest::SetCookieHeader)
 				.value<QList<QNetworkCookie>>();
-			for (const auto &cookie : cookies) {
-				LOG(("MtsLink Auth: Set-Cookie: %1=%2 domain=%3 path=%4")
-					.arg(QString::fromUtf8(cookie.name()))
-					.arg(QString::fromUtf8(cookie.value().left(20)) + "...")
-					.arg(cookie.domain())
-					.arg(cookie.path()));
-			}
 			if (!cookies.isEmpty()) {
 				MtsLink::setFileAuthCookies(cookies);
 			}
 
 			if (reply->error() != QNetworkReply::NoError) {
 				const auto body = reply->readAll();
-				LOG(("MtsLink Auth: error body: %1")
-					.arg(QString::fromUtf8(body.left(500))));
+				LOG(("MtsLink Auth: error: %1")
+					.arg(QString::fromUtf8(body.left(200))));
 				if (fail) {
 					fail(reply->errorString());
 				}

@@ -1192,7 +1192,8 @@ void Account::readMtpData() {
 void Account::writeMtsLinkToken(
 		const QString &token,
 		quint64 userId,
-		const QString &refreshToken) {
+		const QString &refreshToken,
+		const QString &deviceId) {
 	const auto path = _basePath + u"mtslink_token"_q;
 	QFile file(path);
 	if (token.isEmpty()) {
@@ -1204,10 +1205,10 @@ void Account::writeMtsLinkToken(
 		file.write(QString::number(userId).toUtf8());
 		file.write("\n");
 		file.write(token.toUtf8());
-		if (!refreshToken.isEmpty()) {
-			file.write("\n");
-			file.write(refreshToken.toUtf8());
-		}
+		file.write("\n");
+		file.write(refreshToken.toUtf8());
+		file.write("\n");
+		file.write(deviceId.toUtf8());
 	} else {
 		LOG(("MtsLink: FAILED to write token file: %1").arg(file.errorString()));
 	}
@@ -1231,6 +1232,7 @@ Account::MtsLinkData Account::readMtsLinkData() const {
 	return {
 		.token = lines[1].trimmed(),
 		.refreshToken = (lines.size() > 2) ? lines[2].trimmed() : QString(),
+		.deviceId = (lines.size() > 3) ? lines[3].trimmed() : QString(),
 		.userId = ok ? userId : 0,
 	};
 }

@@ -90,12 +90,14 @@ public:
 	struct MtsLinkData {
 		QString token;
 		QString refreshToken;
+		QString deviceId;
 		quint64 userId = 0;
 	};
 	void writeMtsLinkToken(
 		const QString &token,
 		quint64 userId,
-		const QString &refreshToken = {});
+		const QString &refreshToken = {},
+		const QString &deviceId = {});
 	[[nodiscard]] MtsLinkData readMtsLinkData() const;
 	void writeMtsLinkActiveChat(const QString &chatId);
 	[[nodiscard]] QString readMtsLinkActiveChat() const;

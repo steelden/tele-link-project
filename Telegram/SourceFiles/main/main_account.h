@@ -120,7 +120,10 @@ public:
 
 	void setMtsLinkMode(bool enabled);
 	[[nodiscard]] bool isMtsLink() const;
-	void startMtsLinkSession(const QString &token);
+	void startMtsLinkSession(
+		const QString &token,
+		bool needsRefresh = false,
+		const QString &savedDeviceId = {});
 	[[nodiscard]] MtsLink::Session *mtsLinkSession() const;
 
 	[[nodiscard]] rpl::lifetime &lifetime() {

@@ -45,6 +45,7 @@ public:
 Q_SIGNALS:
 	void connected();
 	void disconnected();
+	void authError(const QString &errorText);
 	void eventReceived(
 		const QString &name,
 		const QString &dst,

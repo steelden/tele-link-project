@@ -8073,6 +8073,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_forum_messages#other" = "{count} messages";
 "lng_forum_show_topics_list" = "Show Topics List";
 
+"lng_threads_folder" = "Threads";
+
 "lng_monoforum_choose_to_reply" = "Choose a message to reply.";
 
 "lng_request_peer_requirements" = "Requirements";

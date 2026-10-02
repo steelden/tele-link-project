@@ -26,7 +26,7 @@ public:
 	explicit Session(QObject *parent = nullptr);
 	~Session();
 
-	void start(const QString &token);
+	void start(const QString &token, bool needsRefresh = false);
 	void stop();
 
 	[[nodiscard]] Rpc *rpc();
@@ -48,9 +48,11 @@ Q_SIGNALS:
 	void stopped();
 	void initialized();
 	void chatListReady();
+	void authExpired();
 
 private:
 	void onConnected();
+	void onAuthError(const QString &errorText);
 	void runInitSequence();
 	void subscribeToEvents();
 	void loadChatLists();

@@ -333,11 +333,14 @@ void Connection::handleControl(const QJsonObject &control, int seq) {
 		sendControl("token", QJsonObject{{"token", _token}});
 	} else if (name == "setTokenResp") {
 		const auto status = param.value("status").toString();
-		LOG(("MtsLink WS: setTokenResp status=%1").arg(status));
 		if (status == "ok") {
+			LOG(("MtsLink WS: setTokenResp status=ok"));
 			_authenticated = true;
 			Q_EMIT connected(_sid);
 		} else {
+			const auto detail = QString::fromUtf8(
+				QJsonDocument(param).toJson(QJsonDocument::Compact));
+			LOG(("MtsLink WS: setTokenResp FAILED: %1").arg(detail));
 			Q_EMIT error("Authentication failed");
 		}
 	} else if (name == "pong") {

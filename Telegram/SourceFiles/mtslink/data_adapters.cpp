@@ -1038,12 +1038,13 @@ void connectToSession(
 		mtsSession->auth(),
 		&Api::Auth::tokenRefreshed,
 		mtsSession,
-		[mainSession](const QString &newToken) {
+		[mainSession, mtsSession](const QString &newToken) {
 			MtsLink::setFileAuthToken(newToken);
 			TokenRefreshInProgress = false;
 			const auto userId = mainSession->userId().bare;
+			const auto deviceId = mtsSession->auth()->deviceId();
 			mainSession->account().local().writeMtsLinkToken(
-				newToken, userId, MtsLink::fileRefreshToken());
+				newToken, userId, MtsLink::fileRefreshToken(), deviceId);
 			LOG(("MtsLink: token refreshed, CDN auth updated"));
 		});
 	QObject::connect(

@@ -43,6 +43,7 @@ public:
 	[[nodiscard]] ClientId clientId() const;
 
 	void setDeviceId(const QString &deviceId);
+	[[nodiscard]] QString deviceId() const;
 
 Q_SIGNALS:
 	void organizationsReceived(const QList<OrganizationInfo> &orgs);

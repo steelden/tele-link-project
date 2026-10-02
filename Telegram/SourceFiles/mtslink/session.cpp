@@ -37,13 +37,37 @@ Session::Session(QObject *parent)
 				scheduleReconnect();
 			}
 		});
+	QObject::connect(
+		&_rpc,
+		&Rpc::authError,
+		this,
+		&Session::onAuthError);
+	QObject::connect(
+		&_auth,
+		&Api::Auth::tokenRefreshed,
+		this,
+		[this](const QString &newToken) {
+			LOG(("MtsLink Session: token refreshed, reconnecting"));
+			_token = newToken;
+			MtsLink::setFileAuthToken(newToken);
+			_rpc.connectAndAuth(newToken);
+		});
+	QObject::connect(
+		&_auth,
+		&Api::Auth::authFailed,
+		this,
+		[this](const QString &error) {
+			LOG(("MtsLink Session: token refresh failed: %1, "
+				"logging out").arg(error));
+			Q_EMIT authExpired();
+		});
 }
 
 Session::~Session() {
 	stop();
 }
 
-void Session::start(const QString &token) {
+void Session::start(const QString &token, bool needsRefresh) {
 	_token = token;
 	MtsLink::setFileAuthToken(token);
 	_manualStop = false;
@@ -56,18 +80,27 @@ void Session::start(const QString &token) {
 	_files = std::make_unique<Api::Files>(&_rpc);
 
 	auto &env = EnvConfig::instance();
+	const auto doConnect = [this, needsRefresh] {
+		if (needsRefresh) {
+			LOG(("MtsLink Session: refreshing token before connect"));
+			_auth.refreshTokens();
+		} else {
+			LOG(("MtsLink Session: fresh login, connecting directly"));
+			_rpc.connectAndAuth(_token);
+		}
+	};
 	if (env.isLoaded()) {
-		_rpc.connectAndAuth(token);
+		doConnect();
 	} else {
-		QObject::connect(&env, &EnvConfig::loaded, this, [this] {
+		QObject::connect(&env, &EnvConfig::loaded, this, [this, doConnect] {
 			if (!_manualStop) {
-				_rpc.connectAndAuth(_token);
+				doConnect();
 			}
 		}, Qt::SingleShotConnection);
-		QObject::connect(&env, &EnvConfig::loadFailed, this, [this] {
+		QObject::connect(&env, &EnvConfig::loadFailed, this, [this, doConnect] {
 			LOG(("MtsLink Session: env-config failed, connecting with defaults"));
 			if (!_manualStop) {
-				_rpc.connectAndAuth(_token);
+				doConnect();
 			}
 		}, Qt::SingleShotConnection);
 		env.load(u"https://my.mts-link.ru/chats/env-config.js"_q);
@@ -100,6 +133,14 @@ UserId Session::userId() const { return _userId; }
 OrganizationId Session::organizationId() const { return _organizationId; }
 bool Session::isActive() const { return _active; }
 QString Session::token() const { return _token; }
+
+void Session::onAuthError(const QString &errorText) {
+	LOG(("MtsLink Session: auth error: %1, trying token refresh")
+		.arg(errorText));
+	_active = false;
+	_rpc.disconnect();
+	_auth.refreshTokens();
+}
 
 void Session::onConnected() {
 	LOG(("MtsLink Session: WS connected, running init sequence"));

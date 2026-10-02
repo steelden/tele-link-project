@@ -25,6 +25,11 @@ Rpc::Rpc(QObject *parent)
 		&Connection::messageReceived,
 		this,
 		&Rpc::handleMessage);
+	QObject::connect(
+		&_connection,
+		&Connection::error,
+		this,
+		&Rpc::authError);
 }
 
 Rpc::~Rpc() = default;

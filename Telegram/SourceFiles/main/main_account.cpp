@@ -519,7 +519,10 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 		if (!mtsLinkData.refreshToken.isEmpty()) {
 			MtsLink::setFileRefreshToken(mtsLinkData.refreshToken);
 		}
-		startMtsLinkSession(mtsLinkData.token);
+		startMtsLinkSession(
+			mtsLinkData.token,
+			true,
+			mtsLinkData.deviceId);
 	}
 
 	_mtpValue = _mtp.get();
@@ -667,9 +670,17 @@ bool Account::isMtsLink() const {
 	return _isMtsLink;
 }
 
-void Account::startMtsLinkSession(const QString &token) {
+void Account::startMtsLinkSession(
+		const QString &token,
+		bool needsRefresh,
+		const QString &savedDeviceId) {
 	LOG(("MtsLink: creating MtsLink::Session..."));
 	_mtsLinkSession = std::make_unique<MtsLink::Session>();
+
+	if (!savedDeviceId.isEmpty()) {
+		_mtsLinkSession->auth()->setDeviceId(savedDeviceId);
+		LOG(("MtsLink: restored deviceId=%1").arg(savedDeviceId));
+	}
 
 	MtsLink::EnvConfig::instance().setCachePath(
 		local().envConfigCachePath());
@@ -686,13 +697,23 @@ void Account::startMtsLinkSession(const QString &token) {
 		&MtsLink::Session::stopped,
 		_mtsLinkSession.get(),
 		[mtp] { mtp->setConnectionState(MTP::ConnectingState); });
+	QObject::connect(
+		_mtsLinkSession.get(),
+		&MtsLink::Session::authExpired,
+		_mtsLinkSession.get(),
+		[this] {
+			LOG(("MtsLink: auth expired, forcing logout"));
+			crl::on_main(this, [this] { forcedLogOut(); });
+		});
 
 	LOG(("MtsLink: calling session->start()..."));
-	_mtsLinkSession->start(token);
+	_mtsLinkSession->start(token, needsRefresh);
 	LOG(("MtsLink: session started, connecting to Main::Session..."));
 
+	const auto deviceId = _mtsLinkSession->auth()->deviceId();
 	const auto userId = sessionExists() ? session().userId().bare : 0;
-	local().writeMtsLinkToken(token, userId, MtsLink::fileRefreshToken());
+	local().writeMtsLinkToken(
+		token, userId, MtsLink::fileRefreshToken(), deviceId);
 
 	if (const auto s = maybeSession()) {
 		MtsLink::connectToSession(s, _mtsLinkSession.get());
