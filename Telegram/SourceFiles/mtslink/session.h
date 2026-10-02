@@ -13,6 +13,7 @@ based on Telegram Desktop.
 #include "mtslink/api/api_sending.h"
 #include "mtslink/api/api_typing.h"
 #include "mtslink/api/api_files.h"
+#include "mtslink/api/api_threads.h"
 
 #include <QObject>
 #include <QTimer>
@@ -37,6 +38,7 @@ public:
 	[[nodiscard]] Api::Sending *sending();
 	[[nodiscard]] Api::Typing *typing();
 	[[nodiscard]] Api::Files *files();
+	[[nodiscard]] Api::Threads *threads();
 
 	[[nodiscard]] UserId userId() const;
 	[[nodiscard]] OrganizationId organizationId() const;
@@ -65,6 +67,7 @@ private:
 	std::unique_ptr<Api::Sending> _sending;
 	std::unique_ptr<Api::Typing> _typing;
 	std::unique_ptr<Api::Files> _files;
+	std::unique_ptr<Api::Threads> _threads;
 
 	void scheduleReconnect();
 	void doReconnect();

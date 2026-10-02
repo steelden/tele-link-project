@@ -10,6 +10,7 @@ Bridges MTS Link API data into tdesktop's data model
 #include "data/data_peer_id.h"
 #include "mtslink/api/api_channels.h"
 #include "mtslink/api/api_messages.h"
+#include "mtslink/api/api_threads.h"
 #include "ui/text/text_entity.h"
 
 #include <QtNetwork/QNetworkCookie>
@@ -48,6 +49,14 @@ void markReadRequestSent(const QString &chatId);
 [[nodiscard]] bool consumeReadRequestSent(const QString &chatId);
 [[nodiscard]] ChatType chatTypeForPeer(PeerId peerId);
 [[nodiscard]] PeerId favoritesPeerId();
+[[nodiscard]] bool isThreadPeer(PeerId peerId);
+[[nodiscard]] QPair<PeerId, MsgId> threadParentInfo(PeerId threadPeerId);
+[[nodiscard]] QPair<ChatId, MessageId> threadTopicInfo(MsgId rootId);
+[[nodiscard]] const QHash<PeerId, QPair<PeerId, MsgId>> &threadPeerMap();
+
+void applyThreadsList(
+	not_null<Main::Session*> session,
+	const QList<Api::ThreadData> &threads);
 
 void applyDialogData(
 	not_null<Main::Session*> session,

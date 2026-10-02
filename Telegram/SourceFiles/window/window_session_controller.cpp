@@ -3172,6 +3172,16 @@ void SessionController::showPeerHistory(
 		PeerId peerId,
 		const SectionShow &params,
 		MsgId msgId) {
+	if (MtsLink::isThreadPeer(peerId)) {
+		const auto [parentPeerId, rootId] =
+			MtsLink::threadParentInfo(peerId);
+		if (parentPeerId && rootId) {
+			const auto parentHistory =
+				session().data().history(parentPeerId);
+			showRepliesForMessage(parentHistory, rootId, MsgId(0), params);
+			return;
+		}
+	}
 	if (const auto peer = session().data().peerLoaded(peerId)) {
 		if (const auto channel = peer->asChannel()) {
 			if (channel->isCommunity()) {

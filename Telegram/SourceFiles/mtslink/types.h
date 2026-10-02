@@ -29,6 +29,7 @@ enum class ChatType {
 	Discussion,
 	Favorites,
 	Team,
+	Thread,
 };
 
 enum class MessageType {

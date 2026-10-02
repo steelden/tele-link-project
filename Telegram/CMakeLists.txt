@@ -1460,6 +1460,8 @@ PRIVATE
     mtslink/api/api_messages.h
     mtslink/api/api_sending.cpp
     mtslink/api/api_sending.h
+    mtslink/api/api_threads.cpp
+    mtslink/api/api_threads.h
     mtslink/api/api_typing.cpp
     mtslink/api/api_typing.h
     mtslink/api/api_users.cpp

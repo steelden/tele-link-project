@@ -55,6 +55,8 @@ public:
 
 		NewChats      = (1 << 11), // Telegram Business exceptions.
 		ExistingChats = (1 << 12),
+
+		Threads       = (1 << 13),
 	};
 	friend constexpr inline bool is_flag_type(Flag) { return true; };
 	using Flags = base::flags<Flag>;

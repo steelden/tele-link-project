@@ -7811,6 +7811,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_filters_type_new" = "New Chats";
 "lng_filters_type_existing" = "Existing Chats";
 "lng_filters_type_bots" = "Bots";
+"lng_filters_type_threads" = "Threads";
 "lng_filters_type_no_archived" = "Archived";
 "lng_filters_type_no_muted" = "Muted";
 "lng_filters_type_no_read" = "Read";

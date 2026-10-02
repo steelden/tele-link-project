@@ -12,6 +12,7 @@ based on Telegram Desktop.
 #include "data/data_session.h"
 #include "data/data_channel.h"
 #include "data/data_chat_participant_status.h"
+#include "data/data_chat_filters.h"
 #include "data/data_user.h"
 #include "data/data_document.h"
 #include "data/data_photo.h"
@@ -91,6 +92,9 @@ QHash<PeerId, QString> ActiveCallLinks;
 rpl::event_stream<PeerId> ActiveCallChanges;
 QString CachedMyUserId;
 QString ProfileDataPath;
+
+QHash<MsgId, QPair<ChatId, MessageId>> ThreadTopicMap;
+QHash<PeerId, QPair<PeerId, MsgId>> ThreadPeerInfoMap;
 
 
 QString myUserIdFilePath() {
@@ -1015,6 +1019,101 @@ void handleNotificationEvent(
 	not_null<Main::Session*> session,
 	const QJsonObject &param);
 
+void applyThreadsList(
+		not_null<Main::Session*> session,
+		const QList<Api::ThreadData> &threads) {
+	for (const auto &thread : threads) {
+		const auto peerId = chatIdToPeerId(
+			thread.id, ChatType::Thread);
+		const auto channelId = peerToChannel(peerId);
+		const auto channel = session->data().channel(channelId);
+
+		using Flag = ChannelDataFlag;
+		auto flags = channel->flags();
+		flags |= Flag::Megagroup;
+		flags &= ~Flag::Broadcast;
+		flags &= ~Flag::Left;
+		flags &= ~Flag::Forbidden;
+		flags &= ~Flag::Forum;
+		channel->setFlags(flags);
+
+		channel->setName(thread.chatName, {});
+		channel->setLoadedStatus(PeerData::LoadedStatus::Normal);
+
+		const auto history = session->data().history(channel->id);
+		if (!history->folderKnown()) {
+			history->clearFolder();
+		}
+
+		const auto createdAt = thread.message.value("createdAt");
+		const auto dateMs = createdAt.isDouble()
+			? qint64(createdAt.toDouble())
+			: createdAt.toString().toLongLong();
+		const auto date = dateMs > 0
+			? TimeId(dateMs / 1000)
+			: base::unixtime::now();
+		history->setChatListTimeId(date);
+
+		if (thread.unreadChildrenCount > 0) {
+			history->setUnreadCount(thread.unreadChildrenCount);
+		}
+
+		const auto rootId = MsgId(
+			uuidToBareId(thread.id) & 0x7FFFFFFFLL);
+
+		const auto msgText = thread.message.value("text").toString();
+		if (!msgText.isEmpty()) {
+			const auto authorUuid =
+				thread.message.value("authorId").toString();
+			PeerId fromId;
+			MessageFlags msgFlags;
+			if (!authorUuid.isEmpty()) {
+				const auto authorBareId = uuidToBareId(authorUuid);
+				fromId = PeerId(::UserId(authorBareId));
+				msgFlags |= MessageFlag::HasFromId;
+			}
+			const auto markdown =
+				thread.message.value("markdown").toString();
+			QList<Api::MentionInfo> mentions;
+			auto mentionsArray = thread.message.value("metadata")
+				.toObject().value("value").toObject()
+				.value("mentions").toArray();
+			if (mentionsArray.isEmpty()) {
+				mentionsArray = thread.message.value("mentions")
+					.toArray();
+			}
+			for (const auto &m : mentionsArray) {
+				const auto mo = m.toObject();
+				if (mo.value("type").toString() == "User") {
+					mentions.push_back({
+						.userId = mo.value("id").toString(),
+						.name = mo.value("name").toString(),
+					});
+				}
+			}
+			history->addNewLocalMessage(
+				HistoryItemCommonFields{
+					.id = rootId,
+					.flags = msgFlags,
+					.from = fromId,
+					.date = date,
+				},
+				parseMentionedText(
+					msgText, markdown, mentions, session),
+				MTP_messageMediaEmpty());
+		}
+		const auto parentPeerId = chatIdToPeerId(thread.chatId);
+		ThreadTopicMap.insert(rootId, { thread.chatId, thread.id });
+		ThreadPeerInfoMap.insert(peerId, { parentPeerId, rootId });
+
+		session->data().refreshChatListEntry(
+			Dialogs::Key(history));
+	}
+
+	LOG(("MtsLink: applied %1 threads as chats")
+		.arg(threads.size()));
+}
+
 QList<Api::ChannelData> PendingChannelsList;
 QList<Api::ChannelData> LoadedDialogsList;
 bool DialogsApplied = false;
@@ -1352,6 +1451,16 @@ void connectToSession(
 			for (const auto &m : members) {
 				applyUserData(mainSession, m);
 			}
+			for (auto it = ThreadPeerInfoMap.constBegin();
+				it != ThreadPeerInfoMap.constEnd(); ++it) {
+				const auto history = mainSession->data().historyLoaded(
+					it.key());
+				if (history) {
+					if (const auto last = history->lastMessage()) {
+						last->invalidateChatListEntry();
+					}
+				}
+			}
 		});
 	QObject::connect(
 		mtsSession->users(),
@@ -1460,6 +1569,37 @@ void connectToSession(
 			}
 		});
 
+	QObject::connect(
+		mtsSession->threads(),
+		&Api::Threads::threadsLoaded,
+		[mainSession](const QList<Api::ThreadData> &threads) {
+			applyThreadsList(mainSession, threads);
+		});
+
+	{
+		using Flag = Data::ChatFilter::Flag;
+		const auto filterId = FilterId(5);
+		bool hasThreadsFolder = false;
+		for (const auto &f : mainSession->data().chatsFilters().list()) {
+			if (f.flags() & Flag::Threads) {
+				hasThreadsFolder = true;
+				break;
+			}
+		}
+		if (!hasThreadsFolder) {
+			mainSession->data().chatsFilters().set(Data::ChatFilter(
+				filterId,
+				Data::ChatFilterTitle{
+					{ tr::lng_threads_folder(tr::now) } },
+				QString(),
+				std::nullopt,
+				Flag::Threads,
+				{},
+				{},
+				{}));
+		}
+	}
+
 	mainSession->data().reactions().populateMtsLinkReactions({
 		QString::fromUtf8("\xF0\x9F\x91\x8D"),     // 👍
 		QString::fromUtf8("\xF0\x9F\x91\x8E"),     // 👎
@@ -1566,6 +1706,22 @@ ChatType chatTypeForPeer(PeerId peerId) {
 
 PeerId favoritesPeerId() {
 	return FavoritesPeerIdValue;
+}
+
+bool isThreadPeer(PeerId peerId) {
+	return PeerToChatTypeMap.value(peerId) == ChatType::Thread;
+}
+
+QPair<PeerId, MsgId> threadParentInfo(PeerId threadPeerId) {
+	return ThreadPeerInfoMap.value(threadPeerId);
+}
+
+QPair<ChatId, MessageId> threadTopicInfo(MsgId rootId) {
+	return ThreadTopicMap.value(rootId);
+}
+
+const QHash<PeerId, QPair<PeerId, MsgId>> &threadPeerMap() {
+	return ThreadPeerInfoMap;
 }
 
 MTPPeerNotifySettings makeMuteSettings(bool muted) {

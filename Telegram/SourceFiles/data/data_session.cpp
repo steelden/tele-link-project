@@ -92,6 +92,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/call_delayed.h"
 #include "base/random.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
+#include "mtslink/data_adapters.h"
 
 namespace Data {
 namespace {
@@ -5665,19 +5666,24 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 	const auto entry = key.entry();
 	const auto history = entry->asHistory();
 	const auto topic = entry->asTopic();
-	const auto mainList = chatsListFor(entry);
-	auto event = ChatListEntryRefresh{ .key = key };
-	const auto creating = event.existenceChanged = !entry->inChatList();
-	if (creating && topic && topic->creating()) {
-		return;
-	} else if (event.existenceChanged) {
-		const auto mainRow = entry->addToChatList(0, mainList);
-		_contactsNoChatsList.remove(key, mainRow);
-	} else {
-		event.moved = entry->adjustByPosInChatList(0, mainList);
-	}
-	if (event) {
-		_chatListEntryRefreshes.fire(std::move(event));
+	const auto isThread = history
+		&& MtsLink::isThreadPeer(history->peer->id);
+	auto creating = false;
+	if (!isThread) {
+		const auto mainList = chatsListFor(entry);
+		auto event = ChatListEntryRefresh{ .key = key };
+		creating = event.existenceChanged = !entry->inChatList();
+		if (creating && topic && topic->creating()) {
+			return;
+		} else if (event.existenceChanged) {
+			const auto mainRow = entry->addToChatList(0, mainList);
+			_contactsNoChatsList.remove(key, mainRow);
+		} else {
+			event.moved = entry->adjustByPosInChatList(0, mainList);
+		}
+		if (event) {
+			_chatListEntryRefreshes.fire(std::move(event));
+		}
 	}
 	if (!history) {
 		return;
@@ -5716,11 +5722,6 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 		} else if (const auto monoforum = history->peer->monoforum()) {
 			monoforum->preloadSublists();
 		}
-		//if (const auto broadcast = history->peer->monoforumBroadcast()) {
-		//	if (!broadcast->isFullLoaded()) {
-		//		broadcast->updateFull();
-		//	}
-		//}
 	}
 }
 

@@ -78,6 +78,7 @@ void Session::start(const QString &token, bool needsRefresh) {
 	_sending = std::make_unique<Api::Sending>(&_rpc);
 	_typing = std::make_unique<Api::Typing>(&_rpc);
 	_files = std::make_unique<Api::Files>(&_rpc);
+	_threads = std::make_unique<Api::Threads>(&_rpc);
 
 	auto &env = EnvConfig::instance();
 	const auto doConnect = [this, needsRefresh] {
@@ -128,6 +129,7 @@ Api::Users *Session::users() { return _users.get(); }
 Api::Sending *Session::sending() { return _sending.get(); }
 Api::Typing *Session::typing() { return _typing.get(); }
 Api::Files *Session::files() { return _files.get(); }
+Api::Threads *Session::threads() { return _threads.get(); }
 
 UserId Session::userId() const { return _userId; }
 OrganizationId Session::organizationId() const { return _organizationId; }
@@ -216,7 +218,7 @@ void Session::subscribeToEvents() {
 }
 
 void Session::loadChatLists() {
-	int pending = 3;
+	int pending = 4;
 	auto onListDone = [this, pending]() mutable {
 		if (--pending <= 0) {
 			Q_EMIT chatListReady();
@@ -237,17 +239,26 @@ void Session::loadChatLists() {
 		[onListDone](const QList<Api::ChannelData> &) mutable {
 			onListDone();
 		});
+	QObject::connect(
+		_threads.get(),
+		&Api::Threads::threadsLoaded,
+		this,
+		[onListDone](const QList<Api::ThreadData> &) mutable {
+			onListDone();
+		});
+
+	QObject::connect(
+		_threads.get(),
+		&Api::Threads::unreadCounterLoaded,
+		this,
+		[onListDone](int) mutable {
+			onListDone();
+		});
 
 	_channels->loadMyChannels();
 	_channels->loadMyDialogsAndGroupChats();
-
-	// Unread threads counter.
-	_rpc.call(
-		"Chat.GetMyUnreadThreadsCounter",
-		QJsonObject{},
-		[onListDone](const QJsonObject &) mutable {
-			onListDone();
-		});
+	_threads->loadMyThreads();
+	_threads->getUnreadCounter(_organizationId);
 }
 
 void Session::scheduleReconnect() {

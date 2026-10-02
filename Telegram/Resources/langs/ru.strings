@@ -475,6 +475,7 @@ Based on Telegram Desktop lang.strings format
 // === Saved/Favorites ===
 "lng_saved_messages" = "Избранное";
 "lng_threads_folder" = "Обсуждения";
+"lng_filters_type_threads" = "Обсуждения";
 "lng_saved_short" = "Сохранить";
 "lng_saved_forward_here" = "Пересылайте сообщения сюда для быстрого доступа";
 "lng_saved_quote_here" = "Цитируйте сюда для сохранения";

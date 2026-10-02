@@ -734,7 +734,8 @@ void EditFilterBox(
 		| Flag::NonContacts
 		| Flag::Groups
 		| Flag::Channels
-		| Flag::Bots;
+		| Flag::Bots
+		| Flag::Threads;
 	constexpr auto kExcludeTypes = Flag::NoMuted
 		| Flag::NoArchived
 		| Flag::NoRead;
@@ -1065,16 +1066,7 @@ void EditExistingFilter(
 	const auto doneCallback = [=](const Data::ChatFilter &result) {
 		Expects(id == result.id());
 
-		const auto tl = result.tl();
-		session->data().chatsFilters().apply(MTP_updateDialogFilter(
-			MTP_flags(MTPDupdateDialogFilter::Flag::f_filter),
-			MTP_int(id),
-			tl));
-		session->api().request(MTPmessages_UpdateDialogFilter(
-			MTP_flags(MTPmessages_UpdateDialogFilter::Flag::f_filter),
-			MTP_int(id),
-			tl
-		)).send();
+		session->data().chatsFilters().set(result);
 	};
 	const auto saveAnd = [=](
 			const Data::ChatFilter &data,

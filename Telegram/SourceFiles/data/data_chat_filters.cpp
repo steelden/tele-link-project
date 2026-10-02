@@ -344,6 +344,10 @@ bool ChatFilter::contains(
 		bool ignoreFakeUnread) const {
 	const auto flag = [&] {
 		const auto peer = history->peer;
+		if (MtsLink::chatTypeForPeer(peer->id)
+			== MtsLink::ChatType::Thread) {
+			return Flag::Threads;
+		}
 		if (const auto user = peer->asUser()) {
 			return user->isBot()
 				? Flag::Bots
@@ -762,7 +766,7 @@ bool ChatFilters::applyChange(ChatFilter &filter, ChatFilter &&updated) {
 
 	const auto id = filter.id();
 	const auto exceptionsChanged = filter.always() != updated.always();
-	const auto rulesMask = Flag() | Flag::RulesMask;
+	const auto rulesMask = Flag() | Flag::RulesMask | Flag::Threads;
 	const auto rulesChanged = exceptionsChanged
 		|| ((filter.flags() & rulesMask) != (updated.flags() & rulesMask))
 		|| (filter.never() != updated.never());
@@ -816,6 +820,12 @@ bool ChatFilters::applyChange(ChatFilter &filter, ChatFilter &&updated) {
 		feedList(_owner->chatsList());
 		if (const auto folder = _owner->folderLoaded(Data::Folder::kId)) {
 			feedList(folder->chatsList());
+		}
+		for (auto it = MtsLink::threadPeerMap().constBegin();
+			it != MtsLink::threadPeerMap().constEnd(); ++it) {
+			if (const auto h = _owner->historyLoaded(it.key())) {
+				feedHistory(h);
+			}
 		}
 		if (exceptionsChanged && !filter.always().empty()) {
 			_exceptionsToLoad.push_back(id);
