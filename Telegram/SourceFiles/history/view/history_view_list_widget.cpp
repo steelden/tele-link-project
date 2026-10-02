@@ -890,12 +890,14 @@ void ListWidget::refreshRows(const Data::MessagesSlice &old) {
 	const auto revealCount = _inverted
 		? 0
 		: std::min(addedToEndCount, int(_items.size()));
-	for (auto e = end(_items), i = e - revealCount; i != e; ++i) {
-		const auto item = (*i)->data();
-		const auto streamed = item->history()->streamedDraftsIfExists();
-		if (!item->isSponsored()
-			&& (!streamed || !streamed->hasFor(item))) {
-			_itemRevealPending.emplace(*i);
+	if (scrolledTillEnd) {
+		for (auto e = end(_items), i = e - revealCount; i != e; ++i) {
+			const auto item = (*i)->data();
+			const auto streamed = item->history()->streamedDraftsIfExists();
+			if (!item->isSponsored()
+				&& (!streamed || !streamed->hasFor(item))) {
+				_itemRevealPending.emplace(*i);
+			}
 		}
 	}
 	updateAroundPositionFromNearest(nearestIndex);
