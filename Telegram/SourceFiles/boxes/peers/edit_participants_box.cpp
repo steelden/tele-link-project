@@ -1206,10 +1206,6 @@ void ParticipantsBoxController::setupListChangeViewers() {
 
 void ParticipantsBoxController::setMtsLinkOnlineOnly(bool onlineOnly) {
 	_mtsLinkOnlineOnly = onlineOnly && MtsLink::hasChatId(_peer->id);
-	LOG(("[MembersOnline] setOnlineOnly peer=%1 requested=%2 enabled=%3")
-		.arg(_peer->id.value)
-		.arg(onlineOnly ? 1 : 0)
-		.arg(_mtsLinkOnlineOnly ? 1 : 0));
 	_mtsLinkOnlineLifetime.destroy();
 	if (!_mtsLinkOnlineOnly) {
 		return;
@@ -1240,19 +1236,9 @@ bool ParticipantsBoxController::acceptsMtsLinkRow(
 		not_null<UserData*> user) const {
 	// MTS Link keeps online users OnlineTill a far future date, a past date
 	// is a stale value stored by an older session.
-	const auto result = !_mtsLinkOnlineOnly
+	return !_mtsLinkOnlineOnly
 		|| user->isSelf()
 		|| user->lastseen().isOnline(base::unixtime::now());
-	LOG(("[MembersOnline] role=%1 onlineOnly=%2 user=%3 '%4' till=%5 "
-		"self=%6 accepted=%7")
-		.arg(int(_role))
-		.arg(_mtsLinkOnlineOnly ? 1 : 0)
-		.arg(user->id.value)
-		.arg(user->name())
-		.arg(user->lastseen().onlineTill())
-		.arg(user->isSelf() ? 1 : 0)
-		.arg(result ? 1 : 0));
-	return result;
 }
 
 void ParticipantsBoxController::mtsLinkOnlineChanged(
@@ -1527,9 +1513,6 @@ void ParticipantsBoxController::restoreState(
 		}
 		const auto was = _fullCountValue.current();
 		PeerListController::restoreState(std::move(state));
-		LOG(("[MembersOnline] restoreState peer=%1 rows=%2")
-			.arg(_peer->id.value)
-			.arg(delegate()->peerListFullRowsCount()));
 		const auto now = delegate()->peerListFullRowsCount();
 		if (now > 0 || _allLoaded) {
 			refreshDescription();
@@ -1857,15 +1840,6 @@ void ParticipantsBoxController::loadMoreRows() {
 	if (MtsLink::hasChatId(_peer->id)) {
 		_groupByRole = true;
 		const auto mega = channel->asMegagroup();
-		LOG(("[MembersOnline] loadMoreRows peer=%1 role=%2 onlineOnly=%3 "
-			"mgLast=%4 rows=%5")
-			.arg(_peer->id.value)
-			.arg(int(_role))
-			.arg(_mtsLinkOnlineOnly ? 1 : 0)
-			.arg((mega && mega->mgInfo)
-				? int(mega->mgInfo->lastParticipants.size())
-				: -1)
-			.arg(delegate()->peerListFullRowsCount()));
 		if (mega && mega->mgInfo
 			&& !mega->mgInfo->lastParticipants.empty()) {
 			_additional.fillFromPeer();

@@ -2090,7 +2090,13 @@ void SessionController::activateFirstChatsFilter() {
 		return;
 	}
 	_filtersActivated = true;
-	setActiveChatsFilter(session().data().chatsFilters().defaultId());
+	const auto &list = session().data().chatsFilters().list();
+	const auto saved = session().account().local().readMtsLinkActiveFilter();
+	const auto restore = saved
+		&& ranges::contains(list, *saved, &Data::ChatFilter::id);
+	setActiveChatsFilter(restore
+		? *saved
+		: session().data().chatsFilters().defaultId());
 }
 
 bool SessionController::uniqueChatsInSearchResults(
@@ -3373,6 +3379,9 @@ void SessionController::setActiveChatsFilter(
 		resetFakeUnreadWhileOpened();
 	}
 	_activeChatsFilter.force_assign(id);
+	if (_filtersActivated && changed) {
+		session().account().local().writeMtsLinkActiveFilter(id);
+	}
 	if (id || !changed) {
 		closeForum();
 		closeFolder();

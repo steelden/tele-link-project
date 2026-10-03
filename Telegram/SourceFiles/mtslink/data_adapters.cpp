@@ -1548,7 +1548,6 @@ void connectToSession(
 							? Data::LastseenStatus::OnlineTill(
 								base::unixtime::now() + kMtsLinkOnlineHorizon)
 							: Data::LastseenStatus::Recently();
-						LOG(("[Presence] event %1 user=%2").arg(type).arg(userId));
 						PresenceKnownUsers.insert(user->id);
 						if (user->updateLastseen(status)) {
 							mainSession->data().session().changes().peerUpdated(
@@ -1619,11 +1618,6 @@ void connectToSession(
 				bool inCall) {
 			const auto user = mainSession->data().user(
 				::UserId(uuidToBareId(userId)));
-			LOG(("[Presence] GetMember user=%1 '%2' presence=%3 inCall=%4")
-				.arg(userId)
-				.arg(user->name())
-				.arg(int(presence))
-				.arg(inCall ? 1 : 0));
 			PresenceKnownUsers.insert(user->id);
 			const auto status = (presence == MemberPresence::Online)
 				? Data::LastseenStatus::OnlineTill(
@@ -1654,7 +1648,6 @@ void connectToSession(
 			auto &stored = ChatMembersMap[peerId];
 			stored.clear();
 			stored.reserve(members.size());
-			auto presenceRequests = 0;
 			for (const auto &m : members) {
 				applyUserData(mainSession, m);
 				const auto bareId = uuidToBareId(m.userId);
@@ -1666,13 +1659,8 @@ void connectToSession(
 					mtsSession->users()->loadPresence(
 						m.userId,
 						mtsSession->organizationId());
-					++presenceRequests;
 				}
 			}
-			LOG(("[Presence] chat=%1 members=%2 presenceRequests=%3")
-				.arg(chatId)
-				.arg(members.size())
-				.arg(presenceRequests));
 			const auto chatType = chatTypeForPeer(peerId);
 			if (chatType == ChatType::Dialog) {
 				const auto selfId = mtsSession->userId();
@@ -2229,14 +2217,6 @@ void applyUserData(
 			? Data::LastseenStatus::OnlineTill(
 				base::unixtime::now() + kMtsLinkOnlineHorizon)
 			: Data::LastseenStatus::Recently();
-		const auto wasOnline = (user->lastseen().onlineTill() > 0);
-		const auto nowOnline = (src.presence == MemberPresence::Online);
-		if (wasOnline != nowOnline) {
-			LOG(("[Presence] applyUserData user=%1 %2 -> %3")
-				.arg(src.userId)
-				.arg(wasOnline ? "online" : "offline")
-				.arg(nowOnline ? "online" : "offline"));
-		}
 		PresenceKnownUsers.insert(user->id);
 		user->updateLastseen(status);
 	}

@@ -101,6 +101,8 @@ public:
 	[[nodiscard]] MtsLinkData readMtsLinkData() const;
 	void writeMtsLinkActiveChat(const QString &chatId);
 	[[nodiscard]] QString readMtsLinkActiveChat() const;
+	void writeMtsLinkActiveFilter(FilterId filterId);
+	[[nodiscard]] std::optional<FilterId> readMtsLinkActiveFilter() const;
 	[[nodiscard]] QString envConfigCachePath() const;
 	[[nodiscard]] QString basePath() const;
 

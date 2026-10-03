@@ -280,6 +280,7 @@ base::flat_set<QString> Account::collectGoodNames() const {
 		"mtslink_token",
 		"mtslink_env_config",
 		"mtslink_active_chat",
+		"mtslink_active_filter",
 		"mtslink_userid",
 	};
 	const auto push = [&](FileKey key) {
@@ -1257,6 +1258,25 @@ QString Account::readMtsLinkActiveChat() const {
 		return {};
 	}
 	return QString::fromUtf8(file.readAll()).trimmed();
+}
+
+void Account::writeMtsLinkActiveFilter(FilterId filterId) {
+	const auto path = _basePath + u"mtslink_active_filter"_q;
+	QDir().mkpath(QFileInfo(path).absolutePath());
+	QFile file(path);
+	if (file.open(QIODevice::WriteOnly)) {
+		file.write(QByteArray::number(filterId));
+	}
+}
+
+std::optional<FilterId> Account::readMtsLinkActiveFilter() const {
+	QFile file(_basePath + u"mtslink_active_filter"_q);
+	if (!file.open(QIODevice::ReadOnly)) {
+		return std::nullopt;
+	}
+	auto ok = false;
+	const auto result = file.readAll().trimmed().toInt(&ok);
+	return ok ? std::make_optional(FilterId(result)) : std::nullopt;
 }
 
 QString Account::envConfigCachePath() const {
