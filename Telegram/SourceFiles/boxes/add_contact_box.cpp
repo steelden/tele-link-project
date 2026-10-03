@@ -573,14 +573,11 @@ void GroupInfoBox::prepare() {
 			: tr::lng_dlg_new_group_name)(),
 		_initialTitle);
 	_title->setMaxLength(Ui::EditPeer::kMaxGroupChannelTitle);
+	// MTS Link doesn't allow emoji in channel and group chat names.
 	_title->setInstantReplaces(Ui::InstantReplaces::Default());
 	_title->setInstantReplacesEnabled(
-		Core::App().settings().replaceEmojiValue(),
+		rpl::single(false),
 		Core::App().settings().systemTextReplaceValue());
-	Ui::Emoji::SuggestionsController::Init(
-		getDelegate()->outerContainer(),
-		_title,
-		&_navigation->session());
 
 	if (_type != Type::Group) {
 		_description.create(
@@ -852,6 +849,11 @@ void GroupInfoBox::submit() {
 	if (title.isEmpty()) {
 		_title->setFocus();
 		_title->showError();
+		return;
+	} else if (MtsLink::containsEmoji(title)) {
+		_title->setFocus();
+		_title->showError();
+		uiShow()->showToast(tr::lng_mtslink_name_no_emoji(tr::now));
 		return;
 	}
 	if (_type != Type::Group) {

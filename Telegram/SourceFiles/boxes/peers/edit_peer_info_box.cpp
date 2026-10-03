@@ -595,6 +595,10 @@ private:
 	std::optional<bool> _forumTabsSavedValue;
 	std::optional<bool> _autotranslateSavedValue;
 	std::optional<bool> _signaturesSavedValue;
+	std::optional<bool> _mtsLinkPublicSavedValue;
+	std::optional<bool> _mtsLinkPublicInitial;
+	std::optional<bool> _mtsLinkReadOnlySavedValue;
+	void saveMtsLink();
 	std::optional<bool> _signatureProfilesSavedValue;
 
 	const not_null<Window::SessionNavigation*> _navigation;
@@ -748,21 +752,27 @@ object_ptr<Ui::RpWidget> Controller::createTitleEdit() {
 			_peer->name()),
 		st::editPeerTitleMargins);
 	result->entity()->setMaxLength(Ui::EditPeer::kMaxGroupChannelTitle);
+	// MTS Link doesn't allow emoji in channel and group chat names.
+	const auto noEmoji = MtsLink::hasChatId(_peer->id);
 	result->entity()->setInstantReplaces(Ui::InstantReplaces::Default());
 	result->entity()->setInstantReplacesEnabled(
-		Core::App().settings().replaceEmojiValue(),
+		(noEmoji
+			? (rpl::single(false) | rpl::type_erased)
+			: Core::App().settings().replaceEmojiValue()),
 		Core::App().settings().systemTextReplaceValue());
-	Ui::Emoji::SuggestionsController::Init(
-		_wrap->window(),
-		result->entity(),
-		&_peer->session());
+	if (!noEmoji) {
+		Ui::Emoji::SuggestionsController::Init(
+			_wrap->window(),
+			result->entity(),
+			&_peer->session());
+	}
 
 	result->entity()->submits(
 	) | rpl::on_next([=] {
 		submitTitle();
 	}, result->entity()->lifetime());
 
-	{
+	if (!noEmoji) {
 		const auto field = result->entity();
 		const auto container = _box->getDelegate()->outerContainer();
 		using Selector = ChatHelpers::TabbedSelector;
@@ -845,6 +855,9 @@ object_ptr<Ui::RpWidget> Controller::createDescriptionEdit() {
 
 	if (!canEditInformation()) {
 		return nullptr;
+	} else if (MtsLink::hasChatId(_peer->id)
+		&& MtsLink::isGroupChat(_peer->id)) {
+		return nullptr; // MTS Link group chats have no description.
 	}
 
 	auto result = object_ptr<Ui::PaddingWrap<Ui::InputField>>(
@@ -933,6 +946,13 @@ bool Controller::canEditInformation() const {
 	if (_isBot) {
 		return _peer->asUser()->botInfo->canEditInformation;
 	} else if (const auto channel = _peer->asChannel()) {
+		if (MtsLink::hasChatId(channel->id)) {
+			// Telegram lets megagroup members change the info by default,
+			// in MTS Link it is the owner (and channel administrators).
+			const auto role = MtsLink::myChannelRole(channel->id);
+			return (role == u"Owner"_q)
+				|| (role == u"Admin"_q && !MtsLink::isGroupChat(channel->id));
+		}
 		return channel->canEditInformation();
 	} else if (const auto chat = _peer->asChat()) {
 		return chat->canEditInformation();
@@ -1596,6 +1616,45 @@ void Controller::fillManageSection() {
 	if (channel && MtsLink::hasChatId(channel->id)) {
 		// MTS Link: no bans, permissions, links, logs, reactions or boosts.
 		::AddSkip(_controls.buttonsLayout, 0);
+		if (!MtsLink::isGroupChat(channel->id) && canEditInformation()) {
+			// isPublic is not in the chats list, get the actual value.
+			MtsLink::requestChatInfo(&channel->session(), channel->id);
+			AddButtonWithText(
+				_controls.buttonsLayout,
+				tr::lng_mtslink_edit_public(),
+				rpl::single(QString()),
+				[] {},
+				{ &st::menuIconLinks }
+			)->toggleOn(
+				MtsLink::channelPublicValue(channel->id)
+			)->toggledValue(
+			) | rpl::on_next([=](bool toggled) {
+				_mtsLinkPublicSavedValue = toggled;
+			}, _controls.buttonsLayout->lifetime());
+			MtsLink::channelPublicValue(
+				channel->id
+			) | rpl::on_next([=](bool value) {
+				// The server value, the toggle follows it.
+				_mtsLinkPublicInitial = value;
+			}, _controls.buttonsLayout->lifetime());
+			AddButtonWithText(
+				_controls.buttonsLayout,
+				tr::lng_mtslink_edit_read_only(),
+				rpl::single(QString()),
+				[] {},
+				{ &st::menuIconPermissions }
+			)->toggleOn(
+				rpl::single(channel->isBroadcast())
+			)->toggledValue(
+			) | rpl::on_next([=](bool toggled) {
+				_mtsLinkReadOnlySavedValue = toggled;
+			}, _controls.buttonsLayout->lifetime());
+			Ui::AddSkip(_controls.buttonsLayout);
+			Ui::AddDividerText(
+				_controls.buttonsLayout,
+				tr::lng_mtslink_edit_about());
+			Ui::AddSkip(_controls.buttonsLayout);
+		}
 		if (!MtsLink::isGroupChat(channel->id)) {
 			AddButtonWithCount(
 				_controls.buttonsLayout,
@@ -2426,6 +2485,13 @@ bool Controller::validateTitle(Saving &to) const {
 		_controls.title->showError();
 		_box->scrollToWidget(_controls.title);
 		return false;
+	} else if (MtsLink::hasChatId(_peer->id)
+		&& MtsLink::containsEmoji(title)) {
+		_controls.title->showError();
+		_box->scrollToWidget(_controls.title);
+		_navigation->parentController()->showToast(
+			tr::lng_mtslink_name_no_emoji(tr::now));
+		return false;
 	}
 	to.title = title;
 	return true;
@@ -2513,6 +2579,10 @@ void Controller::save() {
 	if (!_saveStagesQueue.empty()) {
 		return;
 	}
+	if (MtsLink::hasChatId(_peer->id) && _peer->isChannel()) {
+		saveMtsLink();
+		return;
+	}
 	if (const auto saving = validate()) {
 		_savingData = *saving;
 		pushSaveStage([=] { saveUsernamesOrder(); });
@@ -2531,6 +2601,49 @@ void Controller::save() {
 		pushSaveStage([=] { savePhoto(); });
 		continueSave();
 	}
+}
+
+void Controller::saveMtsLink() {
+	const auto channel = _peer->asChannel();
+	const auto saving = validate();
+	if (!saving || !channel) {
+		return;
+	}
+	auto image = _controls.photo
+		? _controls.photo->takeResultImage()
+		: QImage();
+	const auto title = saving->title.value_or(channel->name());
+	const auto description = saving->description.value_or(channel->about());
+	const auto isPublic = _mtsLinkPublicSavedValue.value_or(false);
+	const auto isReadOnly = _mtsLinkReadOnlySavedValue.value_or(
+		channel->isBroadcast());
+	const auto changed = (title != channel->name())
+		|| (description != channel->about())
+		|| (_mtsLinkPublicSavedValue.has_value()
+			&& _mtsLinkPublicSavedValue != _mtsLinkPublicInitial)
+		|| (isReadOnly != channel->isBroadcast());
+	if (!changed && image.isNull()) {
+		_box->closeBox();
+		return;
+	} else if (!changed) {
+		// Only the cover: the info is sent as is, as MTS Link does.
+	}
+	const auto weak = base::make_weak(_box.get());
+	MtsLink::updateChatInfo(
+		&channel->session(),
+		channel,
+		title,
+		description,
+		isPublic,
+		isReadOnly,
+		std::move(image),
+		[=](bool ok) {
+			if (ok) {
+				if (const auto strong = weak.get()) {
+					strong->closeBox();
+				}
+			}
+		});
 }
 
 void Controller::pushSaveStage(FnMut<void()> &&lambda) {
@@ -3303,6 +3416,14 @@ bool EditPeerInfoBox::Available(not_null<PeerData*> peer) {
 		// always true and in channels it is equal to canViewBanned().
 		if (channel->isMonoforum()) {
 			return false;
+		} else if (MtsLink::hasChatId(channel->id)) {
+			// Only the owner and channel administrators manage MTS Link
+			// chats, the members list is in the profile for everyone.
+			const auto role = MtsLink::myChannelRole(channel->id);
+			return channel->amIn()
+				&& ((role == u"Owner"_q)
+					|| (role == u"Admin"_q
+						&& !MtsLink::isGroupChat(channel->id)));
 		}
 		return false
 			//|| channel->canViewMembers()

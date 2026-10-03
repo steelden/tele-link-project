@@ -45,6 +45,7 @@ based on Telegram Desktop.
 #include "base/call_delayed.h"
 #include "ui/image/image_location.h"
 #include "ui/text/text_entity.h"
+#include "ui/emoji_config.h"
 #include "ui/chat/group_call_bar.h"
 #include "ui/chat/group_call_userpics.h"
 #include "storage/cache/storage_cache_database.h"
@@ -244,6 +245,16 @@ QHash<PeerId, PeerId> ChannelOwners; // channel -> owner user
 QSet<QString> MembersReloadScheduled;
 QHash<PeerId, QHash<PeerId, MemberRole>> ChatMembersRoles;
 QSet<QString> SelfLeavingChats; // Our own leave, no "removed" toast.
+QHash<PeerId, bool> ChannelPublic;
+rpl::event_stream<PeerId> ChannelPublicChanges;
+
+void setChannelPublic(PeerId peerId, bool isPublic) {
+	const auto i = ChannelPublic.constFind(peerId);
+	if (i == ChannelPublic.constEnd() || *i != isPublic) {
+		ChannelPublic.insert(peerId, isPublic);
+		ChannelPublicChanges.fire_copy(peerId);
+	}
+}
 // Pinned messages of a chat ordered by date, MsgIds are not chronological.
 QHash<PeerId, std::vector<std::pair<TimeId, MsgId>>> PinnedByDate;
 QSet<PeerId> PresenceKnownUsers;
@@ -1155,6 +1166,12 @@ void removeStaleChannels(
 	not_null<Main::Session*> session,
 	const QList<Api::ChannelData> &channels,
 	ChatType type = ChatType::Channel);
+void attachChatCover(
+	not_null<Main::Session*> session,
+	const QString &chatId,
+	bool group,
+	const QString &fileId,
+	int attempt = 0);
 void applyThreadNotifiable(
 	not_null<Main::Session*> session,
 	const QString &chatId,
@@ -2679,7 +2696,8 @@ void applyMyChannelRole(
 			| ChatAdminRight::PinMessages
 			| ChatAdminRight::DeleteMessages
 			| ChatAdminRight::InviteByLinkOrAdd
-			| ChatAdminRight::BanUsers;
+			| ChatAdminRight::BanUsers
+			| ChatAdminRight::ChangeInfo;
 	}
 	if (owner) {
 		rights |= ChatAdminRight::AddAdmins;
@@ -2741,6 +2759,12 @@ void applyChannelData(
 	}
 	channel->setFlags(flags);
 	applyMyChannelRole(channel, src.memberRole);
+	if (src.isPublicKnown) {
+		setChannelPublic(channel->id, src.isPublic);
+	}
+	if (!src.description.isEmpty() || src.isPublicKnown) {
+		channel->setAbout(src.description);
+	}
 	channel->setName(src.name, {});
 	applyUserpic(channel, src.avatarFileId);
 	if (src.memberCount > 0) {
@@ -4335,6 +4359,9 @@ void handleChatEvent(
 		}
 		if (updated.contains("description")) {
 			channel->setAbout(updated.value("description").toString());
+		}
+		if (updated.contains("isPublic")) {
+			setChannelPublic(channel->id, updated.value("isPublic").toBool());
 		}
 		if (updated.contains("isReadOnly")) {
 			const auto readOnly = updated.value("isReadOnly").toBool();
@@ -6114,20 +6141,11 @@ void createChannel(
 							}
 							LOG(("MtsLink Channel: cover %1 uploaded for %2"
 								).arg(uploaded.id, chatId));
-							mts->channels()->addChannelCover(
+							attachChatCover(
+								weak.get(),
 								chatId,
-								uploaded.id,
-								[=](bool ok) {
-									LOG(("MtsLink Channel: AddChannelCover %1"
-										).arg(ok ? "ok" : "fail"));
-									// No cover event comes for a new chat.
-									if (ok && weak) {
-										if (const auto peer = weak->data().peerLoaded(
-												chatIdToPeerId(chatId))) {
-											applyUserpic(peer, uploaded.id);
-										}
-									}
-								});
+								false,
+								uploaded.id);
 						},
 						[=](const QString &error) {
 							LOG(("MtsLink Channel: cover upload failed: %1"
@@ -6333,6 +6351,159 @@ void reloadChannelMembers(
 	}
 }
 
+rpl::producer<bool> channelPublicValue(PeerId channelPeerId) {
+	return rpl::single(
+		ChannelPublic.value(channelPeerId, false)
+	) | rpl::then(ChannelPublicChanges.events(
+	) | rpl::filter(
+		rpl::mappers::_1 == channelPeerId
+	) | rpl::map([=] {
+		return ChannelPublic.value(channelPeerId, false);
+	}));
+}
+
+void requestChatInfo(not_null<Main::Session*> session, PeerId peerId) {
+	const auto chatId = peerIdToChatId(peerId);
+	const auto mts = session->account().mtsLinkSession();
+	if (mts && !chatId.isEmpty()) {
+		mts->channels()->loadChatInfo(chatId);
+	}
+}
+
+void updateChatInfo(
+		not_null<Main::Session*> session,
+		not_null<ChannelData*> channel,
+		const QString &title,
+		const QString &description,
+		bool isPublic,
+		bool isReadOnly,
+		QImage cover,
+		Fn<void(bool ok)> done) {
+	const auto mts = session->account().mtsLinkSession();
+	const auto chatId = peerIdToChatId(channel->id);
+	if (!mts || chatId.isEmpty()) {
+		done(false);
+		return;
+	}
+	const auto group = isGroupChat(channel->id);
+	const auto weak = base::make_weak(session);
+	const auto uploadCover = [=] {
+		if (cover.isNull() || !weak) {
+			return;
+		}
+		const auto mts = weak->account().mtsLinkSession();
+		if (!mts) {
+			return;
+		}
+		auto bytes = QByteArray();
+		QBuffer buffer(&bytes);
+		buffer.open(QIODevice::WriteOnly);
+		cover.save(&buffer, "PNG");
+		mts->files()->uploadAvatar(
+			u"Avatar.png"_q,
+			bytes,
+			u"image/png"_q,
+			[=](const Api::UploadResult &uploaded) {
+				const auto mts = weak
+					? weak->account().mtsLinkSession()
+					: nullptr;
+				if (!mts) {
+					return;
+				}
+				attachChatCover(weak.get(), chatId, group, uploaded.id);
+			},
+			[=](const QString &error) {
+				LOG(("MtsLink Edit: cover upload failed: %1").arg(error));
+			});
+	};
+	const auto finish = [=](bool ok) {
+		LOG(("MtsLink Edit: update %1 -> %2"
+			).arg(chatId, ok ? "ok" : "fail"));
+		if (!ok) {
+			if (weak) {
+				showMtsLinkToast(weak.get(), tr::lng_cant_do_this(tr::now));
+			}
+		} else {
+			uploadCover();
+		}
+		done(ok);
+	};
+	LOG(("MtsLink Edit: update %1 name='%2' public=%3 readOnly=%4 cover=%5"
+		).arg(chatId, title
+		).arg(isPublic ? 1 : 0
+		).arg(isReadOnly ? 1 : 0
+		).arg(cover.isNull() ? 0 : 1));
+	if (group) {
+		mts->channels()->updateGroupChat(chatId, title, finish);
+	} else {
+		mts->channels()->updateChannel(
+			chatId,
+			title,
+			description,
+			isPublic,
+			isReadOnly,
+			finish);
+	}
+}
+
+// The storage processes an uploaded cover for a few seconds, Add*Cover
+// fails with "internalError" before that (the MTS Link client retries too).
+void attachChatCover(
+		not_null<Main::Session*> session,
+		const QString &chatId,
+		bool group,
+		const QString &fileId,
+		int attempt) {
+	constexpr auto kDelays = std::array<crl::time, 6>{
+		1500, 2000, 3000, 4000, 6000, 8000 };
+	const auto mts = session->account().mtsLinkSession();
+	if (!mts) {
+		return;
+	}
+	const auto weak = base::make_weak(session);
+	const auto applied = [=](bool ok) {
+		LOG(("MtsLink Cover: %1 attempt %2 -> %3"
+			).arg(chatId).arg(attempt + 1).arg(ok ? "ok" : "fail"));
+		if (!weak) {
+			return;
+		} else if (ok) {
+			if (const auto peer = weak->data().peerLoaded(
+					chatIdToPeerId(chatId))) {
+				applyUserpic(peer, fileId);
+			}
+		} else if (attempt < int(kDelays.size())) {
+			base::call_delayed(kDelays[attempt], [=] {
+				if (weak) {
+					attachChatCover(
+						weak.get(),
+						chatId,
+						group,
+						fileId,
+						attempt + 1);
+				}
+			});
+		} else {
+			showMtsLinkToast(weak.get(), tr::lng_cant_do_this(tr::now));
+		}
+	};
+	if (group) {
+		mts->channels()->addGroupChatCover(chatId, fileId, applied);
+	} else {
+		mts->channels()->addChannelCover(chatId, fileId, applied);
+	}
+}
+
+bool containsEmoji(const QString &text) {
+	const auto end = text.constData() + text.size();
+	for (auto ch = text.constData(); ch != end; ++ch) {
+		auto length = 0;
+		if (Ui::Emoji::Find(ch, end, &length)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 bool isGroupChat(PeerId peerId) {
 	return chatTypeForPeer(peerId) == ChatType::GroupChat;
 }
@@ -6430,20 +6601,11 @@ void createGroupChat(
 							if (!mts) {
 								return;
 							}
-							mts->channels()->addGroupChatCover(
+							attachChatCover(
+								weak.get(),
 								chatId,
-								uploaded.id,
-								[=](bool ok) {
-									LOG(("MtsLink Group: AddGroupChatCover %1"
-										).arg(ok ? "ok" : "fail"));
-									// No cover event comes for a new chat.
-									if (ok && weak) {
-										if (const auto peer = weak->data().peerLoaded(
-												chatIdToPeerId(chatId))) {
-											applyUserpic(peer, uploaded.id);
-										}
-									}
-								});
+								true,
+								uploaded.id);
 						},
 						[=](const QString &error) {
 							LOG(("MtsLink Group: cover upload failed: %1"

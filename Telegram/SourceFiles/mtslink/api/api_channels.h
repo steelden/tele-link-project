@@ -33,6 +33,7 @@ struct ChannelData {
 	bool isPinned = false;
 	bool isReadOnly = false;
 	bool isPublic = false;
+	bool isPublicKnown = false; // Not in the GetMyChannelsV3 list items.
 	int pinnedMessageCount = 0;
 	QString memberRole;
 	QString interlocutorId;
@@ -123,6 +124,19 @@ public:
 		const QString &userId,
 		Done done);
 	void deleteGroupChat(const ChatId &chatId, Done done);
+
+	// Editing: channels need all the fields, group chats only the name.
+	void updateChannel(
+		const ChatId &chatId,
+		const QString &name,
+		const QString &description,
+		bool isPublic,
+		bool isReadOnly,
+		Done done);
+	void updateGroupChat(
+		const ChatId &chatId,
+		const QString &name,
+		Done done);
 
 	// Channels of the organization by name / description.
 	void searchChannels(

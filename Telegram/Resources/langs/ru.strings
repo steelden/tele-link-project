@@ -622,6 +622,10 @@ Based on Telegram Desktop lang.strings format
 "lng_mtslink_remove_from_group" = "Удалить из группы";
 "lng_mtslink_search_channel" = "Канал";
 "lng_mtslink_search_group" = "Группа";
+"lng_mtslink_edit_public" = "Публичный канал";
+"lng_mtslink_edit_read_only" = "Писать могут только администраторы";
+"lng_mtslink_edit_about" = "Публичный канал смогут найти и вступить в него все сотрудники организации.";
+"lng_mtslink_name_no_emoji" = "В названии нельзя использовать эмодзи";
 "lng_mtslink_remove_member_confirm" = "Удалить {user} из «{chat}»?";
 "lng_mtslink_role_owner" = "владелец";
 "lng_mtslink_role_admin" = "администратор";

@@ -140,6 +140,12 @@ void Files::doHttpUpload(
 		}
 	}
 
+	if (result.mime.startsWith(u"image/"_q)) {
+		// Without it the storage keeps a cover as a plain file and
+		// Add*Cover methods don't accept it.
+		request.setHeader(QNetworkRequest::ContentTypeHeader, result.mime);
+	}
+
 	const auto token = MtsLink::fileAuthToken();
 	if (!token.isEmpty()) {
 		request.setRawHeader("Authorization", ("Bearer " + token).toUtf8());

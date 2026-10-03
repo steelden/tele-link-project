@@ -357,6 +357,22 @@ void searchOrganizationMembers(
 	const QString &query,
 	Fn<void(std::vector<not_null<UserData*>>)> done);
 [[nodiscard]] bool isGroupChat(PeerId peerId);
+// The server rejects emoji in channel and group chat names.
+[[nodiscard]] bool containsEmoji(const QString &text);
+// Public channels can be found and joined by everyone in the organization.
+[[nodiscard]] rpl::producer<bool> channelPublicValue(PeerId channelPeerId);
+void requestChatInfo(not_null<Main::Session*> session, PeerId peerId);
+// Saves the edited info, done(ok) after the info request, the cover is
+// uploaded after that.
+void updateChatInfo(
+	not_null<Main::Session*> session,
+	not_null<ChannelData*> channel,
+	const QString &title,
+	const QString &description,
+	bool isPublic,
+	bool isReadOnly,
+	QImage cover,
+	Fn<void(bool ok)> done);
 // Members with roles, the result comes as PeerUpdate::Flag::Members.
 void reloadChannelMembers(
 	not_null<Main::Session*> session,

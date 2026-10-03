@@ -5,6 +5,8 @@ based on Telegram Desktop.
 #include "mtslink/api/api_channels.h"
 #include "mtslink/rpc.h"
 
+#include <QtCore/QJsonDocument>
+
 namespace MtsLink::Api {
 
 namespace {
@@ -180,6 +182,7 @@ ChannelData Channels::parseChat(const QJsonObject &obj) const {
 		.isPinned = src.value("pinPosition").toInt() > 0,
 		.isReadOnly = src.value("isReadOnly").toBool(false),
 		.isPublic = src.value("isPublic").toBool(false),
+		.isPublicKnown = src.contains("isPublic"),
 		.pinnedMessageCount = src.value("pinnedMessageCount").toInt(),
 		.memberRole = src.value("memberRole").toString(),
 		.interlocutorId = src.value("interlocutorId").toString(),
@@ -236,9 +239,18 @@ void Channels::simpleCall(
 		method,
 		param,
 		[=](const QJsonObject &result) {
+			const auto type = result.value("type").toString();
+			LOG(("MtsLink Channels: %1 -> %2"
+				).arg(method
+				).arg(QString::fromUtf8(QJsonDocument(
+					result
+				).toJson(QJsonDocument::Compact)).left(400)));
+			// "BusinessError", "validationError" and alike.
+			const auto failed = type.contains(
+				QStringLiteral("error"),
+				Qt::CaseInsensitive);
 			if (done) {
-				done(result.value("type").toString()
-					!= QStringLiteral("BusinessError"));
+				done(!failed);
 			}
 		},
 		[=](const QString &) {
@@ -438,6 +450,32 @@ void Channels::giveGroupOwnership(
 	simpleCall("Chat.GiveGroupChatOwnership", QJsonObject{
 		{ "chatId", chatId },
 		{ "userId", userId },
+	}, std::move(done));
+}
+
+void Channels::updateChannel(
+		const ChatId &chatId,
+		const QString &name,
+		const QString &description,
+		bool isPublic,
+		bool isReadOnly,
+		Done done) {
+	simpleCall("Chat.UpdateChannel", QJsonObject{
+		{ "chatId", chatId },
+		{ "name", name },
+		{ "description", description },
+		{ "isPublic", isPublic },
+		{ "isReadOnly", isReadOnly },
+	}, std::move(done));
+}
+
+void Channels::updateGroupChat(
+		const ChatId &chatId,
+		const QString &name,
+		Done done) {
+	simpleCall("Chat.UpdateGroupChat", QJsonObject{
+		{ "chatId", chatId },
+		{ "name", name },
 	}, std::move(done));
 }
 

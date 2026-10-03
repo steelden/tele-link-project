@@ -4,6 +4,8 @@ based on Telegram Desktop.
 */
 #include "mtslink/rpc.h"
 
+#include <QtCore/QJsonDocument>
+
 #include <QUuid>
 
 namespace MtsLink {
@@ -103,12 +105,26 @@ void Rpc::handleMessage(const QJsonObject &message) {
 	if (type == "response") {
 		const auto id = message.value("id").toString();
 		const auto method = message.value("method").toString();
-		const auto resultObj = message.value("result").toObject();
+		// {"error": {name, message}} instead of "result": the handlers get
+		// {"type": "RpcError", "value": error}, not an empty "success".
+		const auto resultObj = message.contains(u"result"_q)
+			? message.value("result").toObject()
+			: QJsonObject{
+				{ u"type"_q, u"RpcError"_q },
+				{ u"value"_q, message.value("error").toObject() },
+			};
 		const auto resultType = resultObj.value("type").toString();
 		const auto it = _pending.find(id);
 		if (it != _pending.end()) {
 			const auto pending = it.value();
 			_pending.erase(it);
+			if (!message.contains(u"result"_q)) {
+				// No result: the server reports the failure differently.
+				LOG(("MtsLink RPC no result [%1]: %2"
+					).arg(pending.method
+					).arg(QString::fromUtf8(QJsonDocument(message).toJson(
+						QJsonDocument::Compact)).left(600)));
+			}
 			if (resultType == u"BusinessError"_q) {
 				const auto val = resultObj.value("value").toObject();
 				LOG(("MtsLink RPC error [%1]: %2 — %3"
