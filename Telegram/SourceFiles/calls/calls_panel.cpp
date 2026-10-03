@@ -7,12 +7,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "calls/calls_panel.h"
 
+#include "base/call_delayed.h"
+
 #include "boxes/peers/replace_boost_box.h" // CreateUserpicsWithMoreBadge
 #include "calls/calls_panel_background.h"
 #include "calls/calls_rate_call.h"
 #include "data/data_photo.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "mtslink/data_adapters.h"
 #include "data/data_file_origin.h"
 #include "data/data_photo_media.h"
 #include "data/data_cloud_file.h"
@@ -110,6 +113,7 @@ constexpr auto kNameFadeDuration = crl::time(70);
 Panel::Panel(not_null<Call*> call)
 : _call(call)
 , _user(call->user())
+, _peer(call->displayPeer())
 , _window(std::make_shared<Window>())
 , _bodySt(&st::callBodyLayout)
 , _answerHangupRedial(
@@ -281,7 +285,7 @@ void Panel::savePanelGeometry() {
 void Panel::initWindow() {
 	window()->setAttribute(Qt::WA_OpaquePaintEvent);
 	window()->setAttribute(Qt::WA_NoSystemBackground);
-	window()->setTitle(_user->name());
+	window()->setTitle(_peer->name());
 	window()->setTitleStyle(st::callTitle);
 
 	base::install_event_filter(window().get(), [=](not_null<QEvent*> e) {
@@ -677,9 +681,10 @@ void Panel::reinitWithCall(Call *call) {
 	}
 
 	_user = _call->user();
+	_peer = _call->displayPeer();
 
 	_background = std::make_unique<PanelBackground>(
-		_user,
+		_peer,
 		[=] {
 			updateTextColors();
 			widget()->update();
@@ -717,7 +722,7 @@ void Panel::reinitWithCall(Call *call) {
 	}, _callLifetime);
 	_userpic = std::make_unique<Userpic>(
 		widget(),
-		_user,
+		_peer,
 		std::move(remoteMuted));
 	_outgoingVideoBubble = std::make_unique<VideoBubble>(
 		widget(),
@@ -882,7 +887,7 @@ void Panel::reinitWithCall(Call *call) {
 		uiShow()->showToast(text);
 	}, _callLifetime);
 
-	_name->setText(_user->name());
+	_name->setText(_peer->name());
 	updateStatusText(_call->state());
 	updateTextColors();
 
@@ -1017,9 +1022,9 @@ void Panel::initLayout() {
 		UpdateFlag::Name
 	) | rpl::filter([=](const Data::PeerUpdate &update) {
 		// _user may change for the same Panel.
-		return (_call != nullptr) && (update.peer == _user);
+		return (_call != nullptr) && (update.peer == _peer);
 	}) | rpl::on_next([=](const Data::PeerUpdate &update) {
-		_name->setText(_call->user()->name());
+		_name->setText(_call->displayPeer()->name());
 		updateControlsGeometry();
 	}, lifetime());
 
@@ -1067,7 +1072,46 @@ void Panel::initGeometry() {
 	window()->setGeometry(panelGeometry());
 	window()->setMinimumSize({ st::callWidthMin, st::callHeightMin });
 	window()->show();
+	_window->refreshFrame();
 	updateControlsGeometry();
+	// Diagnostics: two sets of the title controls right after the opening.
+	LOG(("MtsLink Call Panel: shown, window %1x%2, controls %3,%4 %5x%6"
+		).arg(window()->width()
+		).arg(window()->height()
+		).arg(_window->controlsGeometry().x()
+		).arg(_window->controlsGeometry().y()
+		).arg(_window->controlsGeometry().width()
+		).arg(_window->controlsGeometry().height()));
+	const auto logChildren = [=](const char *when) {
+		for (const auto child : window()->children()) {
+			if (const auto w = qobject_cast<QWidget*>(child)) {
+				LOG(("MtsLink Call Panel: %1 child %2 visible=%3 %4,%5 %6x%7"
+					).arg(when
+					).arg(w->metaObject()->className()
+					).arg(w->isVisible() ? 1 : 0
+					).arg(w->x()
+					).arg(w->y()
+					).arg(w->width()
+					).arg(w->height()));
+			}
+		}
+	};
+	logChildren("shown");
+	window()->geometryValue(
+	) | rpl::skip(1) | rpl::take(1) | rpl::on_next([=] {
+		logChildren("moved");
+	}, lifetime());
+	base::call_delayed(300, widget(), [=] {
+		LOG(("MtsLink Call Panel: repaint, controls %1,%2 wrap top %3"
+			).arg(_window->controlsGeometry().x()
+			).arg(_window->controlsGeometry().y()
+			).arg(_window->controlsWrapTop()));
+		_window->refreshFrame();
+		logChildren("delayed");
+		updateControlsGeometry();
+		window()->update();
+		widget()->update();
+	});
 
 	_geometryLifetime = window()->geometryValue(
 	) | rpl::skip(1) | rpl::on_next([=](QRect r) {
@@ -1791,22 +1835,30 @@ void Panel::stateChanged(State state) {
 		&& (state != State::EndedByOtherDevice)
 		&& (state != State::FailedHangingUp)
 		&& (state != State::Failed)) {
+		// MTS Link: the conference page itself manages the camera, the
+		// second button opens the conference in the system browser.
+		const auto mtsLink = MtsLink::hasChatId(_peer->id);
 		if (_startVideo && !isWaitingUser) {
 			_startVideo = nullptr;
 		} else if (!_startVideo && isWaitingUser) {
 			_startVideo = base::make_unique_q<Ui::CallButton>(
 				widget(),
-				st::callStartVideo);
+				mtsLink ? st::callOpenBrowser : st::callStartVideo);
 			_startVideo->show();
 			_startVideo->setLabelShown(_buttonLabelsShown);
 			setupButtonTooltip(_startVideo.get());
-			_startVideo->setText(tr::lng_call_start_video());
-			_startVideo->setAccessibleName(tr::lng_call_start_video(tr::now));
+			_startVideo->setText(mtsLink
+				? tr::lng_mtslink_call_open_browser()
+				: tr::lng_call_start_video());
+			_startVideo->setAccessibleName(mtsLink
+				? tr::lng_mtslink_call_open_browser(tr::now)
+				: tr::lng_call_start_video(tr::now));
 			_startVideo->clicks() | rpl::map_to(true) | rpl::start_to_stream(
 				_startOutgoingRequests,
 				_startVideo->lifetime());
 		}
-		_camera->setVisible(!_startVideo);
+		const auto mtsLinkIncoming = mtsLink && _call->isIncomingWaiting();
+		_camera->setVisible(!_startVideo && !mtsLinkIncoming);
 
 		const auto windowHidden = window()->isHidden();
 		const auto toggleButton = [&](auto &&button, bool visible) {
@@ -1820,7 +1872,7 @@ void Panel::stateChanged(State state) {
 		}
 		toggleButton(_decline, incomingWaiting);
 		toggleButton(_cancel, (isBusy || isWaitingUser));
-		toggleButton(_mute, !isWaitingUser);
+		toggleButton(_mute, !isWaitingUser && !mtsLinkIncoming);
 		toggleButton(
 			_screencast,
 			!(isBusy || isWaitingUser || incomingWaiting));
@@ -1864,7 +1916,12 @@ void Panel::refreshAnswerHangupRedialLabel() {
 		case AnswerHangupRedialState::Answer: return tr::lng_call_accept;
 		case AnswerHangupRedialState::Hangup: return tr::lng_call_end_call;
 		case AnswerHangupRedialState::Redial: return tr::lng_call_redial;
-		case AnswerHangupRedialState::StartCall: return tr::lng_call_start;
+		case AnswerHangupRedialState::StartCall:
+			// MTS Link: the call is already going on in the chat.
+			return (MtsLink::hasChatId(_peer->id)
+				&& !MtsLink::activeCallJoinLink(_peer->id).isEmpty())
+				? tr::lng_group_call_join
+				: tr::lng_call_start;
 		}
 		Unexpected("AnswerHangupRedialState value.");
 	}();
@@ -1905,7 +1962,9 @@ void Panel::updateStatusText(State state) {
 				: tr::lng_call_status_incoming(tr::now));
 		case State::Ringing: return tr::lng_call_status_ringing(tr::now);
 		case State::Busy: return tr::lng_call_status_busy(tr::now);
-		case State::WaitingUserConfirmation: return tr::lng_call_status_sure(tr::now);
+		case State::WaitingUserConfirmation: return MtsLink::hasChatId(_peer->id)
+			? QString()
+			: tr::lng_call_status_sure(tr::now);
 		}
 		Unexpected("State in stateChanged()");
 	};

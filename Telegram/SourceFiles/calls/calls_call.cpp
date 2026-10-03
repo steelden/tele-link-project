@@ -202,6 +202,12 @@ uint64 ComputeFingerprint(bytes::const_span authKey) {
 
 } // namespace
 
+not_null<PeerData*> Call::displayPeer() const {
+	return _mtsLinkPeer
+		? not_null<PeerData*>(_mtsLinkPeer)
+		: not_null<PeerData*>(_user);
+}
+
 Call::Call(
 	not_null<Delegate*> delegate,
 	not_null<UserData*> user,
@@ -418,6 +424,10 @@ void Call::applyUserConfirmation() {
 }
 
 void Call::answer() {
+	if (!_mtsLinkJoinLink.isEmpty()) {
+		_mtsLinkAnswers.fire({});
+		return;
+	}
 	const auto video = isSharingVideo();
 	_delegate->callRequestPermissionsOrFail(crl::guard(this, [=] {
 		actuallyAnswer();

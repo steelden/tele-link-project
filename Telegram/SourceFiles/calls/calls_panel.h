@@ -183,6 +183,7 @@ private:
 
 	Call *_call = nullptr;
 	not_null<UserData*> _user;
+	not_null<PeerData*> _peer; // The group for MTS Link group calls.
 
 	std::shared_ptr<Window> _window;
 	std::unique_ptr<Incoming> _incoming;

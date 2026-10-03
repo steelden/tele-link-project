@@ -190,6 +190,7 @@ MessageData Messages::parseMessage(const QJsonObject &obj) const {
 		return CallMetadata{
 			.status = v.value("status").toString(),
 			.joinLink = v.value("joinLink").toString(),
+			.webinarEventId = v.value("webinarEventId").toString(),
 			.duration = int(v.value("duration").toDouble() / 1000),
 			.statusReason = v.value("statusReasonV2").toString(
 				v.value("statusReason").toString()),

@@ -6486,6 +6486,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_status_until" = "until {date}";
 "lng_mtslink_status_no_emoji" = "This emoji is not supported by MTS Link";
 "lng_mtslink_status_no_end" = "always";
+"lng_mtslink_call_window" = "MTS Link call";
+"lng_mtslink_call_window_chat" = "Call: {chat}";
+"lng_mtslink_settings_conferences" = "Video conferences";
+"lng_mtslink_settings_embedded_browser" = "Open in the built-in browser";
+"lng_mtslink_call_in_browser" = "In browser";
+"lng_mtslink_call_in_app" = "In TeleLink";
+"lng_mtslink_call_open_browser" = "Open in browser";
 "lng_mtslink_remove_member_confirm" = "Remove {user} from {chat}?";
 "lng_mtslink_role_owner" = "owner";
 "lng_mtslink_role_admin" = "administrator";

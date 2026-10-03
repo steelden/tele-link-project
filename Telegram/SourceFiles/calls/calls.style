@@ -141,6 +141,14 @@ callStartVideo: CallButton(callAnswer) {
 		}
 	}
 }
+callOpenBrowser: CallButton(callStartVideo) {
+	button: IconButton(callButton) {
+		icon: icon {{ "calls/call_browser", callIconFg }};
+		ripple: RippleAnimation(defaultRippleAnimation) {
+			color: callAnswerRipple;
+		}
+	}
+}
 callHangup: CallButton(callAnswer) {
 	button: IconButton(callButton) {
 		icon: icon {{ "calls/call_discard", callIconFg }};

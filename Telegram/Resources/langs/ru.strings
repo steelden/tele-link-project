@@ -7059,6 +7059,13 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_status_until" = "до {date}";
 "lng_mtslink_status_no_emoji" = "Это эмодзи не поддерживается в MTS Link";
 "lng_mtslink_status_no_end" = "всегда";
+"lng_mtslink_call_window" = "Звонок MTS Link";
+"lng_mtslink_call_window_chat" = "Звонок: {chat}";
+"lng_mtslink_settings_conferences" = "Видеоконференции";
+"lng_mtslink_settings_embedded_browser" = "Открывать во встроенном браузере";
+"lng_mtslink_call_in_browser" = "В браузере";
+"lng_mtslink_call_in_app" = "В TeleLink";
+"lng_mtslink_call_open_browser" = "Открыть в браузере";
 "lng_mtslink_remove_member_confirm" = "Удалить {user} из «{chat}»?";
 "lng_mtslink_role_owner" = "владелец";
 "lng_mtslink_role_admin" = "администратор";

@@ -173,6 +173,26 @@ bool Window::controlsHasHitTest(QPoint widgetPoint) const {
 #endif // Q_OS_MAC
 }
 
+void Window::refreshFrame() {
+#ifdef Q_OS_WIN
+	if (const auto handle = window()->windowHandle()) {
+		SetWindowPos(
+			reinterpret_cast<HWND>(handle->winId()),
+			nullptr,
+			0,
+			0,
+			0,
+			0,
+			(SWP_NOMOVE
+				| SWP_NOSIZE
+				| SWP_NOZORDER
+				| SWP_NOOWNERZORDER
+				| SWP_NOACTIVATE
+				| SWP_FRAMECHANGED));
+	}
+#endif // Q_OS_WIN
+}
+
 rpl::producer<bool> Window::maximizeRequests() const {
 	return _maximizeRequests.events();
 }

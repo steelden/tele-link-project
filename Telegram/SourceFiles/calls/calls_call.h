@@ -119,6 +119,18 @@ public:
 	[[nodiscard]] not_null<UserData*> user() const {
 		return _user;
 	}
+	// MTS Link: the "start call" window for a group chat shows the group.
+	void setMtsLinkPeer(not_null<PeerData*> peer) {
+		_mtsLinkPeer = peer;
+	}
+	[[nodiscard]] not_null<PeerData*> displayPeer() const;
+	// MTS Link incoming call: answering opens the conference.
+	void setMtsLinkJoinLink(const QString &link) {
+		_mtsLinkJoinLink = link;
+	}
+	[[nodiscard]] rpl::producer<> mtsLinkAnswers() const {
+		return _mtsLinkAnswers.events();
+	}
 	[[nodiscard]] CallId id() const {
 		return _id;
 	}
@@ -343,6 +355,9 @@ private:
 
 	const not_null<Delegate*> _delegate;
 	const not_null<UserData*> _user;
+	PeerData *_mtsLinkPeer = nullptr;
+	QString _mtsLinkJoinLink;
+	rpl::event_stream<> _mtsLinkAnswers;
 	MTP::Sender _api;
 	Type _type = Type::Outgoing;
 	rpl::variable<State> _state = State::Starting;

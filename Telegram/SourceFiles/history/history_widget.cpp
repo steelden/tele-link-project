@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "main/main_account.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/call_window.h"
 #include "mtslink/session.h"
 #include "mtslink/api/api_messages.h"
 #include "api/api_compose_with_ai.h"
@@ -10287,7 +10288,7 @@ void HistoryWidget::setupGroupCallBar() {
 	) | rpl::on_next([=] {
 		const auto link = MtsLink::activeCallJoinLink(peer->id);
 		if (!link.isEmpty()) {
-			File::OpenUrl(link);
+			MtsLink::joinCallLink(link, peer->name());
 		}
 	}, _groupCallBar->lifetime());
 

@@ -6,6 +6,7 @@ based on Telegram Desktop.
 #include "mtslink/session.h"
 #include "mtslink/env_config.h"
 #include "mtslink/my_profile.h"
+#include "mtslink/call_window.h"
 
 #include "main/main_session.h"
 #include "main/main_account.h"
@@ -34,12 +35,17 @@ based on Telegram Desktop.
 #include "ui/text/format_values.h"
 #include "ui/boxes/confirm_box.h"
 #include "styles/style_menu_icons.h"
+#include "styles/style_layers.h"
+#include "styles/style_boxes.h"
+#include "ui/widgets/labels.h"
+#include "ui/layers/generic_box.h"
 #include "dialogs/dialogs_key.h"
 #include "data/data_lastseen_status.h"
 #include "data/data_types.h"
 #include "data/notify/data_notify_settings.h"
 #include "data/notify/data_peer_notify_settings.h"
 #include "core/application.h"
+#include "calls/calls_instance.h"
 #include "window/notifications_manager.h"
 #include "base/unixtime.h"
 #include "base/random.h"
@@ -92,6 +98,8 @@ QHash<quint64, MsgId> ThreadRootMap;
 QString FileAuthTokenValue;
 QString FileRefreshTokenValue;
 QList<QNetworkCookie> FileAuthCookies;
+// Incoming call messages: their notifications open the incoming call.
+base::flat_set<FullMsgId> CallMessages;
 std::function<void()> TokenRefreshCallback;
 bool TokenRefreshInProgress = false;
 QHash<QString, QString> EmojiToIdMap;
@@ -621,7 +629,10 @@ void ensureUserpicPhoto(
 		crl::time(0));
 }
 
-void applyUserpic(not_null<PeerData*> peer, const QString &fileId) {
+void applyUserpic(
+		not_null<PeerData*> peer,
+		const QString &fileId,
+		int line) {
 	if (fileId.isEmpty()) {
 		return;
 	}
@@ -630,6 +641,8 @@ void applyUserpic(not_null<PeerData*> peer, const QString &fileId) {
 	if (peer->userpicPhotoId() == photoId) {
 		return;
 	}
+	LOG(("MtsLink Userpic: '%1' file=%2 from line %3"
+		).arg(peer->name(), fileId).arg(line));
 	const auto url = avatarCdnBase() + fileId + u"_s.jpg"_q;
 	const auto location = ImageLocation(
 		DownloadLocation{ PlainUrlLocation{ url } }, 160, 160);
@@ -637,6 +650,10 @@ void applyUserpic(not_null<PeerData*> peer, const QString &fileId) {
 	peer->session().changes().peerUpdated(
 		peer,
 		Data::PeerUpdate::Flag::Photo);
+}
+
+[[nodiscard]] bool HasKnownUserpic(not_null<PeerData*> peer) {
+	return !peer->userpicPhotoUnknown() && peer->userpicPhotoId();
 }
 
 ChatId extractChatIdFromDst(const QString &dst) {
@@ -1676,7 +1693,7 @@ void connectToSession(
 				if (cm.type == MessageType::Call && cm.callMeta) {
 					if (cm.callMeta->status == "Started"
 						&& !cm.callMeta->joinLink.isEmpty()) {
-						setActiveCall(mainSession, peerId, cm.callMeta->joinLink);
+						setActiveCall(mainSession, peerId, *cm.callMeta);
 					} else {
 						setActiveCall(mainSession, peerId, QString());
 					}
@@ -1831,7 +1848,7 @@ void connectToSession(
 							.displayName = prof.value("displayName").toString(),
 							.avatarFileId = prof.value("avatarFileId").toString(),
 							.role = MemberRole::Member,
-						});
+						}, true);
 						if (userId == mtsSession->userId()) {
 							applyMyProfileChanged(mainSession, prof);
 						}
@@ -1966,7 +1983,7 @@ void connectToSession(
 						const auto peer = mainSession->data()
 							.peerLoaded(peerId);
 						if (peer && !peer->userpicPhotoId()) {
-							applyUserpic(peer, m.avatarFileId);
+							applyUserpic(peer, m.avatarFileId, __LINE__);
 						}
 						break;
 					}
@@ -2755,7 +2772,9 @@ void applyDialogData(
 
 	user->setName(src.name, {}, {}, {});
 	user->setIsContact(true);
-	applyUserpic(user, src.avatarFileId);
+	if (!HasKnownUserpic(user)) {
+		applyUserpic(user, src.avatarFileId, __LINE__);
+	}
 
 	const auto history = session->data().history(user->id);
 	if (!history->folderKnown()) {
@@ -2862,7 +2881,7 @@ void applyChannelData(
 		if (!src.description.isEmpty()) {
 			channel->setAbout(src.description);
 		}
-		applyUserpic(channel, src.avatarFileId);
+		applyUserpic(channel, src.avatarFileId, __LINE__);
 		if (src.memberCount > 0) {
 			channel->setMembersCount(src.memberCount);
 		}
@@ -2893,7 +2912,7 @@ void applyChannelData(
 		channel->setAbout(src.description);
 	}
 	channel->setName(src.name, {});
-	applyUserpic(channel, src.avatarFileId);
+	applyUserpic(channel, src.avatarFileId, __LINE__);
 	if (src.memberCount > 0) {
 		channel->setMembersCount(src.memberCount);
 	}
@@ -2947,7 +2966,8 @@ void applyChannelData(
 
 void applyUserData(
 		not_null<Main::Session*> session,
-		const Api::MemberProfile &src) {
+		const Api::MemberProfile &src,
+		bool profileChanged) {
 	if (src.customStatusKnown) {
 		applyUserStatus(session, src.userId, src.customStatus);
 	}
@@ -2965,6 +2985,12 @@ void applyUserData(
 		LOG(("MtsLink: applying SELF user data: '%1 %2' display='%3' avatar='%4'")
 			.arg(first, last, display, src.avatarFileId));
 	}
+	// Name and userpic changes are notified by their setters, the rest
+	// only when changed: an update of all the members on opening a chat
+	// made all the userpics blink.
+	const auto wasUsername = user->username();
+	const auto wasPhone = user->phone();
+	const auto wasAbout = user->about();
 	user->setName(
 		first.isEmpty() ? display : first,
 		last,
@@ -2973,7 +2999,12 @@ void applyUserData(
 	user->setLoadedStatus(PeerData::LoadedStatus::Normal);
 	user->removeFlags(UserDataFlag::Scam | UserDataFlag::Fake);
 	user->setIsContact(true);
-	applyUserpic(user, src.avatarFileId);
+	// The server gives different avatars of the same user in different
+	// answers (an old one in some member lists), so a loaded profile only
+	// sets a missing userpic, a change comes with MemberProfileChanged.
+	if (profileChanged || !HasKnownUserpic(user)) {
+		applyUserpic(user, src.avatarFileId, __LINE__);
+	}
 
 	if (!src.displayName.isEmpty()) {
 		user->setUsername(src.displayName);
@@ -3001,13 +3032,14 @@ void applyUserData(
 		user->setAbout(aboutParts.join(QChar('\n')));
 	}
 
+	auto onlineChanged = false;
 	if (src.presence != MemberPresence::Unknown) {
 		const auto status = (src.presence == MemberPresence::Online)
 			? Data::LastseenStatus::OnlineTill(
 				base::unixtime::now() + kMtsLinkOnlineHorizon)
 			: Data::LastseenStatus::Recently();
 		PresenceKnownUsers.insert(user->id);
-		user->updateLastseen(status);
+		onlineChanged = user->updateLastseen(status);
 	}
 	if (src.inCall >= 0) {
 		if (src.inCall) {
@@ -3017,17 +3049,22 @@ void applyUserData(
 		}
 	}
 
-	auto flags = Data::PeerUpdate::Flag::Name
-		| Data::PeerUpdate::Flag::Photo
-		| Data::PeerUpdate::Flag::Username
-		| Data::PeerUpdate::Flag::OnlineStatus;
-	if (!src.phone.isEmpty()) {
+	auto flags = Data::PeerUpdate::Flags();
+	if (user->username() != wasUsername) {
+		flags |= Data::PeerUpdate::Flag::Username;
+	}
+	if (onlineChanged) {
+		flags |= Data::PeerUpdate::Flag::OnlineStatus;
+	}
+	if (user->phone() != wasPhone) {
 		flags |= Data::PeerUpdate::Flag::PhoneNumber;
 	}
-	if (!aboutParts.isEmpty()) {
+	if (user->about() != wasAbout) {
 		flags |= Data::PeerUpdate::Flag::About;
 	}
-	session->changes().peerUpdated(user, flags);
+	if (flags) {
+		session->changes().peerUpdated(user, flags);
+	}
 }
 
 void applyThreadChildrenCount(
@@ -3240,9 +3277,9 @@ HistoryItem *addMessage(
 			const auto joinUrl = src.callMeta->joinLink;
 			item->setOngoingCallLink(
 				std::make_shared<LambdaClickHandler>([joinUrl] {
-					File::OpenUrl(joinUrl);
+					joinCallLink(joinUrl);
 				}));
-			setActiveCall(session, chatPeerId, src.callMeta->joinLink);
+			setActiveCall(session, chatPeerId, *src.callMeta);
 		}
 		if (item && threadOnly) {
 			session->changes().messageUpdated(
@@ -3450,7 +3487,7 @@ bool addOlderMessages(
 				const auto joinUrl = src.callMeta->joinLink;
 				callItem->setOngoingCallLink(
 					std::make_shared<LambdaClickHandler>([joinUrl] {
-						File::OpenUrl(joinUrl);
+						joinCallLink(joinUrl);
 					}));
 			}
 			items.push_back(callItem);
@@ -3524,7 +3561,7 @@ bool addOlderMessages(
 		if (cm.type == MessageType::Call && cm.callMeta) {
 			if (cm.callMeta->status == "Started"
 				&& !cm.callMeta->joinLink.isEmpty()) {
-				setActiveCall(session, chatPeerId, cm.callMeta->joinLink);
+				setActiveCall(session, chatPeerId, *cm.callMeta);
 			} else {
 				setActiveCall(session, chatPeerId, QString());
 			}
@@ -3821,6 +3858,7 @@ void handleChatEvent(
 				msg.callMeta = Api::CallMetadata{
 					.status = mv.value("status").toString(),
 					.joinLink = mv.value("joinLink").toString(),
+					.webinarEventId = mv.value("webinarEventId").toString(),
 					.duration = int(mv.value("duration").toDouble() / 1000),
 					.statusReason = mv.value("statusReasonV2").toString(
 						mv.value("statusReason").toString()),
@@ -3866,6 +3904,7 @@ void handleChatEvent(
 				msg.callMeta = Api::CallMetadata{
 					.status = v.value("status").toString(),
 					.joinLink = v.value("joinLink").toString(),
+					.webinarEventId = v.value("webinarEventId").toString(),
 					.duration = int(v.value("duration").toDouble() / 1000),
 					.statusReason = v.value("statusReasonV2").toString(
 						v.value("statusReason").toString()),
@@ -3894,6 +3933,14 @@ void handleChatEvent(
 		} else {
 			LOG(("MtsLink NewMsg: replaced pending message"));
 		}
+		// A call started just now: the active call of the chat.
+		if (!isThread
+			&& msg.type == MessageType::Call
+			&& msg.callMeta
+			&& msg.callMeta->status == u"Started"_q
+			&& !msg.callMeta->joinLink.isEmpty()) {
+			setActiveCall(session, chatPeerId, *msg.callMeta);
+		}
 		{
 			const auto mts = session->account().mtsLinkSession();
 			const auto isOutgoing =
@@ -3917,6 +3964,29 @@ void handleChatEvent(
 					newItem->notificationThread()->pushNotification(
 						notification);
 					Core::App().notifications().schedule(notification);
+				}
+				// Someone calls: the incoming call window, in channels only
+				// the notification opens the window to join the call.
+				const auto broadcast = channel && channel->isBroadcast();
+				if (newItem
+					&& !isThread
+					&& msg.type == MessageType::Call
+					&& msg.callMeta
+					&& msg.callMeta->status == u"Started"_q
+					&& !msg.callMeta->joinLink.isEmpty()) {
+					CallMessages.insert(newItem->fullId());
+					rememberCallEvent(
+						msg.callMeta->joinLink,
+						msg.callMeta->webinarEventId);
+					const auto author = broadcast
+						? nullptr
+						: newItem->from()->asUser();
+					if (author) {
+						Core::App().calls().showMtsLinkIncomingCall(
+							history->peer,
+							author,
+							msg.callMeta->joinLink);
+					}
 				}
 			}
 		}
@@ -4332,6 +4402,7 @@ void handleChatEvent(
 			const auto callMeta = Api::CallMetadata{
 				.status = mv.value("status").toString(),
 				.joinLink = mv.value("joinLink").toString(),
+				.webinarEventId = mv.value("webinarEventId").toString(),
 				.duration = int(mv.value("duration").toDouble() / 1000),
 				.statusReason = mv.value("statusReasonV2").toString(
 					mv.value("statusReason").toString()),
@@ -4348,7 +4419,7 @@ void handleChatEvent(
 				setActiveCall(session, chatPeerId, QString());
 			} else if (status == "Started"
 				&& !joinLink.isEmpty()) {
-				setActiveCall(session, chatPeerId, joinLink);
+				setActiveCall(session, chatPeerId, callMeta);
 			}
 			if (item) {
 				item->updateServiceText(buildCallServiceText(
@@ -4361,7 +4432,7 @@ void handleChatEvent(
 					&& !joinLink.isEmpty()) {
 					item->setOngoingCallLink(
 						std::make_shared<LambdaClickHandler>(
-							[joinLink] { File::OpenUrl(joinLink); }));
+							[joinLink] { joinCallLink(joinLink); }));
 				}
 				session->data().requestItemViewRefresh(item);
 			}
@@ -4524,7 +4595,7 @@ void handleChatEvent(
 			peerToChannel(chatIdToPeerId(chatId)));
 		const auto fileId = value.value("coverFileId").toString();
 		if (channel && !fileId.isEmpty()) {
-			applyUserpic(channel, fileId);
+			applyUserpic(channel, fileId, __LINE__);
 		}
 	} else if (type == "NewChannelEvent"
 		|| type == "MemberJoinedChannelEvent"
@@ -4557,6 +4628,7 @@ void handleChatEvent(
 		const auto callMeta = Api::CallMetadata{
 			.status = meta.value("status").toString(),
 			.joinLink = meta.value("joinLink").toString(),
+			.webinarEventId = meta.value("webinarEventId").toString(),
 			.duration = int(meta.value("duration").toDouble() / 1000),
 			.statusReason = meta.value("statusReasonV2").toString(
 				meta.value("statusReason").toString()),
@@ -4566,8 +4638,11 @@ void handleChatEvent(
 		const auto chatPeerId = chatIdToPeerId(chatId);
 		if (status == "Ended") {
 			setActiveCall(session, chatPeerId, QString());
+			if (const auto peer = session->data().peerLoaded(chatPeerId)) {
+				Core::App().calls().mtsLinkCallEnded(peer);
+			}
 		} else if (status == "Started" && !joinLink.isEmpty()) {
-			setActiveCall(session, chatPeerId, joinLink);
+			setActiveCall(session, chatPeerId, callMeta);
 		}
 		const auto csMapped = MtsLinkIdToMsgMap.constFind(messageId);
 		const auto msgId = (csMapped != MtsLinkIdToMsgMap.constEnd())
@@ -4584,7 +4659,7 @@ void handleChatEvent(
 			} else if (status == "Started" && !joinLink.isEmpty()) {
 				item->setOngoingCallLink(
 					std::make_shared<LambdaClickHandler>(
-						[joinLink] { File::OpenUrl(joinLink); }));
+						[joinLink] { joinCallLink(joinLink); }));
 			}
 			session->data().requestItemViewRefresh(item);
 		}
@@ -5436,6 +5511,8 @@ QString fileRefreshToken() {
 void setFileAuthCookies(const QList<QNetworkCookie> &cookies) {
 	FileAuthCookies = cookies;
 	for (const auto &cookie : cookies) {
+		LOG(("MtsLink Auth: set cookie %1 domain=%2").arg(
+			QString::fromLatin1(cookie.name()), cookie.domain()));
 		if (cookie.name() == "refresh") {
 			FileRefreshTokenValue = QString::fromUtf8(cookie.value());
 			LOG(("MtsLink: extracted refresh token from cookie"));
@@ -6025,7 +6102,9 @@ namespace {
 
 void performStartCall(
 		not_null<Main::Session*> session,
-		not_null<PeerData*> peer) {
+		not_null<PeerData*> peer,
+		CallBrowser browser,
+		bool video = true) {
 	static auto starting = QSet<QString>();
 	const auto chatId = peerIdToChatId(peer->id);
 	const auto mts = session->account().mtsLinkSession();
@@ -6046,7 +6125,7 @@ void performStartCall(
 	} else if (const auto active = activeCallJoinLink(peer->id)
 		; !active.isEmpty()) {
 		LOG(("MtsLink Call: joining active call chatId=%1").arg(chatId));
-		File::OpenUrl(active);
+		joinCallLink(active, peer->name(), browser, video);
 		return;
 	}
 	starting.insert(chatId);
@@ -6058,7 +6137,7 @@ void performStartCall(
 		[=](QString joinLink) {
 			starting.remove(chatId);
 			LOG(("MtsLink Call: created, joinLink=%1").arg(joinLink));
-			File::OpenUrl(joinLink);
+			openCallLink(joinLink, peer->name(), browser, video);
 		},
 		[=] {
 			starting.remove(chatId);
@@ -6712,7 +6791,7 @@ void attachChatCover(
 		} else if (ok) {
 			if (const auto peer = weak->data().peerLoaded(
 					chatIdToPeerId(chatId))) {
-				applyUserpic(peer, fileId);
+				applyUserpic(peer, fileId, __LINE__);
 			}
 		} else if (attempt < int(kDelays.size())) {
 			base::call_delayed(kDelays[attempt], [=] {
@@ -6961,38 +7040,85 @@ void startCall(not_null<Main::Session*> session, not_null<PeerData*> peer) {
 	if (session->windows().empty()) {
 		return;
 	}
-	const auto active = !activeCallJoinLink(peer->id).isEmpty();
-	const auto name = tr::bold(peer->name());
-	auto text = active
-		? tr::lng_mtslink_call_join_confirm(
-			tr::now,
-			lt_chat,
-			name,
-			tr::marked)
-		: isPersonalChat(peer->id)
+	const auto weak = base::make_weak(session);
+	const auto start = [=](CallBrowser browser) {
+		if (const auto strong = weak.get()) {
+			performStartCall(strong, peer, browser);
+		}
+	};
+	// As in Telegram: an ongoing video chat is joined right away, a new one
+	// is created after the confirmation.
+	if (!activeCallJoinLink(peer->id).isEmpty()) {
+		LOG(("MtsLink Call: joining the ongoing call without confirmation"));
+		start(CallBrowser::Default);
+		return;
+	}
+	auto text = isPersonalChat(peer->id)
 		? tr::lng_mtslink_call_confirm_personal(
 			tr::now,
 			lt_user,
-			name,
+			tr::bold(peer->name()),
 			tr::marked)
-		: tr::lng_mtslink_call_confirm_group(
-			tr::now,
-			lt_chat,
-			name,
-			tr::marked);
-	const auto weak = base::make_weak(session);
-	session->windows().front()->show(Ui::MakeConfirmBox({
-		.text = std::move(text),
-		.confirmed = [=](Fn<void()> close) {
-			close();
-			if (const auto strong = weak.get()) {
-				performStartCall(strong, peer);
-			}
-		},
-		.confirmText = (active
-			? tr::lng_mtslink_call_join()
-			: tr::lng_mtslink_call_start()),
+		: TextWithEntities{ peer->isBroadcast()
+			? tr::lng_group_call_create_sure_channel(tr::now)
+			: tr::lng_group_call_create_sure(tr::now) };
+	session->windows().front()->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			rpl::single(text),
+			st::boxLabel));
+		box->addButton(tr::lng_create_group_create(), [=] {
+			box->closeBox();
+			start(CallBrowser::Default);
+		});
+		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+		box->addLeftButton(tr::lng_mtslink_call_open_browser(), [=] {
+			box->closeBox();
+			start(CallBrowser::System);
+		});
 	}));
+}
+
+bool openIncomingCall(not_null<HistoryItem*> item) {
+	if (!CallMessages.contains(item->fullId())) {
+		return false;
+	}
+	const auto peer = item->history()->peer;
+	const auto joinLink = activeCallJoinLink(peer->id);
+	const auto author = item->from()->asUser();
+	LOG(("MtsLink Call: notification click, broadcast=%1 author=%2 link=%3"
+		).arg(peer->isBroadcast() ? 1 : 0
+		).arg(author ? 1 : 0
+		).arg(joinLink));
+	if (joinLink.isEmpty()) {
+		LOG(("MtsLink Call: notification of a finished call"));
+		return false;
+	} else if (peer->isBroadcast() || !author) {
+		// Channels (posts are from the channel itself): the call window
+		// with "join" and "open in browser".
+		Core::App().calls().showMtsLinkJoinCall(peer);
+		return true;
+	}
+	Core::App().calls().showMtsLinkIncomingCall(peer, author, joinLink);
+	return true;
+}
+
+void startCallNow(
+		not_null<Main::Session*> session,
+		not_null<PeerData*> peer,
+		bool systemBrowser) {
+	performStartCall(
+		session,
+		peer,
+		systemBrowser ? CallBrowser::System : CallBrowser::Default);
+}
+
+void setActiveCall(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		const Api::CallMetadata &meta) {
+	rememberCallEvent(meta.joinLink, meta.webinarEventId);
+	setActiveCall(session, peerId, meta.joinLink);
 }
 
 void setActiveCall(

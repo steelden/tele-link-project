@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_instance.h"
 
 #include "calls/calls_call.h"
+#include "mtslink/call_window.h"
 #include "mtslink/data_adapters.h"
 #include "calls/group/calls_group_common.h"
 #include "calls/group/calls_choose_join_as.h"
@@ -205,7 +206,9 @@ void Instance::startOutgoingCall(
 		not_null<UserData*> user,
 		StartOutgoingCallArgs args) {
 	if (MtsLink::hasChatId(user->id)) {
-		MtsLink::startCall(&user->session(), user);
+		if (!activateCurrentCall()) {
+			showMtsLinkCallConfirmation(user);
+		}
 		return;
 	}
 	if (activateCurrentCall()
@@ -235,7 +238,13 @@ void Instance::startOrJoinGroupCall(
 		not_null<PeerData*> peer,
 		StartGroupCallArgs args) {
 	if (MtsLink::hasChatId(peer->id)) {
-		MtsLink::startCall(&peer->session(), peer);
+		// As in Telegram an ongoing call is joined right away, a new one
+		// is started from the same window as the personal calls.
+		if (!MtsLink::activeCallJoinLink(peer->id).isEmpty()) {
+			MtsLink::startCall(&peer->session(), peer);
+		} else if (!activateCurrentCall()) {
+			showMtsLinkCallConfirmation(peer);
+		}
 		return;
 	}
 	confirmLeaveCurrent(show, peer, args, [=](StartGroupCallArgs args) {
@@ -408,6 +417,101 @@ not_null<Media::Audio::Track*> Instance::ensureSoundLoaded(
 
 void Instance::playSoundOnce(const QString &key) {
 	ensureSoundLoaded(key)->playOnce();
+}
+
+void Instance::showMtsLinkCallConfirmation(not_null<PeerData*> peer) {
+	// An outgoing call waits for the confirmation and sends nothing. For a
+	// group chat the call is "with" self, the window shows the group.
+	const auto user = peer->asUser()
+		? not_null(peer->asUser())
+		: peer->session().user();
+	auto call = std::make_unique<Call>(
+		_delegate.get(),
+		user,
+		Call::Type::Outgoing,
+		false);
+	const auto raw = call.get();
+	if (peer != user) {
+		raw->setMtsLinkPeer(peer);
+	}
+	user->session().account().sessionChanges(
+	) | rpl::on_next([=] {
+		destroyCall(raw);
+	}, raw->lifetime());
+	_currentCallPanel = std::make_unique<Panel>(raw);
+	_currentCall = std::move(call);
+	_currentCallPanel->startOutgoingRequests(
+	) | rpl::on_next([=](bool video) {
+		const auto session = &user->session();
+		LOG(("MtsLink Call: confirmed, video=%1").arg(video ? 1 : 0));
+		crl::on_main(this, [=] {
+			destroyCall(raw);
+			// The second button is "open in browser", the page manages
+			// the camera itself.
+			MtsLink::startCallNow(session, peer, video);
+		});
+	}, raw->lifetime());
+	_currentCallChanges.fire_copy(raw);
+}
+
+void Instance::showMtsLinkIncomingCall(
+		not_null<PeerData*> peer,
+		not_null<UserData*> author,
+		const QString &joinLink) {
+	if (_currentCall || _currentGroupCall) {
+		LOG(("MtsLink Call: incoming call skipped, already in a call"));
+		return;
+	}
+	LOG(("MtsLink Call: incoming call in %1 from %2"
+		).arg(peer->name(), author->name()));
+	const auto user = peer->asUser() ? not_null(peer->asUser()) : author;
+	auto call = std::make_unique<Call>(
+		_delegate.get(),
+		user,
+		Call::Type::Incoming,
+		false);
+	const auto raw = call.get();
+	if (peer != user) {
+		raw->setMtsLinkPeer(peer);
+	}
+	raw->setMtsLinkJoinLink(joinLink);
+	user->session().account().sessionChanges(
+	) | rpl::on_next([=] {
+		destroyCall(raw);
+	}, raw->lifetime());
+	_currentCallPanel = std::make_unique<Panel>(raw);
+	_currentCall = std::move(call);
+	raw->mtsLinkAnswers(
+	) | rpl::on_next([=] {
+		LOG(("MtsLink Call: incoming call answered"));
+		const auto title = peer->name();
+		crl::on_main(this, [=] {
+			destroyCall(raw);
+			MtsLink::joinCallLink(joinLink, title);
+		});
+	}, raw->lifetime());
+	_currentCallChanges.fire_copy(raw);
+}
+
+void Instance::showMtsLinkJoinCall(not_null<PeerData*> peer) {
+	if (!activateCurrentCall()) {
+		showMtsLinkCallConfirmation(peer);
+		if (_currentCall) {
+			_mtsLinkJoinWindow = _currentCall.get();
+		}
+	}
+}
+
+void Instance::mtsLinkCallEnded(not_null<PeerData*> peer) {
+	if (_currentCall
+		&& _currentCall->displayPeer() == peer
+		&& (_currentCall->isIncomingWaiting()
+			|| (_currentCall.get() == _mtsLinkJoinWindow
+				&& (_currentCall->state()
+					== Call::State::WaitingUserConfirmation)))) {
+		LOG(("MtsLink Call: incoming call ended by the caller"));
+		_currentCall->hangup();
+	}
 }
 
 void Instance::destroyCall(not_null<Call*> call) {

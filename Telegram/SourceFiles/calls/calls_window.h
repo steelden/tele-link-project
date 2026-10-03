@@ -60,6 +60,9 @@ public:
 	[[nodiscard]] auto controlsLayoutChanges() const
 		-> rpl::producer<Ui::Platform::TitleLayout>;
 	[[nodiscard]] bool controlsHasHitTest(QPoint widgetPoint) const;
+
+	// The system frame is shown until the frame is recalculated.
+	void refreshFrame();
 	[[nodiscard]] rpl::producer<bool> maximizeRequests() const;
 
 	[[nodiscard]] bool pinnedOnTop() const;

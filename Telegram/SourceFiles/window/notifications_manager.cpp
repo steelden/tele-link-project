@@ -1289,6 +1289,12 @@ void Manager::notificationActivated(
 			id.msgId);
 		const auto topic = item ? item->topic() : nullptr;
 		const auto sublist = item ? item->savedSublist() : nullptr;
+		if (item
+			&& options.draft.text.isEmpty()
+			&& MtsLink::openIncomingCall(item)) {
+			system()->clearFromItem(item);
+			return;
+		}
 		if (!options.draft.text.isEmpty()) {
 			const auto topicRootId = topic
 				? topic->rootId()

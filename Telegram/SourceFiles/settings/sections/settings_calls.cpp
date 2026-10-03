@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_calls.h"
 
+#include "mtslink/call_window.h"
+
 #include "api/api_authorizations.h"
 #include "apiwrap.h"
 #include "base/timer.h"
@@ -427,9 +429,41 @@ void BuildOtherSection(SectionBuilder &builder) {
 	builder.addSkip();
 }
 
+void BuildMtsLinkConferencesSection(SectionBuilder &builder) {
+	builder.addSkip();
+	builder.addSubsectionTitle({
+		.id = u"calls/mtslink"_q,
+		.title = tr::lng_mtslink_settings_conferences(),
+		.keywords = { u"browser"_q, u"conference"_q },
+	});
+	builder.add([](const WidgetContext &ctx) {
+		const auto button = ctx.container->add(
+			object_ptr<Ui::SettingsButton>(
+				ctx.container,
+				tr::lng_mtslink_settings_embedded_browser(),
+				st::settingsButtonNoIcon));
+		button->toggleOn(
+			rpl::single(MtsLink::callsInEmbeddedBrowser())
+		)->toggledValue(
+		) | rpl::on_next([](bool embedded) {
+			MtsLink::setCallsInEmbeddedBrowser(embedded);
+		}, button->lifetime());
+		return SectionBuilder::WidgetToAdd{};
+	}, [] {
+		return SearchEntry{
+			.id = u"calls/mtslink/browser"_q,
+			.title = tr::lng_mtslink_settings_embedded_browser(tr::now),
+			.keywords = { u"browser"_q, u"conference"_q },
+		};
+	});
+	builder.addSkip();
+	builder.addDivider();
+}
+
 void BuildCallsSectionContent(
 		SectionBuilder &builder,
 		rpl::variable<bool> *testingMicrophone = nullptr) {
+	BuildMtsLinkConferencesSection(builder);
 	BuildOutputSection(builder);
 	BuildInputSection(builder, testingMicrophone);
 	BuildCallDevicesSection(builder);

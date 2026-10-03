@@ -142,9 +142,11 @@ void applyChannelData(
 	not_null<Main::Session*> session,
 	const Api::ChannelData &src);
 
+// profileChanged: from MemberProfileChanged, the userpic is replaced.
 void applyUserData(
 	not_null<Main::Session*> session,
-	const Api::MemberProfile &src);
+	const Api::MemberProfile &src,
+	bool profileChanged = false);
 
 HistoryItem *addMessage(
 	not_null<Main::Session*> session,
@@ -415,7 +417,18 @@ void searchChannelNonMembers(
 
 // Creates an MTS Link video conference for the chat and opens its link.
 void startCall(not_null<Main::Session*> session, not_null<PeerData*> peer);
+// Without a confirmation, in the system browser or as set in the settings.
+// The notification of an ongoing incoming call opens the call window.
+[[nodiscard]] bool openIncomingCall(not_null<HistoryItem*> item);
+void startCallNow(
+	not_null<Main::Session*> session,
+	not_null<PeerData*> peer,
+	bool systemBrowser);
 
+void setActiveCall(
+	not_null<Main::Session*> session,
+	PeerId peerId,
+	const Api::CallMetadata &meta);
 void setActiveCall(
 	not_null<Main::Session*> session,
 	PeerId peerId,

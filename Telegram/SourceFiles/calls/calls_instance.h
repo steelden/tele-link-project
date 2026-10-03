@@ -91,6 +91,14 @@ public:
 		not_null<PeerData*> peer,
 		StartGroupCallArgs args);
 	void startOrJoinConferenceCall(StartConferenceInfo args);
+	// MTS Link: someone started a call in a personal or a group chat.
+	void showMtsLinkIncomingCall(
+		not_null<PeerData*> peer,
+		not_null<UserData*> author,
+		const QString &joinLink);
+	void mtsLinkCallEnded(not_null<PeerData*> peer);
+	// The "start call" window, for an ongoing call it joins.
+	void showMtsLinkJoinCall(not_null<PeerData*> peer);
 	void startedConferenceReady(
 		not_null<GroupCall*> call,
 		StartConferenceInfo args);
@@ -165,6 +173,10 @@ private:
 	not_null<Media::Audio::Track*> ensureSoundLoaded(const QString &key);
 	void playSoundOnce(const QString &key);
 
+	// The Telegram "start call" window, the call itself is an MTS Link
+	// conference started with the chosen audio / video.
+	void showMtsLinkCallConfirmation(not_null<PeerData*> peer);
+	Call *_mtsLinkJoinWindow = nullptr; // Closed when the call is ended.
 	void createCall(
 		not_null<UserData*> user,
 		CallType type,

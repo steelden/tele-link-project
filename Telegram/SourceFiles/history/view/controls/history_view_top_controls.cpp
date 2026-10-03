@@ -50,6 +50,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "core/file_utilities.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/call_window.h"
 
 namespace HistoryView {
 namespace {
@@ -493,7 +494,7 @@ void TopControls::setupGroupCallBar() {
 	) | rpl::on_next([=] {
 		const auto link = MtsLink::activeCallJoinLink(peer->id);
 		if (!link.isEmpty()) {
-			File::OpenUrl(link);
+			MtsLink::joinCallLink(link, peer->name());
 		}
 	}, _groupCallBar->lifetime());
 

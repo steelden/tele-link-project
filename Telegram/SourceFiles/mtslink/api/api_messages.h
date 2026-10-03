@@ -70,6 +70,7 @@ struct ForwardInfo {
 struct CallMetadata {
 	QString status;
 	QString joinLink;
+	QString webinarEventId; // For the personal link of the joining user.
 	int duration = 0;
 	QString statusReason; // "None", "Declined", ...
 };

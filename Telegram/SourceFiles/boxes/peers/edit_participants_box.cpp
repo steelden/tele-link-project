@@ -1847,8 +1847,9 @@ void ParticipantsBoxController::loadMoreRows() {
 	if (MtsLink::hasChatId(_peer->id)) {
 		_groupByRole = true;
 		if (!_mtsLinkMembersSubscribed) {
-			// Members and roles change by server events, rebuild the list
-			// on every members reload.
+			// Members and roles change by server events, update the list
+			// on every members reload. The rows are kept (recreated rows
+			// made the userpics blink), the gone members are removed.
 			_mtsLinkMembersSubscribed = true;
 			MtsLink::reloadChannelMembers(&channel->session(), channel->id);
 			using UpdateFlag = Data::PeerUpdate::Flag;
@@ -1856,13 +1857,9 @@ void ParticipantsBoxController::loadMoreRows() {
 				channel,
 				UpdateFlag::Members | UpdateFlag::Rights
 			) | rpl::on_next([=](const Data::PeerUpdate &) {
-				LOG(("MtsLink Members: rebuilding list of %1"
+				LOG(("MtsLink Members: updating list of %1"
 					).arg(_peer->name()));
 				_allLoaded = false;
-				while (delegate()->peerListFullRowsCount() > 0) {
-					delegate()->peerListRemoveRow(
-						delegate()->peerListRowAt(0));
-				}
 				loadMoreRows();
 			}, lifetime());
 		}
@@ -1880,6 +1877,7 @@ void ParticipantsBoxController::loadMoreRows() {
 		}
 		const auto owner = MtsLink::channelOwner(channel->id);
 		using Type = Api::ChatParticipant::Type;
+		auto shown = base::flat_set<PeerId>();
 		for (const auto &user : users) {
 			const auto isOwner = (user->id == owner);
 			const auto isAdmin = isOwner
@@ -1901,6 +1899,13 @@ void ParticipantsBoxController::loadMoreRows() {
 				continue;
 			} else if (acceptsMtsLinkRow(user)) {
 				appendRow(user);
+				shown.emplace(user->id);
+			}
+		}
+		for (auto i = delegate()->peerListFullRowsCount(); i != 0;) {
+			const auto row = delegate()->peerListRowAt(--i);
+			if (!shown.contains(row->peer()->id)) {
+				delegate()->peerListRemoveRow(row);
 			}
 		}
 		_allLoaded = true;
