@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "ui/image/image.h"
 #include "ui/text/format_values.h" // Ui::FormatPhone
+#include "base/unixtime.h"
 
 namespace Serialize {
 namespace {
@@ -297,9 +298,14 @@ PeerData *readPeer(
 				user->setFlags((user->flags() & ~flagsMask) | flagsSet);
 			}
 			user->setAccessHash(access);
-			user->updateLastseen((version > 1)
+			const auto stored = (version > 1)
 				? Data::LastseenStatus::FromSerialized(lastseen)
-				: Data::LastseenStatus::FromLegacy(lastseen));
+				: Data::LastseenStatus::FromLegacy(lastseen);
+			// MTS Link online lasts until MemberOffline, a stored online
+			// status is stale, the server reports the current one.
+			user->updateLastseen(stored.isOnline(base::unixtime::now())
+				? Data::LastseenStatus::Recently()
+				: stored);
 			user->setIsContact(contact == 1);
 			user->setBotInfoVersion(botInfoVersion);
 			if (user->isBot() && user->botInfo) {

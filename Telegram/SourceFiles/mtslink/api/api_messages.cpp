@@ -186,6 +186,8 @@ MessageData Messages::parseMessage(const QJsonObject &obj) const {
 			.status = v.value("status").toString(),
 			.joinLink = v.value("joinLink").toString(),
 			.duration = int(v.value("duration").toDouble() / 1000),
+			.statusReason = v.value("statusReasonV2").toString(
+				v.value("statusReason").toString()),
 		};
 	}();
 
@@ -242,7 +244,6 @@ FileData Messages::parseFile(const QJsonObject &obj) const {
 
 MemberProfile Messages::parseProfile(const QJsonObject &obj) const {
 	const auto roleStr = obj.value("role").toString();
-	const auto presenceStr = obj.value("presence").toString();
 	return {
 		.userId = obj.value("userId").toString(),
 		.organizationId = obj.value("organizationId").toString(),
@@ -250,11 +251,8 @@ MemberProfile Messages::parseProfile(const QJsonObject &obj) const {
 		.firstName = obj.value("firstName").toString(),
 		.lastName = obj.value("lastName").toString(),
 		.displayName = obj.value("displayName").toString(),
-		.presence = (presenceStr == "Online")
-			? MemberPresence::Online
-			: (presenceStr == "Away")
-				? MemberPresence::Away
-				: MemberPresence::Offline,
+		// Same unreliable "presence" / "inCall" as in chat member profiles.
+		.presence = MemberPresence::Unknown,
 		.avatarFileId = obj.value("avatarFileId").toString(),
 		.role = (roleStr == "Owner")
 			? MemberRole::Owner

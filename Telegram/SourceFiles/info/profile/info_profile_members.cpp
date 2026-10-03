@@ -52,6 +52,9 @@ Members::Members(
 , _peer(_controller->key().peer())
 , _listController(CreateMembersController(controller, _peer)) {
 	_listController->setStoriesShown(true);
+	// The profile preview lists online members, "N members" opens them all.
+	_listController->setMtsLinkOnlineOnly(
+		_controller->section().type() == Section::Type::Profile);
 	setupHeader();
 	setupList();
 	setContent(_list.data());

@@ -6436,6 +6436,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_call_group_declined" = "Declined group call";
 "lng_call_duration_info" = "{time}, {duration}";
 "lng_call_type_and_duration" = "{type} ({duration})";
+"lng_mtslink_group_call" = "Group call";
+"lng_mtslink_call_confirm_personal" = "Call {user}?";
+"lng_mtslink_call_confirm_group" = "Start a group call in {chat}?";
+"lng_mtslink_call_join_confirm" = "Join the ongoing call in {chat}?";
+"lng_mtslink_call_start" = "Call";
+"lng_mtslink_call_join" = "Join";
+"lng_mtslink_status_in_call" = "in a call";
 "lng_call_invitation" = "Group call invitation";
 "lng_call_ongoing" = "Ongoing group call";
 

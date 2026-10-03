@@ -67,6 +67,8 @@ std::optional<QString> OnlineTextSpecial(not_null<UserData*> user) {
 		return tr::lng_status_bot(tr::now);
 	} else if (user->isServiceUser()) {
 		return tr::lng_status_support(tr::now);
+	} else if (MtsLink::isUserInCall(user->id)) {
+		return tr::lng_mtslink_status_in_call(tr::now);
 	}
 	return std::nullopt;
 }

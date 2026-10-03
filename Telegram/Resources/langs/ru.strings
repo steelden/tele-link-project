@@ -592,6 +592,30 @@ Based on Telegram Desktop lang.strings format
 "lng_action_group_call_started_group" = "{from} начал(а) видеочат";
 "lng_action_group_call_finished_group" = "{from} завершил(а) видеочат ({duration})";
 
+// === MTS Link calls ===
+"lng_call_outgoing" = "Исходящий звонок";
+"lng_call_incoming" = "Входящий звонок";
+"lng_call_missed" = "Пропущенный звонок";
+"lng_call_cancelled" = "Отменённый звонок";
+"lng_call_declined" = "Отклонённый звонок";
+"lng_call_type_and_duration" = "{type} ({duration})";
+"lng_mtslink_group_call" = "Групповой звонок";
+"lng_mtslink_call_confirm_personal" = "Позвонить {user}?";
+"lng_mtslink_call_confirm_group" = "Начать групповой звонок в «{chat}»?";
+"lng_mtslink_call_join_confirm" = "Присоединиться к идущему звонку в «{chat}»?";
+"lng_mtslink_call_start" = "Позвонить";
+"lng_mtslink_call_join" = "Присоединиться";
+"lng_mtslink_status_in_call" = "в звонке";
+"lng_duration_minsec_minutes#one" = "{count} мин";
+"lng_duration_minsec_minutes#few" = "{count} мин";
+"lng_duration_minsec_minutes#many" = "{count} мин";
+"lng_duration_minsec_minutes#other" = "{count} мин";
+"lng_duration_minsec_seconds#one" = "{count} с";
+"lng_duration_minsec_seconds#few" = "{count} с";
+"lng_duration_minsec_seconds#many" = "{count} с";
+"lng_duration_minsec_seconds#other" = "{count} с";
+"lng_duration_minutes_seconds" = "{minutes_count} {seconds_count}";
+
 // === Channel admin ===
 "lng_channel_admins" = "Администраторы";
 "lng_channel_add_admin" = "Добавить администратора";

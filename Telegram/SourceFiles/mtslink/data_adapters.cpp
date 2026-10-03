@@ -30,6 +30,8 @@ based on Telegram Desktop.
 #include "history/view/history_view_send_action.h"
 #include "dialogs/dialogs_main_list.h"
 #include "dialogs/dialogs_pinned_list.h"
+#include "ui/text/format_values.h"
+#include "ui/boxes/confirm_box.h"
 #include "dialogs/dialogs_key.h"
 #include "data/data_lastseen_status.h"
 #include "data/data_types.h"
@@ -232,6 +234,13 @@ QMap<QPair<PeerId, MsgId>, PendingThreadUnreadInfo> PendingThreadUnread;
 constexpr auto kPreviewRetryLimit = 20;
 QHash<PeerId, MsgId> PendingChatThreadScroll;
 bool FolderPinsSyncScheduled = false;
+QSet<PeerId> InCallUsers;
+QSet<PeerId> PresenceKnownUsers;
+QSet<PeerId> PresenceRequestedUsers;
+
+// MTS Link reports presence explicitly: a user stays online until
+// MemberOffline, so the online status must not expire on its own.
+constexpr auto kMtsLinkOnlineHorizon = TimeId(365 * 86400);
 
 // MTS Link pins are global, so every folder pins the globally pinned
 // chats it contains, in the main list order.
@@ -1055,32 +1064,45 @@ QString markdownFromBlocks(const QJsonArray &blocks) {
 	return md;
 }
 
+// Mirrors MTS Link: "Outgoing / Incoming / Missed call" in personal chats,
+// "Group call" elsewhere, with the duration once the call has ended.
 PreparedServiceText buildCallServiceText(
-		const QString &status,
-		int durationSec) {
-	auto result = PreparedServiceText();
-	if (status == "Ended" && durationSec > 0) {
-		const auto days = durationSec / 86400;
-		const auto hours = durationSec / 3600;
-		const auto minutes = durationSec / 60;
-		auto text = (days > 1)
-			? tr::lng_days(tr::now, lt_count, days)
-			: (hours > 1)
-			? tr::lng_hours(tr::now, lt_count, hours)
-			: (minutes > 1)
-			? tr::lng_minutes(tr::now, lt_count, minutes)
-			: tr::lng_seconds(tr::now, lt_count, durationSec);
-		result.text = tr::lng_action_group_call_finished(
-			tr::now,
-			lt_duration,
-			{ .text = text },
-			tr::marked);
+		const Api::CallMetadata &meta,
+		bool outgoing,
+		bool personal) {
+	const auto ended = (meta.status == u"Ended"_q);
+	const auto reason = meta.statusReason;
+	const auto withDuration = [&](const QString &type) {
+		return (ended && meta.duration > 0)
+			? tr::lng_call_type_and_duration(
+				tr::now,
+				lt_type,
+				type,
+				lt_duration,
+				Ui::FormatDurationWords(meta.duration))
+			: type;
+	};
+	auto text = QString();
+	if (!personal) {
+		text = withDuration(tr::lng_mtslink_group_call(tr::now));
+	} else if (ended && reason == u"Declined"_q) {
+		text = tr::lng_call_declined(tr::now);
 	} else {
-		result.text = tr::lng_action_group_call_started_channel(
-			tr::now,
-			tr::marked);
+		if (ended && !reason.isEmpty() && reason != u"None"_q) {
+			LOG(("MtsLink Call: unknown statusReason '%1'").arg(reason));
+		}
+		text = withDuration(outgoing
+			? tr::lng_call_outgoing(tr::now)
+			: tr::lng_call_incoming(tr::now));
 	}
+	auto result = PreparedServiceText();
+	result.text = TextWithEntities{ text };
 	return result;
+}
+
+[[nodiscard]] bool isPersonalChat(PeerId peerId) {
+	const auto type = chatTypeForPeer(peerId);
+	return (type == ChatType::Dialog) || (type == ChatType::Favorites);
 }
 
 } // namespace
@@ -1524,10 +1546,32 @@ void connectToSession(
 						const auto online = (type == "MemberOnline");
 						const auto status = online
 							? Data::LastseenStatus::OnlineTill(
-								base::unixtime::now() + 300)
+								base::unixtime::now() + kMtsLinkOnlineHorizon)
 							: Data::LastseenStatus::Recently();
+						LOG(("[Presence] event %1 user=%2").arg(type).arg(userId));
+						PresenceKnownUsers.insert(user->id);
 						if (user->updateLastseen(status)) {
 							mainSession->data().session().changes().peerUpdated(
+								user,
+								Data::PeerUpdate::Flag::OnlineStatus);
+						}
+					}
+				} else if (type == "MemberInCallChanged") {
+					const auto userId = value.value("userId").toString();
+					if (!userId.isEmpty()) {
+						const auto user = mainSession->data().user(
+							::UserId(uuidToBareId(userId)));
+						const auto inCall = value.value("inCall").toBool();
+						const auto changed = inCall
+							? !InCallUsers.contains(user->id)
+							: InCallUsers.contains(user->id);
+						if (changed) {
+							if (inCall) {
+								InCallUsers.insert(user->id);
+							} else {
+								InCallUsers.remove(user->id);
+							}
+							mainSession->changes().peerUpdated(
 								user,
 								Data::PeerUpdate::Flag::OnlineStatus);
 						}
@@ -1568,6 +1612,40 @@ void connectToSession(
 		});
 	QObject::connect(
 		mtsSession->users(),
+		&Api::Users::presenceLoaded,
+		[mainSession](
+				const UserId &userId,
+				MemberPresence presence,
+				bool inCall) {
+			const auto user = mainSession->data().user(
+				::UserId(uuidToBareId(userId)));
+			LOG(("[Presence] GetMember user=%1 '%2' presence=%3 inCall=%4")
+				.arg(userId)
+				.arg(user->name())
+				.arg(int(presence))
+				.arg(inCall ? 1 : 0));
+			PresenceKnownUsers.insert(user->id);
+			const auto status = (presence == MemberPresence::Online)
+				? Data::LastseenStatus::OnlineTill(
+					base::unixtime::now() + kMtsLinkOnlineHorizon)
+				: Data::LastseenStatus::Recently();
+			auto changed = user->updateLastseen(status);
+			if (inCall != InCallUsers.contains(user->id)) {
+				if (inCall) {
+					InCallUsers.insert(user->id);
+				} else {
+					InCallUsers.remove(user->id);
+				}
+				changed = true;
+			}
+			if (changed) {
+				mainSession->changes().peerUpdated(
+					user,
+					Data::PeerUpdate::Flag::OnlineStatus);
+			}
+		});
+	QObject::connect(
+		mtsSession->users(),
 		&Api::Users::chatMembersLoaded,
 		[mainSession, mtsSession](
 				const ChatId &chatId,
@@ -1576,11 +1654,25 @@ void connectToSession(
 			auto &stored = ChatMembersMap[peerId];
 			stored.clear();
 			stored.reserve(members.size());
+			auto presenceRequests = 0;
 			for (const auto &m : members) {
 				applyUserData(mainSession, m);
 				const auto bareId = uuidToBareId(m.userId);
 				stored.push_back(bareId);
+				const auto userPeerId = PeerId(::UserId(bareId));
+				if (!PresenceKnownUsers.contains(userPeerId)
+					&& !PresenceRequestedUsers.contains(userPeerId)) {
+					PresenceRequestedUsers.insert(userPeerId);
+					mtsSession->users()->loadPresence(
+						m.userId,
+						mtsSession->organizationId());
+					++presenceRequests;
+				}
 			}
+			LOG(("[Presence] chat=%1 members=%2 presenceRequests=%3")
+				.arg(chatId)
+				.arg(members.size())
+				.arg(presenceRequests));
 			const auto chatType = chatTypeForPeer(peerId);
 			if (chatType == ChatType::Dialog) {
 				const auto selfId = mtsSession->userId();
@@ -2132,10 +2224,29 @@ void applyUserData(
 		user->setAbout(aboutParts.join(QChar('\n')));
 	}
 
-	const auto status = (src.presence == MemberPresence::Online)
-		? Data::LastseenStatus::OnlineTill(base::unixtime::now() + 300)
-		: Data::LastseenStatus::Recently();
-	user->updateLastseen(status);
+	if (src.presence != MemberPresence::Unknown) {
+		const auto status = (src.presence == MemberPresence::Online)
+			? Data::LastseenStatus::OnlineTill(
+				base::unixtime::now() + kMtsLinkOnlineHorizon)
+			: Data::LastseenStatus::Recently();
+		const auto wasOnline = (user->lastseen().onlineTill() > 0);
+		const auto nowOnline = (src.presence == MemberPresence::Online);
+		if (wasOnline != nowOnline) {
+			LOG(("[Presence] applyUserData user=%1 %2 -> %3")
+				.arg(src.userId)
+				.arg(wasOnline ? "online" : "offline")
+				.arg(nowOnline ? "online" : "offline"));
+		}
+		PresenceKnownUsers.insert(user->id);
+		user->updateLastseen(status);
+	}
+	if (src.inCall >= 0) {
+		if (src.inCall) {
+			InCallUsers.insert(user->id);
+		} else {
+			InCallUsers.remove(user->id);
+		}
+	}
 
 	auto flags = Data::PeerUpdate::Flag::Name
 		| Data::PeerUpdate::Flag::Photo
@@ -2321,6 +2432,15 @@ HistoryItem *addMessage(
 			}
 		}
 		applyThreadChildrenCount(existing, chatPeerId, msgId, src);
+		if (src.type == MessageType::Call && src.callMeta) {
+			existing->updateServiceText(buildCallServiceText(
+				*src.callMeta,
+				existing->out(),
+				isPersonalChat(chatPeerId)));
+			if (src.callMeta->status == u"Ended"_q) {
+				existing->clearOngoingCallLink();
+			}
+		}
 		if (!existing->mainView() && !threadOnly) {
 			if (batchItems) {
 				batchItems->push_back(existing);
@@ -2333,7 +2453,9 @@ HistoryItem *addMessage(
 
 	if (src.type == MessageType::Call && src.callMeta) {
 		auto serviceText = buildCallServiceText(
-			src.callMeta->status, src.callMeta->duration);
+			*src.callMeta,
+			bool(fields.flags & MessageFlag::Outgoing),
+			isPersonalChat(chatPeerId));
 		const auto item = (threadOnly || batchItems)
 			? history->makeMessage(
 				std::move(fields),
@@ -2548,7 +2670,9 @@ bool addOlderMessages(
 
 		if (src.type == MessageType::Call && src.callMeta) {
 			auto serviceText = buildCallServiceText(
-				src.callMeta->status, src.callMeta->duration);
+				*src.callMeta,
+				bool(fields.flags & MessageFlag::Outgoing),
+				isPersonalChat(chatPeerId));
 			const auto callItem = history->makeMessage(
 				std::move(fields),
 				std::move(serviceText));
@@ -2807,6 +2931,8 @@ void handleChatEvent(
 					.status = mv.value("status").toString(),
 					.joinLink = mv.value("joinLink").toString(),
 					.duration = int(mv.value("duration").toDouble() / 1000),
+					.statusReason = mv.value("statusReasonV2").toString(
+						mv.value("statusReason").toString()),
 				};
 			}
 		}
@@ -2850,6 +2976,8 @@ void handleChatEvent(
 					.status = v.value("status").toString(),
 					.joinLink = v.value("joinLink").toString(),
 					.duration = int(v.value("duration").toDouble() / 1000),
+					.statusReason = v.value("statusReasonV2").toString(
+						v.value("statusReason").toString()),
 				};
 			}
 		}
@@ -3259,9 +3387,15 @@ void handleChatEvent(
 				return;
 			}
 			const auto mv = meta.value("value").toObject();
-			const auto status = mv.value("status").toString();
-			const auto duration = int(mv.value("duration").toDouble() / 1000);
-			const auto joinLink = mv.value("joinLink").toString();
+			const auto callMeta = Api::CallMetadata{
+				.status = mv.value("status").toString(),
+				.joinLink = mv.value("joinLink").toString(),
+				.duration = int(mv.value("duration").toDouble() / 1000),
+				.statusReason = mv.value("statusReasonV2").toString(
+					mv.value("statusReason").toString()),
+			};
+			const auto &status = callMeta.status;
+			const auto &joinLink = callMeta.joinLink;
 			const auto chatPeerId = chatIdToPeerId(chatId);
 			const auto callMapped = MtsLinkIdToMsgMap.constFind(messageId);
 			const auto msgId = (callMapped != MtsLinkIdToMsgMap.constEnd())
@@ -3275,8 +3409,10 @@ void handleChatEvent(
 				setActiveCall(session, chatPeerId, joinLink);
 			}
 			if (item) {
-				item->updateServiceText(
-					buildCallServiceText(status, duration));
+				item->updateServiceText(buildCallServiceText(
+					callMeta,
+					item->out(),
+					isPersonalChat(chatPeerId)));
 				if (status == "Ended") {
 					item->clearOngoingCallLink();
 				} else if (status == "Started"
@@ -3294,9 +3430,15 @@ void handleChatEvent(
 			return;
 		}
 		const auto meta = value.value("metadata").toObject();
-		const auto status = meta.value("status").toString();
-		const auto duration = int(meta.value("duration").toDouble() / 1000);
-		const auto joinLink = meta.value("joinLink").toString();
+		const auto callMeta = Api::CallMetadata{
+			.status = meta.value("status").toString(),
+			.joinLink = meta.value("joinLink").toString(),
+			.duration = int(meta.value("duration").toDouble() / 1000),
+			.statusReason = meta.value("statusReasonV2").toString(
+				meta.value("statusReason").toString()),
+		};
+		const auto &status = callMeta.status;
+		const auto &joinLink = callMeta.joinLink;
 		const auto chatPeerId = chatIdToPeerId(chatId);
 		if (status == "Ended") {
 			setActiveCall(session, chatPeerId, QString());
@@ -3309,8 +3451,10 @@ void handleChatEvent(
 			: MsgId(uuidToBareId(messageId) & 0x7FFFFFFFLL);
 		const auto item = session->data().message(chatPeerId, msgId);
 		if (item) {
-			item->updateServiceText(
-				buildCallServiceText(status, duration));
+			item->updateServiceText(buildCallServiceText(
+				callMeta,
+				item->out(),
+				isPersonalChat(chatPeerId)));
 			if (status == "Ended") {
 				item->clearOngoingCallLink();
 			} else if (status == "Started" && !joinLink.isEmpty()) {
@@ -3669,7 +3813,7 @@ QByteArray serializeMessages(
 	QDataStream s(&result, QIODevice::WriteOnly);
 	s.setVersion(QDataStream::Qt_5_1);
 
-	s << qint32(2); // format version
+	s << qint32(3); // format version
 	qint32 msgCount = 0;
 	for (const auto &m : messages) {
 		if (m.type == MessageType::Call
@@ -3715,7 +3859,8 @@ QByteArray serializeMessages(
 		s << m.callMeta.has_value();
 		if (m.callMeta) {
 			s << m.callMeta->status << m.callMeta->joinLink
-				<< qint32(m.callMeta->duration);
+				<< qint32(m.callMeta->duration)
+				<< m.callMeta->statusReason;
 		}
 	}
 	s << qint32(profiles.size());
@@ -3743,8 +3888,8 @@ std::optional<CachedMessages> deserializeMessages(const QByteArray &data) {
 
 	qint32 version = 0;
 	s >> version;
-	// version 2 adds callMeta
-	if (version < 1 || version > 2) {
+	// version 2 adds callMeta, version 3 adds callMeta statusReason
+	if (version < 1 || version > 3) {
 		return std::nullopt;
 	}
 
@@ -3812,6 +3957,9 @@ std::optional<CachedMessages> deserializeMessages(const QByteArray &data) {
 				qint32 dur = 0;
 				s >> cm.status >> cm.joinLink >> dur;
 				cm.duration = dur;
+				if (version >= 3) {
+					s >> cm.statusReason;
+				}
 				m.callMeta = std::move(cm);
 			}
 		}
@@ -3831,7 +3979,9 @@ std::optional<CachedMessages> deserializeMessages(const QByteArray &data) {
 			>> p.phone >> p.position >> p.department
 			>> p.firstName >> p.lastName >> p.displayName
 			>> presInt >> p.avatarFileId >> roleInt;
-		p.presence = MemberPresence(presInt);
+		// A cached presence is stale, the server reports the current one.
+		Q_UNUSED(presInt);
+		p.presence = MemberPresence::Unknown;
 		p.role = MemberRole(roleInt);
 		if (s.status() != QDataStream::Ok) {
 			return std::nullopt;
@@ -4689,6 +4839,98 @@ void handleMtsLinkUrl(
 		[url](const QString &) {
 			File::OpenUrl(url);
 		});
+}
+
+namespace {
+
+void performStartCall(
+		not_null<Main::Session*> session,
+		not_null<PeerData*> peer) {
+	static auto starting = QSet<QString>();
+	const auto chatId = peerIdToChatId(peer->id);
+	const auto mts = session->account().mtsLinkSession();
+	const auto showError = [=] {
+		if (!session->windows().empty()) {
+			session->windows().front()->showToast(
+				tr::lng_cant_do_this(tr::now));
+		}
+	};
+	if (chatId.isEmpty() || !mts || !mts->channels()) {
+		LOG(("MtsLink Call: can't start, chatId='%1' session=%2")
+			.arg(chatId)
+			.arg(mts ? 1 : 0));
+		showError();
+		return;
+	} else if (starting.contains(chatId)) {
+		return;
+	} else if (const auto active = activeCallJoinLink(peer->id)
+		; !active.isEmpty()) {
+		LOG(("MtsLink Call: joining active call chatId=%1").arg(chatId));
+		File::OpenUrl(active);
+		return;
+	}
+	starting.insert(chatId);
+	LOG(("MtsLink Call: CreateCallV2 chatId=%1").arg(chatId));
+	const auto weak = base::make_weak(session);
+	mts->channels()->createCall(
+		chatId,
+		peer->name(),
+		[=](QString joinLink) {
+			starting.remove(chatId);
+			LOG(("MtsLink Call: created, joinLink=%1").arg(joinLink));
+			File::OpenUrl(joinLink);
+		},
+		[=] {
+			starting.remove(chatId);
+			LOG(("MtsLink Call: CreateCallV2 failed chatId=%1").arg(chatId));
+			if (weak) {
+				showError();
+			}
+		});
+}
+
+} // namespace
+
+bool isUserInCall(PeerId userPeerId) {
+	return InCallUsers.contains(userPeerId);
+}
+
+void startCall(not_null<Main::Session*> session, not_null<PeerData*> peer) {
+	if (session->windows().empty()) {
+		return;
+	}
+	const auto active = !activeCallJoinLink(peer->id).isEmpty();
+	const auto name = tr::bold(peer->name());
+	auto text = active
+		? tr::lng_mtslink_call_join_confirm(
+			tr::now,
+			lt_chat,
+			name,
+			tr::marked)
+		: isPersonalChat(peer->id)
+		? tr::lng_mtslink_call_confirm_personal(
+			tr::now,
+			lt_user,
+			name,
+			tr::marked)
+		: tr::lng_mtslink_call_confirm_group(
+			tr::now,
+			lt_chat,
+			name,
+			tr::marked);
+	const auto weak = base::make_weak(session);
+	session->windows().front()->show(Ui::MakeConfirmBox({
+		.text = std::move(text),
+		.confirmed = [=](Fn<void()> close) {
+			close();
+			if (const auto strong = weak.get()) {
+				performStartCall(strong, peer);
+			}
+		},
+		.confirmText = (active
+			? tr::lng_mtslink_call_join()
+			: tr::lng_mtslink_call_start()),
+	}));
 }
 
 void setActiveCall(

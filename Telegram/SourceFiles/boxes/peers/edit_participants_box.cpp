@@ -1157,6 +1157,9 @@ void ParticipantsBoxController::setupListChangeViewers() {
 	channel->owner().megagroupParticipantAdded(
 		channel
 	) | rpl::on_next([=](not_null<UserData*> user) {
+		if (!acceptsMtsLinkRow(user)) {
+			return;
+		}
 		if (_groupByRole.current()) {
 			if (!delegate()->peerListFindRow(user->id.value)) {
 				if (auto row = createRow(user)) {
@@ -1199,6 +1202,76 @@ void ParticipantsBoxController::setupListChangeViewers() {
 		}
 		refreshRows();
 	}, lifetime());
+}
+
+void ParticipantsBoxController::setMtsLinkOnlineOnly(bool onlineOnly) {
+	_mtsLinkOnlineOnly = onlineOnly && MtsLink::hasChatId(_peer->id);
+	LOG(("[MembersOnline] setOnlineOnly peer=%1 requested=%2 enabled=%3")
+		.arg(_peer->id.value)
+		.arg(onlineOnly ? 1 : 0)
+		.arg(_mtsLinkOnlineOnly ? 1 : 0));
+	_mtsLinkOnlineLifetime.destroy();
+	if (!_mtsLinkOnlineOnly) {
+		return;
+	}
+	_peer->session().changes().peerUpdates(
+		Data::PeerUpdate::Flag::OnlineStatus
+	) | rpl::on_next([=](const Data::PeerUpdate &update) {
+		if (const auto user = update.peer->asUser()) {
+			mtsLinkOnlineChanged(user);
+		}
+	}, _mtsLinkOnlineLifetime);
+}
+
+std::vector<not_null<UserData*>> ParticipantsBoxController::mtsLinkMembers(
+) const {
+	if (const auto mega = _peer->asMegagroup()) {
+		if (mega->mgInfo && !mega->mgInfo->lastParticipants.empty()) {
+			return {
+				begin(mega->mgInfo->lastParticipants),
+				end(mega->mgInfo->lastParticipants),
+			};
+		}
+	}
+	return MtsLink::chatMtsLinkUsers(&_peer->session(), _peer->id);
+}
+
+bool ParticipantsBoxController::acceptsMtsLinkRow(
+		not_null<UserData*> user) const {
+	// MTS Link keeps online users OnlineTill a far future date, a past date
+	// is a stale value stored by an older session.
+	const auto result = !_mtsLinkOnlineOnly
+		|| user->isSelf()
+		|| user->lastseen().isOnline(base::unixtime::now());
+	LOG(("[MembersOnline] role=%1 onlineOnly=%2 user=%3 '%4' till=%5 "
+		"self=%6 accepted=%7")
+		.arg(int(_role))
+		.arg(_mtsLinkOnlineOnly ? 1 : 0)
+		.arg(user->id.value)
+		.arg(user->name())
+		.arg(user->lastseen().onlineTill())
+		.arg(user->isSelf() ? 1 : 0)
+		.arg(result ? 1 : 0));
+	return result;
+}
+
+void ParticipantsBoxController::mtsLinkOnlineChanged(
+		not_null<UserData*> user) {
+	if (!delegate()) {
+		return;
+	}
+	const auto row = delegate()->peerListFindRow(user->id.value);
+	if (acceptsMtsLinkRow(user)) {
+		if (!row
+			&& ranges::contains(mtsLinkMembers(), user)
+			&& appendRow(user)) {
+			refreshRows();
+			resort();
+		}
+	} else if (row) {
+		delegate()->peerListRemoveRow(row);
+		refreshRows();
+	}
 }
 
 auto ParticipantsBoxController::CreateSearchController(
@@ -1454,6 +1527,9 @@ void ParticipantsBoxController::restoreState(
 		}
 		const auto was = _fullCountValue.current();
 		PeerListController::restoreState(std::move(state));
+		LOG(("[MembersOnline] restoreState peer=%1 rows=%2")
+			.arg(_peer->id.value)
+			.arg(delegate()->peerListFullRowsCount()));
 		const auto now = delegate()->peerListFullRowsCount();
 		if (now > 0 || _allLoaded) {
 			refreshDescription();
@@ -1778,24 +1854,33 @@ void ParticipantsBoxController::loadMoreRows() {
 	}
 
 	const auto channel = _peer->asChannel();
-	if (feedMegagroupLastParticipants()) {
-		return;
-	}
-
 	if (MtsLink::hasChatId(_peer->id)) {
 		_groupByRole = true;
 		const auto mega = channel->asMegagroup();
+		LOG(("[MembersOnline] loadMoreRows peer=%1 role=%2 onlineOnly=%3 "
+			"mgLast=%4 rows=%5")
+			.arg(_peer->id.value)
+			.arg(int(_role))
+			.arg(_mtsLinkOnlineOnly ? 1 : 0)
+			.arg((mega && mega->mgInfo)
+				? int(mega->mgInfo->lastParticipants.size())
+				: -1)
+			.arg(delegate()->peerListFullRowsCount()));
 		if (mega && mega->mgInfo
 			&& !mega->mgInfo->lastParticipants.empty()) {
 			_additional.fillFromPeer();
 			for (const auto &user : mega->mgInfo->lastParticipants) {
-				appendRow(user);
+				if (acceptsMtsLinkRow(user)) {
+					appendRow(user);
+				}
 			}
 		} else {
 			const auto users = MtsLink::chatMtsLinkUsers(
 				&_peer->session(), _peer->id);
 			for (const auto &user : users) {
-				appendRow(user);
+				if (acceptsMtsLinkRow(user)) {
+					appendRow(user);
+				}
 			}
 			using UpdateFlag = Data::PeerUpdate::Flag;
 			const auto done = std::make_shared<bool>(false);
@@ -1820,6 +1905,9 @@ void ParticipantsBoxController::loadMoreRows() {
 		resort();
 		refreshRows();
 		chatListReady();
+		return;
+	}
+	if (feedMegagroupLastParticipants()) {
 		return;
 	}
 

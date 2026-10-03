@@ -190,6 +190,27 @@ void Channels::unpinChat(const ChatId &chatId) {
 		});
 }
 
+void Channels::createCall(
+		const ChatId &chatId,
+		const QString &name,
+		std::function<void(QString joinLink)> done,
+		std::function<void()> fail) {
+	_rpc->call(
+		"WebinarApp.CreateCallV2",
+		QJsonObject{ { "chatId", chatId }, { "name", name } },
+		[=](const QJsonObject &result) {
+			const auto joinLink = result.value("value").toObject()
+				.value("joinLink").toString();
+			if (result.value("type").toString() == QStringLiteral("Call")
+				&& !joinLink.isEmpty()) {
+				done(joinLink);
+			} else {
+				fail();
+			}
+		},
+		[=](const QString &) { fail(); });
+}
+
 ChatType Channels::parseChatType(const QString &type) const {
 	if (type == "Dialog") return ChatType::Dialog;
 	if (type == "Channel") return ChatType::Channel;

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_top_bar_widget.h"
 
 #include "history/history.h"
+#include "mtslink/data_adapters.h"
 #include "history/view/history_view_send_action.h"
 #include "boxes/add_contact_box.h"
 #include "ui/boxes/confirm_box.h"
@@ -79,6 +80,7 @@ constexpr auto kEmojiInteractionSeenDuration = 3 * crl::time(1000);
 
 [[nodiscard]] inline bool HasGroupCallMenu(not_null<PeerData*> peer) {
 	return !peer->isUser()
+		&& !MtsLink::hasChatId(peer->id)
 		&& !peer->groupCall()
 		&& peer->canManageGroupCall();
 }
@@ -1405,6 +1407,15 @@ void TopBarWidget::updateControlsVisibility() {
 		&& !_chooseForReportReason);
 	const auto groupCallsEnabled = [&] {
 		if (const auto peer = _activeChat.key.peer()) {
+			if (MtsLink::hasChatId(peer->id)) {
+				// Any member can start an MTS Link call, except in threads
+				// and read-only channels.
+				const auto channel = peer->asChannel();
+				return channel
+					&& !MtsLink::isThreadPeer(peer->id)
+					&& (!channel->isBroadcast()
+						|| channel->canPostMessages());
+			}
 			if (!peer->isUser() && peer->canManageGroupCall()) {
 				return true;
 			} else if (const auto call = peer->groupCall()) {

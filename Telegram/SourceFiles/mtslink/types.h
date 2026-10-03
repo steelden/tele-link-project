@@ -43,6 +43,7 @@ enum class MemberPresence {
 	Online,
 	Offline,
 	Away,
+	Unknown, // Not reported in this response, keep the known status.
 };
 
 enum class MemberRole {

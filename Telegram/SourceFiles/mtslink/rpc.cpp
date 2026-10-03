@@ -63,10 +63,11 @@ void Rpc::call(
 		_pending.insert(id, { method, std::move(done), std::move(fail) });
 	}
 
-	const auto parts = method.split('.');
-	const auto dst = parts.isEmpty()
+	// "WebinarApp.CreateCallV2" -> "webinarApp", "Chat.PinChat" -> "chat".
+	const auto service = method.section('.', 0, 0);
+	const auto dst = service.isEmpty()
 		? QString()
-		: parts.first().toLower();
+		: (service.left(1).toLower() + service.mid(1));
 
 	QJsonObject message;
 	message["id"] = id;

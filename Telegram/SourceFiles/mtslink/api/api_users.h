@@ -24,6 +24,7 @@ public:
 	void loadMember(const UserId &userId, const QString &organizationId);
 	void loadOrganizationMembers(int offset = 0, int limit = 100);
 	void loadChatMembers(const ChatId &chatId);
+	void loadPresence(const UserId &userId, const QString &organizationId);
 
 	[[nodiscard]] MemberProfile cachedProfile(const UserId &userId) const;
 	void cacheProfiles(const QList<MemberProfile> &profiles);
@@ -34,9 +35,10 @@ Q_SIGNALS:
 	void chatMembersLoaded(
 		const ChatId &chatId,
 		const QList<MemberProfile> &members);
-	void presenceChanged(
+	void presenceLoaded(
 		const UserId &userId,
-		MemberPresence presence);
+		MemberPresence presence,
+		bool inCall);
 
 private:
 	Rpc *_rpc = nullptr;

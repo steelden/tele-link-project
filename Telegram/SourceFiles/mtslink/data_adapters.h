@@ -23,6 +23,7 @@ namespace Main {
 class Session;
 } // namespace Main
 
+class PeerData;
 class ChannelData;
 class UserData;
 class History;
@@ -228,6 +229,11 @@ void setEmojiIdMapping(const QString &emojiId, const QString &emoji);
 void handleMtsLinkUrl(
 	const QString &url,
 	const QVariant &context);
+
+[[nodiscard]] bool isUserInCall(PeerId userPeerId);
+
+// Creates an MTS Link video conference for the chat and opens its link.
+void startCall(not_null<Main::Session*> session, not_null<PeerData*> peer);
 
 void setActiveCall(
 	not_null<Main::Session*> session,

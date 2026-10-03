@@ -28,9 +28,10 @@ struct MemberProfile {
 	QString firstName;
 	QString lastName;
 	QString displayName;
-	MemberPresence presence;
+	MemberPresence presence = MemberPresence::Unknown;
 	QString avatarFileId;
 	MemberRole role;
+	int inCall = -1; // -1 unknown, 0 / 1 when reported by the server.
 };
 
 struct FileData {
@@ -66,6 +67,7 @@ struct CallMetadata {
 	QString status;
 	QString joinLink;
 	int duration = 0;
+	QString statusReason; // "None", "Declined", ...
 };
 
 struct MessageData {

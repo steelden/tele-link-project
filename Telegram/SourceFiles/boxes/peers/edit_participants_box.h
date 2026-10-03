@@ -236,6 +236,9 @@ public:
 
 	void setStoriesShown(bool shown);
 
+	// Shows only online members and keeps the list in sync with statuses.
+	void setMtsLinkOnlineOnly(bool onlineOnly);
+
 protected:
 	using Row = Info::Profile::MemberListRow;
 	using Type = Row::Type;
@@ -328,6 +331,9 @@ private:
 	void sortByRoleAndName();
 	void applyRoleSectionHeaders();
 	[[nodiscard]] int memberRoleTier(not_null<PeerData*> peer) const;
+	[[nodiscard]] std::vector<not_null<UserData*>> mtsLinkMembers() const;
+	[[nodiscard]] bool acceptsMtsLinkRow(not_null<UserData*> user) const;
+	void mtsLinkOnlineChanged(not_null<UserData*> user);
 
 	// It may be nullptr in subclasses of this controller.
 	Window::SessionNavigation *_navigation = nullptr;
@@ -345,6 +351,8 @@ private:
 	rpl::variable<bool> _groupByRole = false;
 	rpl::variable<int> _onlineCountValue;
 	rpl::variable<int> _fullCountValue;
+	bool _mtsLinkOnlineOnly = false;
+	rpl::lifetime _mtsLinkOnlineLifetime;
 	Ui::BoxPointer _editBox;
 	Ui::BoxPointer _addBox;
 	base::weak_qptr<Ui::BoxContent> _editParticipantBox;

@@ -47,6 +47,9 @@ void Users::loadMember(const UserId &userId, const QString &organizationId) {
 							? MemberRole::Guest
 							: MemberRole::Member,
 			};
+			if (value.contains("inCall")) {
+				profile.inCall = int(value.value("inCall").toBool());
+			}
 			_cache.insert(profile.userId, profile);
 			Q_EMIT memberLoaded(profile);
 		});
@@ -93,6 +96,9 @@ void Users::loadOrganizationMembers(int offset, int limit) {
 								? MemberRole::Guest
 								: MemberRole::Member,
 				};
+				if (obj.contains("inCall")) {
+					profile.inCall = int(obj.value("inCall").toBool());
+				}
 				_cache.insert(profile.userId, profile);
 				members.push_back(std::move(profile));
 			}
@@ -119,6 +125,10 @@ void Users::loadChatMembers(const ChatId &chatId) {
 				const auto wrapper = item.toObject();
 				const auto obj = wrapper.value("profile").toObject();
 				const auto chatRole = wrapper.value("role").toString();
+				// "presence" / "inCall" in chat member profiles are not
+				// reliable (almost everyone is "Online"), statuses come from
+				// Member.GetMember and organization events instead.
+				const auto presence = MemberPresence::Unknown;
 				auto role = defaultRole;
 				if (chatRole.contains("Owner")) {
 					role = MemberRole::Owner;
@@ -134,6 +144,7 @@ void Users::loadChatMembers(const ChatId &chatId) {
 					.lastName = obj.value("lastName").toString(),
 					.displayName =
 						obj.value("displayName").toString(),
+					.presence = presence,
 					.avatarFileId =
 						obj.value("avatarFileId").toString(),
 					.role = role,
@@ -159,6 +170,32 @@ void Users::loadChatMembers(const ChatId &chatId) {
 				members.push_back(std::move(profile));
 			}
 			Q_EMIT chatMembersLoaded(chatId, members);
+		});
+}
+
+void Users::loadPresence(
+		const UserId &userId,
+		const QString &organizationId) {
+	_rpc->call(
+		"Member.GetMember",
+		QJsonObject{
+			{ "organizationId", organizationId },
+			{ "userId", userId },
+		},
+		[=](const QJsonObject &result) {
+			const auto value = result.value("value").toObject();
+			const auto presenceStr = value.value("presence").toString();
+			if (presenceStr.isEmpty()) {
+				return;
+			}
+			Q_EMIT presenceLoaded(
+				userId,
+				(presenceStr == u"Online"_q)
+					? MemberPresence::Online
+					: (presenceStr == u"Away"_q)
+					? MemberPresence::Away
+					: MemberPresence::Offline,
+				value.value("inCall").toBool());
 		});
 }
 

@@ -49,6 +49,11 @@ public:
 	void loadChatInfo(const ChatId &chatId);
 	void pinChat(const ChatId &chatId);
 	void unpinChat(const ChatId &chatId);
+	void createCall(
+		const ChatId &chatId,
+		const QString &name,
+		std::function<void(QString joinLink)> done,
+		std::function<void()> fail);
 
 Q_SIGNALS:
 	void channelsLoaded(const QList<ChannelData> &channels);
