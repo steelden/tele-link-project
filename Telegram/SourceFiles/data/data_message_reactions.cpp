@@ -318,6 +318,19 @@ PossibleItemReactionsRef LookupPossibleReactions(
 			toFront(ReactionId::Paid());
 		}
 	}
+	if (MtsLink::hasChatId(item->history()->peer->id)
+		&& !item->reactionsAreTags()) {
+		// Any emoji of the MTS Link catalogue: the full emoji panel with
+		// the categories and the search, the popular ones on top.
+		constexpr auto kPopularCount = 32;
+		result.customAllowed = true;
+		result.allEmoji = true;
+		if (!limited && result.recent.size() > kPopularCount) {
+			result.recent.erase(
+				begin(result.recent) + kPopularCount,
+				end(result.recent));
+		}
+	}
 	return result;
 }
 
@@ -358,7 +371,8 @@ PossibleItemReactions::PossibleItemReactions(
 	return *value;
 }) | ranges::to_vector)
 , customAllowed(other.customAllowed)
-, tags(other.tags){
+, tags(other.tags)
+, allEmoji(other.allEmoji) {
 }
 
 Reactions::Reactions(not_null<Session*> owner)

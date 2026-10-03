@@ -50,6 +50,7 @@ struct PossibleItemReactionsRef {
 	std::vector<not_null<const Reaction*>> stickers;
 	bool customAllowed = false;
 	bool tags = false;
+	bool allEmoji = false; // MTS Link: the full emoji panel.
 };
 
 struct PossibleItemReactions {
@@ -60,6 +61,7 @@ struct PossibleItemReactions {
 	std::vector<Reaction> stickers;
 	bool customAllowed = false;
 	bool tags = false;
+	bool allEmoji = false;
 };
 
 [[nodiscard]] PossibleItemReactionsRef LookupPossibleReactions(

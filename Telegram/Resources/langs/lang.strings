@@ -6484,7 +6484,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_status_today" = "Today";
 "lng_mtslink_status_custom" = "Until date and time...";
 "lng_mtslink_status_until" = "until {date}";
-"lng_mtslink_status_no_emoji" = "This emoji can't be used in the status";
+"lng_mtslink_status_no_emoji" = "This emoji is not supported by MTS Link";
 "lng_mtslink_status_no_end" = "always";
 "lng_mtslink_remove_member_confirm" = "Remove {user} from {chat}?";
 "lng_mtslink_role_owner" = "owner";

@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/reactions/history_view_reactions_selector.h"
 
+#include "mtslink/data_adapters.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/widgets/popup_menu.h"
@@ -264,7 +265,9 @@ Selector::Selector(
 	st,
 	std::move(show),
 	reactions,
-	(reactions.customAllowed
+	(reactions.allEmoji
+		? ChatHelpers::EmojiListMode::Full
+		: reactions.customAllowed
 		? ChatHelpers::EmojiListMode::FullReactions
 		: reactions.stickers.empty()
 		? ChatHelpers::EmojiListMode::RecentReactions
@@ -1215,6 +1218,21 @@ void Selector::createList() {
 	) | rpl::on_next([=](ChatHelpers::FileChosen data) {
 		_chosen.fire({
 			.id = _unifiedFactoryOwner->lookupReactionId(data.document->id),
+			.icon = data.messageSendingFrom.frame,
+			.globalGeometry = data.messageSendingFrom.globalStartGeometry,
+		});
+	}, _list->lifetime());
+
+	// MTS Link: a usual emoji of the full panel is the reaction.
+	_list->chosen(
+	) | rpl::on_next([=](ChatHelpers::EmojiChosen data) {
+		const auto emoji = data.emoji->text();
+		if (MtsLink::emojiToId(emoji).isEmpty()) {
+			_show->showToast(tr::lng_mtslink_status_no_emoji(tr::now));
+			return;
+		}
+		_chosen.fire({
+			.id = Data::ReactionId{ emoji },
 			.icon = data.messageSendingFrom.frame,
 			.globalGeometry = data.messageSendingFrom.globalStartGeometry,
 		});

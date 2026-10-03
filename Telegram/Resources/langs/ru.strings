@@ -7057,7 +7057,7 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_status_today" = "Сегодня";
 "lng_mtslink_status_custom" = "До даты и времени...";
 "lng_mtslink_status_until" = "до {date}";
-"lng_mtslink_status_no_emoji" = "Это эмодзи нельзя использовать в статусе";
+"lng_mtslink_status_no_emoji" = "Это эмодзи не поддерживается в MTS Link";
 "lng_mtslink_status_no_end" = "всегда";
 "lng_mtslink_remove_member_confirm" = "Удалить {user} из «{chat}»?";
 "lng_mtslink_role_owner" = "владелец";

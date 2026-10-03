@@ -95,6 +95,7 @@ QList<QNetworkCookie> FileAuthCookies;
 std::function<void()> TokenRefreshCallback;
 bool TokenRefreshInProgress = false;
 QHash<QString, QString> EmojiToIdMap;
+std::vector<QString> EmojiCatalogueOrder; // The MTS Link catalogue order.
 QHash<QString, QString> IdToEmojiMap;
 bool EmojiMapsInitialized = false;
 
@@ -240,6 +241,7 @@ void ensureEmojiMapsInitialized() {
 			if (!EmojiToIdMap.contains(emoji)) {
 				EmojiToIdMap[emoji] = id;
 			}
+			EmojiCatalogueOrder.push_back(emoji);
 			++count;
 		}
 		LOG(("MtsLink Emoji: catalogue of %1 emoji").arg(count));
@@ -1447,6 +1449,30 @@ void handleTypingEvent(
 	}
 }
 
+// The popular reactions first, then the whole MTS Link emoji catalogue for
+// the expanded reactions selector.
+[[nodiscard]] QStringList withMtsLinkCatalogue(QStringList popular) {
+	ensureEmojiMapsInitialized();
+	auto result = QStringList();
+	auto seen = QSet<QString>();
+	const auto add = [&](const QString &emoji) {
+		auto key = emoji;
+		key.remove(QChar(0xFE0F));
+		if (!seen.contains(key) && Ui::Emoji::Find(emoji)) {
+			seen.insert(key);
+			result.push_back(emoji);
+		}
+	};
+	for (const auto &emoji : popular) {
+		add(emoji);
+	}
+	for (const auto &emoji : EmojiCatalogueOrder) {
+		add(emoji);
+	}
+	LOG(("MtsLink Emoji: %1 reactions").arg(result.size()));
+	return result;
+}
+
 void connectToSession(
 		not_null<Main::Session*> mainSession,
 		not_null<Session*> mtsSession) {
@@ -2169,7 +2195,7 @@ void connectToSession(
 		}
 	}
 
-	mainSession->data().reactions().populateMtsLinkReactions({
+	mainSession->data().reactions().populateMtsLinkReactions(withMtsLinkCatalogue({
 		QString::fromUtf8("\xF0\x9F\x91\x8D"),     // 👍
 		QString::fromUtf8("\xF0\x9F\x91\x8E"),     // 👎
 		QString::fromUtf8("\xE2\x9D\xA4"),          // ❤
@@ -2215,7 +2241,7 @@ void connectToSession(
 		QString::fromUtf8("\xF0\x9F\x98\x80"),     // 😀
 		QString::fromUtf8("\xE2\x9E\x95"),          // ➕
 		QString::fromUtf8("\xF0\x9F\x8C\xB4"),     // 🌴
-	});
+	}));
 
 	mtsSession->users()->loadOrganizationMembers();
 }
