@@ -3234,7 +3234,10 @@ object_ptr<Ui::RpWidget> ActionsFiller::fill() {
 			fillUserActions(user);
 		});
 	} else if (auto channel = _peer->asChannel()) {
-		if (channel->isMegagroup() && !MtsLink::hasChatId(channel->id)) {
+		if (channel->isMegagroup() || MtsLink::hasChatId(channel->id)) {
+			// MTS Link: leave and manage are the buttons under the name,
+			// join is the button in the chat, an empty block would leave
+			// two dividers in a row.
 			return { nullptr };
 		}
 		return wrapResult([=] {
