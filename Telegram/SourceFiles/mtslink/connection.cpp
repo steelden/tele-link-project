@@ -72,6 +72,12 @@ constexpr auto kWsPort = 443;
 
 Connection::Connection(QObject *parent)
 : QObject(parent) {
+	_sendQueueTimer.setSingleShot(true);
+	QObject::connect(
+		&_sendQueueTimer,
+		&QTimer::timeout,
+		this,
+		&Connection::flushSendQueue);
 	QObject::connect(
 		&_socket,
 		&QSslSocket::encrypted,
@@ -171,6 +177,35 @@ void Connection::sendControl(const QString &name, const QJsonObject &param) {
 }
 
 void Connection::sendMessages(const QJsonArray &messages) {
+	_sendQueue.push_back(messages);
+	flushSendQueue();
+}
+
+void Connection::flushSendQueue() {
+	// The server answers "rateLimitIsReached" and drops requests above
+	// ~50 messages per second (seen on the first login: 84 sent, 34 lost).
+	constexpr auto kMaxPerSecond = 40;
+	constexpr auto kWindow = crl::time(1000);
+	while (!_sendQueue.empty()) {
+		const auto now = crl::now();
+		while (!_sentTimes.empty() && now - _sentTimes.front() >= kWindow) {
+			_sentTimes.pop_front();
+		}
+		if (int(_sentTimes.size()) >= kMaxPerSecond) {
+			if (!_sendQueueTimer.isActive()) {
+				const auto wait = kWindow - (now - _sentTimes.front()) + 1;
+				_sendQueueTimer.start(int(std::max(wait, crl::time(1))));
+			}
+			return;
+		}
+		_sentTimes.push_back(now);
+		const auto messages = _sendQueue.front();
+		_sendQueue.pop_front();
+		sendMessagesNow(messages);
+	}
+}
+
+void Connection::sendMessagesNow(const QJsonArray &messages) {
 	QJsonObject frame;
 	frame["messages"] = messages;
 	frame["seq"] = _sendSeq++;
@@ -345,6 +380,11 @@ void Connection::handleControl(const QJsonObject &control, int seq) {
 		}
 	} else if (name == "pong") {
 		// keepalive acknowledged
+	} else if (name == "rateLimitIsReached") {
+		LOG(("MtsLink WS: rate limit reached, sent in the last second: %1, "
+			"queued: %2")
+			.arg(_sentTimes.size())
+			.arg(_sendQueue.size()));
 	}
 
 	Q_EMIT controlReceived(name, param);
@@ -362,6 +402,9 @@ void Connection::sendPing() {
 
 void Connection::onSocketDisconnected() {
 	_pingTimer.stop();
+	_sendQueueTimer.stop();
+	_sendQueue.clear();
+	_sentTimes.clear();
 	_authenticated = false;
 	_wsHandshakeDone = false;
 	_readBuffer.clear();

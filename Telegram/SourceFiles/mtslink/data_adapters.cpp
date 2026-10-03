@@ -1488,8 +1488,16 @@ void connectToSession(
 				const auto history =
 					mainSession->data().history(peerId);
 				history->addCreatedNewerSlice(newerItems);
-				history->applyDialogTopMessage(
-					newerItems.back()->id);
+				// Messages already shown are not in newerItems, so its last
+				// item may be older than the current chat list preview.
+				const auto newest = *ranges::max_element(
+					newerItems,
+					ranges::less(),
+					[](not_null<HistoryItem*> item) { return item->date(); });
+				const auto currentLast = history->lastMessage();
+				if (!currentLast || newest->date() >= currentLast->date()) {
+					history->applyDialogTopMessage(newest->id);
+				}
 				mainSession->data().notifyHistoryChangeDelayed(
 					history);
 			}

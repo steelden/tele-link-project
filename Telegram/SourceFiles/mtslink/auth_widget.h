@@ -39,6 +39,7 @@ protected:
 
 private:
 	void createWebView();
+	void refreshWebViewBounds();
 	bool onNavigationStart(const QString &url, bool newWindow);
 	void onAuthCodeReceived(const QString &authCode);
 	void showError(const QString &text);

@@ -7,6 +7,7 @@ based on Telegram Desktop.
 
 #include "webview/webview_embed.h"
 #include "base/options.h"
+#include "base/call_delayed.h"
 #include "core/application.h"
 
 #include <QtCore/QUrl>
@@ -173,6 +174,9 @@ void AuthWidget::createWebView() {
 		if (!success) {
 			LOG(("MtsLink Auth: navigation FAILED"));
 		}
+		refreshWebViewBounds();
+		base::call_delayed(1000, this, [=] { refreshWebViewBounds(); });
+		base::call_delayed(3000, this, [=] { refreshWebViewBounds(); });
 		_webView->eval(R"JS(
 			(function() {
 				var post = function(obj) {
@@ -262,6 +266,24 @@ void AuthWidget::createWebView() {
 			.arg(QString::fromUtf8(message.toJson(
 				QJsonDocument::Compact))));
 	});
+}
+
+void AuthWidget::refreshWebViewBounds() {
+	const auto widget = _webView ? _webView->widget() : nullptr;
+	if (!widget || widget->isHidden()) {
+		return;
+	}
+	// WebView2 takes its bounds from the native window on the container
+	// Resize event. When the controller becomes ready before the native
+	// window got its final size, the page stays blank until the next resize
+	// (maximizing the window "fixes" it). Nudge the container to re-sync.
+	const auto size = widget->size();
+	LOG(("MtsLink Auth: refresh webview bounds %1x%2 visible=%3")
+		.arg(size.width())
+		.arg(size.height())
+		.arg(widget->isVisible() ? 1 : 0));
+	widget->resize(size.width(), size.height() + 1);
+	widget->resize(size);
 }
 
 bool AuthWidget::onNavigationStart(const QString &url, bool newWindow) {

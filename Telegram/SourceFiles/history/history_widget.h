@@ -881,6 +881,8 @@ private:
 
 	// Initial updateHistoryGeometry() was called.
 	bool _historyInited = false;
+	// Bottom message on the last updateHistoryGeometry() (MTS Link).
+	FullMsgId _mtsLinkBottomItemId;
 	// If updateListSize() was called without updateHistoryGeometry().
 	bool _updateHistoryGeometryRequired = false;
 

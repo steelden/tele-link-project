@@ -9,6 +9,7 @@ based on Telegram Desktop.
 #include <QJsonArray>
 #include <QTimer>
 #include <QtNetwork/QSslSocket>
+#include <deque>
 
 namespace MtsLink {
 
@@ -40,6 +41,8 @@ private:
 	void handleMessages(const QJsonArray &messages, int seq);
 	void sendPing();
 	void sendRawText(const QString &text);
+	void flushSendQueue();
+	void sendMessagesNow(const QJsonArray &messages);
 
 	// Raw WebSocket over QSslSocket (Qt WebSockets module not available).
 	void onSocketConnected();
@@ -63,6 +66,9 @@ private:
 	int _sendSeq = 0;
 	int _recvSeq = 0;
 	int _ackSeq = 0;
+	std::deque<crl::time> _sentTimes; // Send times within the last second.
+	std::deque<QJsonArray> _sendQueue;
+	QTimer _sendQueueTimer;
 
 	bool _authenticated = false;
 };

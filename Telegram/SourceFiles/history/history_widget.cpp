@@ -8950,13 +8950,29 @@ void HistoryWidget::updateHistoryGeometry(
 	updateListSize();
 	_updateHistoryGeometryRequired = false;
 
+	const auto isMtsLink = MtsLink::hasChatId(_history->peer->id);
+	const auto bottomItemId = _history->isEmpty()
+		? FullMsgId()
+		: _history->blocks.back()->messages.back()->data()->fullId();
+	// MTS Link doesn't follow new incoming messages, but if the bottom
+	// message just got taller (comments bar, link preview, media) we keep
+	// the bottom visible.
+	const auto mtsLinkKeepBottom = isMtsLink
+		&& wasAtBottom
+		&& !initial
+		&& bottomItemId
+		&& (bottomItemId == _mtsLinkBottomItemId);
+	_mtsLinkBottomItemId = bottomItemId;
+
 	auto newScrollTop = 0;
 	if (initial) {
 		newScrollTop = countInitialScrollTop();
 		_historyInited = true;
 		_scrollToAnimation.stop();
+	} else if (mtsLinkKeepBottom && !loadedDown) {
+		newScrollTop = ScrollMax;
 	} else if (wasAtBottom && !loadedDown && !_history->unreadBar()
-		&& !MtsLink::hasChatId(_history->peer->id)) {
+		&& !isMtsLink) {
 		newScrollTop = countAutomaticScrollTop();
 	} else {
 		newScrollTop = std::min(
