@@ -4315,6 +4315,7 @@ void ChatWidget::restoreState(not_null<ChatMemento*> memento) {
 	}
 	if (_repliesRootId && MtsLink::hasChatId(_peer->id)) {
 		MtsLink::setCurrentOpenThread(_peer->id, _repliesRootId);
+		MtsLink::subscribeTyping(&session(), _peer->id, _repliesRootId);
 	}
 	const auto mtsLinkThread = !memento->highlightId()
 		&& _repliesRootId

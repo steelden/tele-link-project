@@ -3609,6 +3609,9 @@ void HistoryWidget::showHistory(
 			_history->destroyUnreadBar();
 			_history->clearFirstUnreadMessage();
 		}
+		if (MtsLink::hasChatId(_history->peer->id)) {
+			MtsLink::subscribeTyping(&session(), _history->peer->id);
+		}
 		if (_history->scrollTopItem
 			|| (_migrated && _migrated->scrollTopItem)
 			|| _history->isReadyFor(_showAtMsgId)) {

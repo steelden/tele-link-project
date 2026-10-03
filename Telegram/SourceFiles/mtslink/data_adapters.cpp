@@ -1293,6 +1293,81 @@ void applyThreadLeft(
 	const QString &chatId,
 	const QString &threadId);
 
+// ChatTypingEvent {chatId, textMembers:[{name, userId}]},
+// ThreadTypingEvent {threadId, textMembers}. Telegram expires the action
+// by itself, the server repeats the event while the user types.
+void handleTypingEvent(
+		not_null<Main::Session*> session,
+		not_null<Session*> mts,
+		const QJsonObject &param) {
+	const auto type = param.value("type").toString();
+	const auto value = param.value("value").toObject();
+	auto targets = std::vector<std::pair<not_null<History*>, MsgId>>();
+	if (type == u"ChatTypingEvent"_q) {
+		const auto chatId = value.value("chatId").toString();
+		if (!ChatToPeerMap.contains(chatId)) {
+			return;
+		}
+		if (const auto history = session->data().historyLoaded(
+				chatIdToPeerId(chatId))) {
+			targets.emplace_back(history, MsgId(0));
+		}
+	} else if (type == u"ThreadTypingEvent"_q) {
+		const auto threadId = value.value("threadId").toString();
+		const auto rootId = MsgId(uuidToBareId(threadId) & 0x7FFFFFFFLL);
+		const auto topic = ThreadTopicMap.constFind(rootId);
+		const auto known = MtsLinkIdToMsgMap.constFind(threadId);
+		// Subscribed threads or any loaded root message.
+		const auto parentPeerId = (topic != ThreadTopicMap.constEnd())
+			? chatIdToPeerId(topic->first)
+			: (known != MtsLinkIdToMsgMap.constEnd())
+			? known->first
+			: PeerId();
+		if (!parentPeerId) {
+			return;
+		}
+		if (const auto history = session->data().historyLoaded(
+				parentPeerId)) {
+			// The thread view of the chat.
+			targets.emplace_back(history, rootId);
+		}
+		if (const auto threadPeerId = threadPeerFor(parentPeerId, rootId)) {
+			// The thread row in the "Threads" folder.
+			if (const auto history = session->data().historyLoaded(
+					threadPeerId)) {
+				targets.emplace_back(history, MsgId(0));
+			}
+		}
+	} else {
+		return;
+	}
+	const auto now = base::unixtime::now();
+	for (const auto &member : value.value("textMembers").toArray()) {
+		const auto obj = member.toObject();
+		const auto userId = obj.value("userId").toString();
+		if (userId.isEmpty() || userId == mts->userId()) {
+			continue;
+		}
+		const auto bareId = uuidToBareId(userId);
+		UserBareIdToUuidMap.insert(bareId, userId);
+		const auto user = session->data().user(::UserId(bareId));
+		if (user->name().isEmpty()) {
+			const auto name = obj.value("name").toString();
+			if (!name.isEmpty()) {
+				user->setName(name, QString(), QString(), QString());
+			}
+		}
+		for (const auto &[history, rootId] : targets) {
+			session->data().sendActionManager().registerFor(
+				history,
+				rootId,
+				user,
+				MTP_sendMessageTypingAction(),
+				now);
+		}
+	}
+}
+
 void connectToSession(
 		not_null<Main::Session*> mainSession,
 		not_null<Session*> mtsSession) {
@@ -1600,29 +1675,7 @@ void connectToSession(
 			if (name == "ChatEvent") {
 				handleChatEvent(mainSession, dst, param);
 			} else if (name == "TypingEvent") {
-				const auto tv = param.value("value").toObject();
-				const auto tChatId = tv.value("chatId").toString();
-				const auto tUserId = tv.value("userId").toString();
-				if (!tChatId.isEmpty() && !tUserId.isEmpty()
-					&& tUserId != mtsSession->userId()) {
-					const auto peerId = chatIdToPeerId(tChatId);
-					if (hasChatId(peerId)) {
-						const auto h = mainSession->data()
-							.historyLoaded(peerId);
-						if (h) {
-							const auto bId = uuidToBareId(tUserId);
-							const auto u = mainSession->data()
-								.user(::UserId(bId));
-							mainSession->data()
-								.sendActionManager().registerFor(
-									h,
-									MsgId(0),
-									u,
-									MTP_sendMessageTypingAction(),
-									base::unixtime::now());
-						}
-					}
-				}
+				handleTypingEvent(mainSession, mtsSession, param);
 			} else if (name == "OrganizationEvent") {
 				const auto type = param.value("type").toString();
 				const auto value = param.value("value").toObject();
@@ -5812,6 +5865,63 @@ void performStartCall(
 
 bool isUserInCall(PeerId userPeerId) {
 	return InCallUsers.contains(userPeerId);
+}
+
+namespace {
+
+// Thread rows of the "Threads" folder are separate peers.
+[[nodiscard]] std::pair<PeerId, MsgId> ResolveTypingTarget(
+		PeerId peerId,
+		MsgId rootId) {
+	if (isThreadPeer(peerId)) {
+		const auto [parentPeerId, threadRoot] = threadParentInfo(peerId);
+		return { parentPeerId, threadRoot };
+	}
+	return { peerId, rootId };
+}
+
+} // namespace
+
+void subscribeTyping(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		MsgId rootId) {
+	const auto mts = session->account().mtsLinkSession();
+	if (!mts || !mts->typing()) {
+		return;
+	}
+	const auto [chatPeerId, threadRoot] = ResolveTypingTarget(peerId, rootId);
+	const auto chatId = peerIdToChatId(chatPeerId);
+	if (chatId.isEmpty()) {
+		return;
+	}
+	if (threadRoot) {
+		const auto threadId = msgIdToMtsLinkId(chatPeerId, threadRoot);
+		if (!threadId.isEmpty()) {
+			mts->typing()->subscribeToThread(chatId, threadId);
+		}
+	} else {
+		mts->typing()->subscribeToChat(chatId);
+	}
+}
+
+void sendTyping(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		MsgId rootId) {
+	const auto mts = session->account().mtsLinkSession();
+	if (!mts || !mts->typing()) {
+		return;
+	}
+	const auto [chatPeerId, threadRoot] = ResolveTypingTarget(peerId, rootId);
+	const auto chatId = peerIdToChatId(chatPeerId);
+	if (chatId.isEmpty()) {
+		return;
+	}
+	const auto threadId = threadRoot
+		? msgIdToMtsLinkId(chatPeerId, threadRoot)
+		: QString();
+	mts->typing()->sendTyping(chatId, threadId);
 }
 
 QString myChannelRole(PeerId channelPeerId) {

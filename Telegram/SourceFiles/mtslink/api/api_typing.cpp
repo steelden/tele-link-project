@@ -12,12 +12,28 @@ Typing::Typing(Rpc *rpc, QObject *parent)
 , _rpc(rpc) {
 }
 
-void Typing::sendTyping(const ChatId &chatId) {
+void Typing::sendTyping(const ChatId &chatId, const MessageId &threadId) {
 	QJsonObject param;
 	param["chatId"] = chatId;
+	param["isText"] = true;
+	if (!threadId.isEmpty()) {
+		param["threadId"] = threadId;
+	}
 	_rpc->call(
 		"Typing.Typing",
 		param,
+		[](const QJsonObject &) {});
+}
+
+void Typing::subscribeToThread(
+		const ChatId &chatId,
+		const MessageId &threadId) {
+	_rpc->call(
+		"Typing.SubscribeThread",
+		QJsonObject{
+			{ "chatId", chatId },
+			{ "threadId", threadId },
+		},
 		[](const QJsonObject &) {});
 }
 

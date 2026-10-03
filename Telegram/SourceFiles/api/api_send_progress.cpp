@@ -113,15 +113,12 @@ bool SendProgressManager::updated(const Key &key, bool doing) {
 
 void SendProgressManager::send(const Key &key, int progress) {
 	if (MtsLink::hasChatId(key.history->peer->id)) {
-		if (key.type == SendProgressType::Typing) {
-			const auto mts = _session->account().mtsLinkSession();
-			if (mts) {
-				const auto chatId = MtsLink::peerIdToChatId(
-					key.history->peer->id);
-				if (!chatId.isEmpty()) {
-					mts->typing()->sendTyping(chatId);
-				}
-			}
+		// Only text typing in MTS Link, at the Telegram rate.
+		if (key.type == SendProgressType::Typing && !skipRequest(key)) {
+			MtsLink::sendTyping(
+				_session,
+				key.history->peer->id,
+				key.topMsgId);
 		}
 		return;
 	}

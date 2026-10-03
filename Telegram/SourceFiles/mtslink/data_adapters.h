@@ -295,6 +295,16 @@ void handleMtsLinkUrl(
 
 [[nodiscard]] bool isUserInCall(PeerId userPeerId);
 
+// Typing: subscribe when a chat / thread is opened, send while typing.
+void subscribeTyping(
+	not_null<Main::Session*> session,
+	PeerId peerId,
+	MsgId rootId = 0);
+void sendTyping(
+	not_null<Main::Session*> session,
+	PeerId peerId,
+	MsgId rootId = 0);
+
 // Channel roles: "Owner", "Admin", "Member" or empty when unknown.
 [[nodiscard]] QString myChannelRole(PeerId channelPeerId);
 [[nodiscard]] PeerId channelOwner(PeerId channelPeerId);

@@ -20,8 +20,11 @@ class Typing final : public QObject {
 public:
 	explicit Typing(Rpc *rpc, QObject *parent = nullptr);
 
-	void sendTyping(const ChatId &chatId);
+	// threadId is empty for the chat itself.
+	void sendTyping(const ChatId &chatId, const MessageId &threadId = {});
+	// Events come in "typing-chat-<id>" / "typing-thread-<id>" streams.
 	void subscribeToChat(const ChatId &chatId);
+	void subscribeToThread(const ChatId &chatId, const MessageId &threadId);
 
 Q_SIGNALS:
 	void userTyping(
