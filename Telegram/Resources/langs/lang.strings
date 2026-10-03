@@ -6463,6 +6463,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_edit_read_only" = "Only administrators can post";
 "lng_mtslink_edit_about" = "Everyone in the organization can find and join a public channel.";
 "lng_mtslink_name_no_emoji" = "Emoji are not allowed in the name";
+"lng_mtslink_restart_language" = "Restart to apply the language";
 "lng_mtslink_remove_member_confirm" = "Remove {user} from {chat}?";
 "lng_mtslink_role_owner" = "owner";
 "lng_mtslink_role_admin" = "administrator";

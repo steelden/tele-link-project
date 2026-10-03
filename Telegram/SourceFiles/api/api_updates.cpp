@@ -1080,7 +1080,11 @@ crl::time Updates::lastSetOnline() const {
 }
 
 bool Updates::isQuitPrevent() {
-	if (!_lastWasOnline) {
+	if (session().account().mtsLinkSession()) {
+		// No MTP: the offline status request never finishes, the quit
+		// (and the restart after it) would hang forever.
+		return false;
+	} else if (!_lastWasOnline) {
 		return false;
 	}
 	LOG(("Api::Updates prevents quit, sending offline status..."));

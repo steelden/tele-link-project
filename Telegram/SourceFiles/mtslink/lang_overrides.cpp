@@ -35,4 +35,21 @@ void applyLangOverrides() {
 		.arg(content.size()));
 }
 
+namespace {
+
+rpl::variable<bool> &LangRestartRequired() {
+	static auto result = rpl::variable<bool>(false);
+	return result;
+}
+
+} // namespace
+
+void setLangRestartRequired() {
+	LangRestartRequired() = true;
+}
+
+rpl::producer<bool> langRestartRequiredValue() {
+	return LangRestartRequired().value();
+}
+
 } // namespace MtsLink

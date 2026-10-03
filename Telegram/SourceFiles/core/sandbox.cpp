@@ -821,10 +821,9 @@ void Sandbox::closeApplication() {
 	}
 	SetLaunchState(LaunchState::QuitProcessed);
 
-	Launcher::Instance().launchUpdaterOnQuit();
-
-	_application = nullptr;
-
+	// Stop being the running instance before a restart launches the new
+	// one: destroying the application takes time and the new instance
+	// would connect here, think it is the second one and quit.
 	_localServer.close();
 	for (const auto &localClient : base::take(_localClients)) {
 		localClient.socket->close();
@@ -832,6 +831,10 @@ void Sandbox::closeApplication() {
 	_localClients.clear();
 
 	_localSocket.close();
+
+	Launcher::Instance().launchUpdaterOnQuit();
+
+	_application = nullptr;
 
 	_updateChecker = nullptr;
 }

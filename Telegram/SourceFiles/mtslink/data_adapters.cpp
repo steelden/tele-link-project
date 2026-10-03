@@ -2683,6 +2683,11 @@ void applyDialogData(
 	} else if (!history->chatListTimeId()) {
 		history->setChatListTimeId(TimeId(1));
 	}
+	LOG(("MtsLink Unread: server '%1' unread=%2 ts=%3 local=%4"
+		).arg(src.name
+		).arg(src.unreadCount
+		).arg(src.lastMessageTimestamp
+		).arg(history->unreadCount()));
 	if (src.unreadCount >= 0 && src.lastMessageTimestamp) {
 		history->setUnreadCount(src.unreadCount);
 	}
@@ -2824,6 +2829,11 @@ void applyChannelData(
 	} else if (!history->chatListTimeId()) {
 		history->setChatListTimeId(TimeId(1));
 	}
+	LOG(("MtsLink Unread: server '%1' unread=%2 ts=%3 local=%4"
+		).arg(src.name
+		).arg(src.unreadCount
+		).arg(src.lastMessageTimestamp
+		).arg(history->unreadCount()));
 	if (src.unreadCount >= 0 && src.lastMessageTimestamp) {
 		history->setUnreadCount(src.unreadCount);
 	}
@@ -3992,6 +4002,11 @@ void handleChatEvent(
 		const auto count = value.value("unreadMessageCount").toInt();
 		const auto localCount = history->unreadCount();
 		const auto wasReadRequest = consumeReadRequestSent(eventChatId);
+		LOG(("MtsLink Unread: event '%1' count=%2 local=%3 ownRead=%4"
+			).arg(history->peer->name()
+			).arg(count
+			).arg(localCount
+			).arg(wasReadRequest ? 1 : 0));
 		if (count < localCount && !wasReadRequest) {
 			return;
 		}
@@ -5237,6 +5252,41 @@ void loadChatListFromCache(
 	});
 }
 
+// Default folders keep the title of the language they were created with,
+// a not renamed one is shown in the current language.
+[[nodiscard]] QString defaultFolderTitle(
+		FilterId id,
+		Data::ChatFilter::Flags flags,
+		const QString &title) {
+	using Flag = Data::ChatFilter::Flag;
+	struct Default {
+		FilterId id = 0;
+		Flag flag = Flag();
+		QStringList known;
+		QString current;
+	};
+	const auto defaults = std::array<Default, 5>{ {
+		{ 1, Flag::NoRead, { u"Unread"_q, u"Новые"_q, u"Непрочитанные"_q },
+			tr::lng_filters_name_unread(tr::now) },
+		{ 2, Flag::Contacts, { u"People"_q, u"Люди"_q, u"Личные"_q },
+			tr::lng_filters_name_people(tr::now) },
+		{ 3, Flag::Groups, { u"Groups"_q, u"Группы"_q },
+			tr::lng_filters_type_groups(tr::now) },
+		{ 4, Flag::Channels, { u"Channels"_q, u"Каналы"_q },
+			tr::lng_filters_type_channels(tr::now) },
+		{ 5, Flag::Threads, { u"Threads"_q, u"Обсуждения"_q, u"Треды"_q },
+			tr::lng_threads_folder(tr::now) },
+	} };
+	for (const auto &entry : defaults) {
+		if (entry.id == id
+			&& (flags & entry.flag)
+			&& entry.known.contains(title)) {
+			return entry.current;
+		}
+	}
+	return title;
+}
+
 void saveFiltersToCache(not_null<Main::Session*> session) {
 	const auto &filters = session->data().chatsFilters().list();
 	auto data = serializeFilters(filters);
@@ -5262,7 +5312,7 @@ void loadFiltersFromCache(
 				}
 				chatFilters.set(Data::ChatFilter(
 					f.id,
-					{ { f.title } },
+					{ { defaultFolderTitle(f.id, f.flags, f.title) } },
 					f.iconEmoji,
 					f.colorIndex,
 					f.flags,
@@ -6539,6 +6589,10 @@ bool containsEmoji(const QString &text) {
 		}
 	}
 	return false;
+}
+
+bool isNewerMessageId(const QString &a, const QString &b) {
+	return uuidV6Time(a) > uuidV6Time(b);
 }
 
 bool isGroupChat(PeerId peerId) {

@@ -10,6 +10,7 @@ based on Telegram Desktop.
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QTimer>
+#include <QHash>
 #include <optional>
 
 namespace MtsLink {
@@ -142,6 +143,10 @@ public:
 		int size,
 		GlobalSearchDone done);
 
+	[[nodiscard]] MessageId newestRawId(const ChatId &chatId) const {
+		return _newestRawIds.value(chatId);
+	}
+
 Q_SIGNALS:
 	void messagesLoaded(
 		const ChatId &chatId,
@@ -188,6 +193,9 @@ private:
 
 	Rpc *_rpc = nullptr;
 	QSet<ChatId> _loadingChats;
+	// The newest message of the chat including deleted ones: the server
+	// counts a deleted newest message as unread until it is read.
+	QHash<ChatId, MessageId> _newestRawIds;
 	QSet<ChatId> _failedChats;
 	QSet<ChatId> _loadingPinnedChats;
 };

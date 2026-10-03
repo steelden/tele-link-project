@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/dialogs_widget.h"
 
 #include "mtslink/data_adapters.h"
+#include "mtslink/lang_overrides.h"
 #include "main/main_account.h"
 
 #include "base/call_delayed.h"
@@ -653,6 +654,28 @@ Widget::Widget(
 		this,
 		[=] { searchCursorMoved(); },
 		Qt::QueuedConnection); // So getLastText() works already.
+
+	MtsLink::langRestartRequiredValue(
+	) | rpl::on_next([=](bool required) {
+		if (!required || _layout == Layout::Child || _langRestart) {
+			return;
+		}
+		_langRestart.create(
+			this,
+			tr::lng_mtslink_restart_language(tr::now),
+			st::dialogsUpdateButton,
+			st::dialogsInstallUpdate,
+			st::dialogsInstallUpdateOver,
+			true);
+		_langRestart->show();
+		_langRestart->setClickedCallback([] {
+			Core::Restart();
+		});
+		if (_connecting) {
+			_connecting->raise();
+		}
+		updateControlsGeometry();
+	}, lifetime());
 
 	if (!Core::UpdaterDisabled()) {
 		Core::UpdateChecker checker;
@@ -1973,6 +1996,9 @@ void Widget::updateControlsVisibility(bool fast) {
 	if (_updateTelegram) {
 		_updateTelegram->show();
 	}
+	if (_langRestart) {
+		_langRestart->show();
+	}
 	_searchControls->setVisible(
 		!_openedFolder && !_openedForum && !_openedCommunity);
 	if (_moreChatsBar) {
@@ -2956,6 +2982,9 @@ void Widget::showAnimated(
 
 	if (_updateTelegram) {
 		_updateTelegram->hide();
+	}
+	if (_langRestart) {
+		_langRestart->hide();
 	}
 	if (_connecting) {
 		_connecting->setForceHidden(true);
@@ -4689,6 +4718,7 @@ void Widget::updateControlsGeometry() {
 		}
 	};
 	putBottomButton(_updateTelegram);
+	putBottomButton(_langRestart);
 	putBottomButton(_downloadBar);
 	putBottomButton(_loadMoreChats);
 	if (_connecting) {

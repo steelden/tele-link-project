@@ -263,6 +263,11 @@ void Histories::readInboxTill(
 			return;
 		}
 		Core::App().notifications().clearIncomingFromHistory(history);
+		LOG(("MtsLink Unread: read '%1' till %2 uuid=%3 unread=%4"
+			).arg(history->peer->name()
+			).arg(tillId.bare
+			).arg(MtsLink::msgIdToMtsLinkId(history->peer->id, tillId)
+			).arg(history->unreadCount()));
 		history->setInboxReadTill(tillId);
 		auto &state = _states[history];
 		if (state.willReadTill == tillId) {
@@ -769,8 +774,24 @@ void Histories::sendReadRequest(not_null<History*> history, State &state) {
 		const auto mts = session().account().mtsLinkSession();
 		if (mts) {
 			const auto chatId = MtsLink::peerIdToChatId(history->peer->id);
-			const auto mtsId = MtsLink::msgIdToMtsLinkId(
+			auto mtsId = MtsLink::msgIdToMtsLinkId(
 				history->peer->id, tillId);
+			// Reading the last shown message reads the deleted ones after
+			// it too, otherwise the server keeps them unread.
+			const auto newest = mts->messages()->newestRawId(chatId);
+			const auto last = history->lastMessage();
+			if (!mtsId.isEmpty()
+				&& !newest.isEmpty()
+				&& newest != mtsId
+				&& last
+				&& last->id == tillId
+				&& MtsLink::isNewerMessageId(newest, mtsId)) {
+				LOG(("MtsLink Unread: read till newest raw %1 instead of %2"
+					).arg(newest, mtsId));
+				mtsId = newest;
+			}
+			LOG(("MtsLink Unread: send read chat=%1 msg=%2"
+				).arg(chatId, mtsId.isEmpty() ? u"<none>"_q : mtsId));
 			if (!chatId.isEmpty() && !mtsId.isEmpty()) {
 				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);

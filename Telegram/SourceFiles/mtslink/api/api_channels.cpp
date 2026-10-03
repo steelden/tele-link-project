@@ -42,6 +42,11 @@ void Channels::loadMyChannels() {
 			channels.reserve(list.size());
 			for (const auto &item : list) {
 				channels.push_back(parseChat(item.toObject()));
+				if (channels.back().unreadCount > 0) {
+					LOG(("MtsLink Unread: GetMyChannelsV3 '%1' unread=%2"
+						).arg(channels.back().name
+						).arg(channels.back().unreadCount));
+				}
 			}
 			Q_EMIT channelsLoaded(channels);
 		});
@@ -49,7 +54,7 @@ void Channels::loadMyChannels() {
 
 void Channels::loadMyDialogsAndGroupChats() {
 	_rpc->call(
-		"Chat.GetMyDialogsAndGroupChatsV2",
+		"Chat.GetMyDialogsAndGroupChatsV3",
 		QJsonObject{},
 		[this](const QJsonObject &result) {
 			const auto value = result.value("value").toObject();
@@ -108,6 +113,10 @@ void Channels::loadMyDialogsAndGroupChats() {
 				if (ch.avatarFileId.isEmpty()
 					&& !ch.interlocutorId.isEmpty()) {
 					ch.avatarFileId = userAvatars.value(ch.interlocutorId);
+				}
+				if (ch.unreadCount > 0) {
+					LOG(("MtsLink Unread: GetMyDialogsAndGroupChatsV3 '%1' "
+						"unread=%2").arg(ch.name).arg(ch.unreadCount));
 				}
 				dialogs.push_back(std::move(ch));
 			}

@@ -602,6 +602,9 @@ void CloudManager::performSwitchAndRestart(const Language &data) {
 	MtsLink::applyLangOverrides();
 	_langpack.notifyUpdated();
 	Local::writeLangPack();
+	// Many texts are taken once when widgets are created: the rest of the
+	// language is applied after a restart, offered by a button.
+	MtsLink::setLangRestartRequired();
 }
 
 void CloudManager::restartAfterSwitch() {

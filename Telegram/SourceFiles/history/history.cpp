@@ -2404,6 +2404,12 @@ void History::setUnreadCount(int newUnreadCount) {
 	if (_unreadCount == newUnreadCount) {
 		return;
 	}
+	if (MtsLink::hasChatId(peer->id)) {
+		LOG(("MtsLink Unread: '%1' count %2 -> %3"
+			).arg(peer->name()
+			).arg(_unreadCount ? QString::number(*_unreadCount) : u"?"_q
+			).arg(newUnreadCount));
+	}
 	const auto notifier = unreadStateChangeNotifier(useMyUnreadInParent());
 	_unreadCount = newUnreadCount;
 
@@ -2444,6 +2450,10 @@ void History::setUnreadMark(bool unread) {
 	}
 	if (unreadMark() == unread) {
 		return;
+	}
+	if (MtsLink::hasChatId(peer->id)) {
+		LOG(("MtsLink Unread: '%1' mark -> %2"
+			).arg(peer->name()).arg(unread ? 1 : 0));
 	}
 	const auto notifier = unreadStateChangeNotifier(
 		useMyUnreadInParent() && !unreadCount());

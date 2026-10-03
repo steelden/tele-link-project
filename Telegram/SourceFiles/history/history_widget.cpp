@@ -3611,6 +3611,19 @@ void HistoryWidget::showHistory(
 		}
 		if (MtsLink::hasChatId(_history->peer->id)) {
 			MtsLink::subscribeTyping(&session(), _history->peer->id);
+			const auto state = _history->chatListBadgesState();
+			LOG(("MtsLink Unread: open '%1' count=%2 mark=%3 mentions=%4 "
+				"reactions=%5 badge: unread=%6 mention=%7 reaction=%8 "
+				"counter=%9"
+				).arg(_history->peer->name()
+				).arg(_history->unreadCount()
+				).arg(_history->unreadMark() ? 1 : 0
+				).arg(_history->unreadMentions().count()
+				).arg(_history->unreadReactions().count()
+				).arg(state.unread ? 1 : 0
+				).arg(state.mention ? 1 : 0
+				).arg(state.reaction ? 1 : 0
+				).arg(state.unreadCounter));
 		}
 		if (_history->scrollTopItem
 			|| (_migrated && _migrated->scrollTopItem)

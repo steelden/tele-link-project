@@ -2582,7 +2582,9 @@ void ApiWrap::saveDraftsToCloud() {
 }
 
 bool ApiWrap::isQuitPrevent() {
-	if (_draftsSaveRequestIds.empty()) {
+	if (_session->account().mtsLinkSession()) {
+		return false; // No cloud drafts through MTP.
+	} else if (_draftsSaveRequestIds.empty()) {
 		return false;
 	}
 	LOG(("ApiWrap prevents quit, saving drafts..."));

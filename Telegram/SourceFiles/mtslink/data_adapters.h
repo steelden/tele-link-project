@@ -357,6 +357,8 @@ void searchOrganizationMembers(
 	const QString &query,
 	Fn<void(std::vector<not_null<UserData*>>)> done);
 [[nodiscard]] bool isGroupChat(PeerId peerId);
+// Compares the UUIDv6 message ids by time.
+[[nodiscard]] bool isNewerMessageId(const QString &a, const QString &b);
 // The server rejects emoji in channel and group chat names.
 [[nodiscard]] bool containsEmoji(const QString &text);
 // Public channels can be found and joined by everyone in the organization.

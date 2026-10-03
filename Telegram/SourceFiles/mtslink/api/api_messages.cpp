@@ -56,6 +56,11 @@ void Messages::load(
 			if (!msgArray.isEmpty()) {
 				rawLastId = msgArray.last().toObject()
 					.value("id").toString();
+				if (!isOlder) {
+					_newestRawIds.insert(
+						chatId,
+						msgArray.first().toObject().value("id").toString());
+				}
 			}
 
 			QList<MessageData> messages;
