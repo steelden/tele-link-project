@@ -679,7 +679,19 @@ void RepliesList::loadAround(MsgId id) {
 				}
 			}
 			checkReadTillEnd();
+			if (id
+				&& id != _rootId
+				&& !ranges::contains(_list, id)
+				&& _skippedBefore.value_or(0) != 0) {
+				LOG(("MtsLink Thread: target %1 is older, loading pages"
+					).arg(id.bare));
+				_mtsLinkSeekId = id;
+				_mtsLinkSeekPages = 0;
+			}
 			_listChanges.fire({});
+			if (_mtsLinkSeekId && !_list.empty()) {
+				loadBefore();
+			}
 		});
 		msgs->loadThread(chatId, parentId);
 		return;
@@ -822,6 +834,20 @@ void RepliesList::loadBefore() {
 			}
 			checkReadTillEnd();
 			_listChanges.fire({});
+			if (const auto seek = _mtsLinkSeekId) {
+				constexpr auto kMaxSeekPages = 40;
+				if (ranges::contains(_list, seek)) {
+					LOG(("MtsLink Thread: target %1 found after %2 pages"
+						).arg(seek.bare).arg(_mtsLinkSeekPages + 1));
+					_mtsLinkSeekId = 0;
+				} else if (_skippedBefore.value_or(0) != 0
+					&& ++_mtsLinkSeekPages < kMaxSeekPages) {
+					loadBefore();
+				} else {
+					LOG(("MtsLink Thread: target %1 not found").arg(seek.bare));
+					_mtsLinkSeekId = 0;
+				}
+			}
 		});
 		msgs->loadThread(chatId, parentId, fromId);
 		return;

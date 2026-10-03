@@ -330,6 +330,27 @@ void createChannel(
 void leaveChannel(
 	not_null<Main::Session*> session,
 	not_null<ChannelData*> channel);
+// Public channels: Chat.JoinToChat.
+void joinChannel(
+	not_null<Main::Session*> session,
+	not_null<ChannelData*> channel);
+// Group chat with the members, done(nullptr) on failure.
+void createGroupChat(
+	not_null<Main::Session*> session,
+	const QString &title,
+	const std::vector<not_null<UserData*>> &users,
+	QImage cover,
+	Fn<void(ChannelData*)> done);
+// Organization members for a new group, without me.
+void searchOrganizationMembers(
+	not_null<Main::Session*> session,
+	const QString &query,
+	Fn<void(std::vector<not_null<UserData*>>)> done);
+[[nodiscard]] bool isGroupChat(PeerId peerId);
+// Members with roles, the result comes as PeerUpdate::Flag::Members.
+void reloadChannelMembers(
+	not_null<Main::Session*> session,
+	PeerId channelPeerId);
 void deleteChannel(
 	not_null<Main::Session*> session,
 	not_null<ChannelData*> channel);

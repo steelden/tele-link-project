@@ -1822,6 +1822,12 @@ void ApiWrap::saveStickerSets(
 }
 
 void ApiWrap::joinChannel(not_null<ChannelData*> channel) {
+	if (MtsLink::hasChatId(channel->id)) {
+		if (!channel->amIn()) {
+			MtsLink::joinChannel(_session, channel);
+		}
+		return;
+	}
 	if (channel->amIn()) {
 		session().changes().peerUpdated(
 			channel,
@@ -2140,7 +2146,8 @@ void ApiWrap::clearHistory(not_null<PeerData*> peer, bool revoke) {
 void ApiWrap::deleteConversation(not_null<PeerData*> peer, bool revoke) {
 	if (const auto channel = peer->asChannel()
 		; channel && MtsLink::hasChatId(peer->id)
-		&& MtsLink::chatTypeForPeer(peer->id) == MtsLink::ChatType::Channel) {
+		&& (MtsLink::chatTypeForPeer(peer->id) == MtsLink::ChatType::Channel
+			|| MtsLink::isGroupChat(peer->id))) {
 		if (revoke && channel->canDelete()) {
 			MtsLink::deleteChannel(_session, channel);
 		} else {

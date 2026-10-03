@@ -768,8 +768,11 @@ std::unique_ptr<ForbiddenRow> InviteForbiddenController::createRow(
 class MtsLinkNonMembersSearchController final
 	: public PeerListSearchController {
 public:
-	explicit MtsLinkNonMembersSearchController(not_null<PeerData*> peer)
-	: _peer(peer) {
+	using Searcher = Fn<void(
+		QString,
+		Fn<void(std::vector<not_null<UserData*>>)>)>;
+	explicit MtsLinkNonMembersSearchController(Searcher searcher)
+	: _searcher(std::move(searcher)) {
 		_timer.setCallback([=] { searchOnServer(); });
 	}
 	~MtsLinkNonMembersSearchController() {
@@ -805,9 +808,7 @@ private:
 		const auto query = _query;
 		const auto alive = std::weak_ptr<bool>(_alive);
 		_loading = true;
-		MtsLink::searchChannelNonMembers(
-			&_peer->session(),
-			_peer,
+		_searcher(
 			query,
 			[=](std::vector<not_null<UserData*>> users) {
 				if (!alive.lock()) {
@@ -827,7 +828,7 @@ private:
 		delegate()->peerListSearchRefreshRows();
 	}
 
-	const not_null<PeerData*> _peer;
+	const Searcher _searcher;
 	const std::shared_ptr<bool> _alive = std::make_shared<bool>(true);
 	base::Timer _timer;
 	QString _query;
@@ -839,7 +840,15 @@ private:
 [[nodiscard]] std::unique_ptr<PeerListSearchController> MakeSearchController(
 		not_null<PeerData*> peer) {
 	if (MtsLink::hasChatId(peer->id)) {
-		return std::make_unique<MtsLinkNonMembersSearchController>(peer);
+		return std::make_unique<MtsLinkNonMembersSearchController>([=](
+				QString query,
+				Fn<void(std::vector<not_null<UserData*>>)> done) {
+			MtsLink::searchChannelNonMembers(
+				&peer->session(),
+				peer,
+				query,
+				std::move(done));
+		});
 	}
 	return std::make_unique<PeerListGlobalSearchController>(
 		&peer->session());
@@ -849,7 +858,17 @@ private:
 
 AddParticipantsBoxController::AddParticipantsBoxController(
 	not_null<Main::Session*> session)
-: ContactsBoxController(session) {
+: ContactsBoxController(
+	session,
+	std::make_unique<MtsLinkNonMembersSearchController>([=](
+			QString query,
+			Fn<void(std::vector<not_null<UserData*>>)> done) {
+		// Members of a new group: everyone in the organization.
+		MtsLink::searchOrganizationMembers(
+			session,
+			query,
+			std::move(done));
+	})) {
 }
 
 AddParticipantsBoxController::AddParticipantsBoxController(

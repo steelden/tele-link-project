@@ -95,6 +95,34 @@ public:
 		Done done);
 	void leaveChat(const ChatId &chatId, Done done);
 	void deleteChannel(const ChatId &chatId, Done done);
+	// Public channels.
+	void joinChat(const ChatId &chatId, Done done);
+
+	// Group chats: only an owner, no administrators.
+	void createGroupChat(
+		const QString &name,
+		const OrganizationId &organizationId,
+		const QStringList &userIds,
+		std::function<void(std::optional<ChannelData>)> done);
+	void addGroupChatCover(
+		const ChatId &chatId,
+		const FileId &fileId,
+		Done done);
+	void addGroupUsers(
+		const ChatId &chatId,
+		const QStringList &userIds,
+		const OrganizationId &organizationId,
+		Done done);
+	void removeGroupUsers(
+		const ChatId &chatId,
+		const QStringList &userIds,
+		const OrganizationId &organizationId,
+		Done done);
+	void giveGroupOwnership(
+		const ChatId &chatId,
+		const QString &userId,
+		Done done);
+	void deleteGroupChat(const ChatId &chatId, Done done);
 
 	// Channels of the organization by name / description.
 	void searchChannels(
@@ -108,6 +136,7 @@ public:
 	using MembersDone = std::function<void(QList<MemberProfile>)>;
 	void searchNonMembers(
 		const ChatId &chatId,
+		bool groupChat,
 		const QString &query,
 		int offset,
 		int limit,

@@ -1593,6 +1593,50 @@ void Controller::fillManageSection() {
 		&& !channel->isMonoforum()
 		&& channel->amCreator();
 
+	if (channel && MtsLink::hasChatId(channel->id)) {
+		// MTS Link: no bans, permissions, links, logs, reactions or boosts.
+		::AddSkip(_controls.buttonsLayout, 0);
+		if (!MtsLink::isGroupChat(channel->id)) {
+			AddButtonWithCount(
+				_controls.buttonsLayout,
+				tr::lng_manage_peer_administrators(),
+				Info::Profile::AdminsCountValue(channel)
+					| ToPositiveNumberString(),
+				[=] {
+					ParticipantsBoxController::Start(
+						_navigation,
+						_peer,
+						ParticipantsBoxController::Role::Admins);
+				},
+				{ &st::menuIconAdmin });
+		}
+		AddButtonWithCount(
+			_controls.buttonsLayout,
+			(_isGroup
+				? tr::lng_manage_peer_members()
+				: tr::lng_manage_peer_subscribers()),
+			Info::Profile::MembersCountValue(channel)
+				| ToPositiveNumberString(),
+			[=] {
+				ParticipantsBoxController::Start(
+					_navigation,
+					_peer,
+					ParticipantsBoxController::Role::Members);
+			},
+			{ &st::menuIconGroups });
+		if (canDeleteChannel) {
+			::AddSkip(_controls.buttonsLayout);
+			AddButtonDelete(
+				_controls.buttonsLayout,
+				(MtsLink::isGroupChat(channel->id)
+					? tr::lng_profile_delete_group
+					: tr::lng_profile_delete_channel)(),
+				[=]{ deleteWithConfirmation(); });
+			::AddSkip(_controls.buttonsLayout);
+		}
+		return;
+	}
+
 	::AddSkip(_controls.buttonsLayout, 0);
 
 	if (canEditType) {
@@ -3068,7 +3112,10 @@ void Controller::deleteWithConfirmation() {
 	const auto channel = _peer->asChannel();
 	Assert(channel != nullptr);
 
-	const auto text = (_isGroup
+	const auto group = MtsLink::hasChatId(channel->id)
+		? MtsLink::isGroupChat(channel->id)
+		: _isGroup;
+	const auto text = (group
 		? tr::lng_sure_delete_group
 		: tr::lng_sure_delete_channel)(tr::now);
 	const auto deleteCallback = crl::guard(this, [=] {

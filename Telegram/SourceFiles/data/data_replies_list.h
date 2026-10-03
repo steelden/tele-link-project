@@ -121,6 +121,10 @@ private:
 	rpl::event_stream<> _listChanges;
 	rpl::event_stream<> _instantChanges;
 	std::optional<MsgId> _loadingAround;
+	// MTS Link loads threads from the newest only: older pages are loaded
+	// until the jump target is found.
+	MsgId _mtsLinkSeekId = 0;
+	int _mtsLinkSeekPages = 0;
 	rpl::variable<std::optional<int>> _unreadCount;
 	MsgId _inboxReadTillId = 0;
 	MsgId _outboxReadTillId = 0;

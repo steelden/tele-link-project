@@ -993,6 +993,31 @@ void Widget::chosenRow(const ChosenRow &row) {
 	}
 
 	const auto history = row.key.history();
+	if (history
+		&& row.message.fullId
+		&& MtsLink::hasChatId(history->peer->id)) {
+		const auto msgId = row.message.fullId.msg;
+		const auto rootId = MtsLink::threadRootFor(history->peer->id, msgId);
+		const auto item = session().data().message(row.message.fullId);
+		LOG(("MtsLink Search: open msg=%1 uuid=%2 root=%3 item=%4 view=%5"
+			).arg(msgId.bare
+			).arg(MtsLink::msgIdToMtsLinkId(history->peer->id, msgId)
+			).arg(rootId.bare
+			).arg(item ? 1 : 0
+			).arg((item && item->mainView()) ? 1 : 0));
+		if (rootId && rootId != msgId) {
+			// A thread reply is shown in its thread, as on notifications.
+			auto params = Window::SectionShow(
+				Window::SectionShow::Way::ClearStack);
+			params.highlight = Window::SearchHighlightId(_searchState.query);
+			controller()->showRepliesForMessage(
+				history,
+				rootId,
+				msgId,
+				params);
+			return;
+		}
+	}
 	const auto topicJump = history
 		? history->peer->forumTopicFor(row.topicJumpRootId)
 		: nullptr;

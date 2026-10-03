@@ -922,8 +922,12 @@ void Filler::addLeaveChat() {
 	if (_topic || _sublist || !channel || !channel->amIn()) {
 		return;
 	}
+	// MTS Link channels which are not read-only are megagroups.
+	const auto group = MtsLink::hasChatId(_peer->id)
+		? MtsLink::isGroupChat(_peer->id)
+		: _peer->isMegagroup();
 	_addAction({
-		.text = (_peer->isMegagroup()
+		.text = (group
 			? tr::lng_profile_leave_group(tr::now)
 			: tr::lng_profile_leave_channel(tr::now)),
 		.handler = DeleteAndLeaveHandler(_controller, _peer),
@@ -998,6 +1002,9 @@ void Filler::addBlockUser() {
 }
 
 void Filler::addBanFromChannel() {
+	if constexpr (true) {
+		return; // MTS Link has no bans.
+	}
 	const auto sublist = _sublist;
 	const auto parent = sublist ? sublist->parentChat() : nullptr;
 	const auto broadcast = parent ? parent->monoforumBroadcast() : nullptr;
@@ -1120,6 +1127,10 @@ void Filler::addTranslate() {
 }
 
 void Filler::addReport() {
+	// MTS Link has no reports.
+	if constexpr (true) {
+		return;
+	}
 	const auto chat = _peer->asChat();
 	const auto channel = _peer->asChannel();
 	if (_topic
@@ -1337,6 +1348,9 @@ void Filler::addManageChat() {
 }
 
 void Filler::addBoostChat() {
+	if constexpr (true) {
+		return; // MTS Link has no boosts.
+	}
 	if (const auto channel = _peer->asChannel()) {
 		if (channel->isMonoforum()) {
 			return;
@@ -1354,6 +1368,9 @@ void Filler::addBoostChat() {
 }
 
 void Filler::addViewStatistics() {
+	if constexpr (true) {
+		return; // MTS Link has no statistics and boosts.
+	}
 	if (const auto channel = _peer->asChannel()) {
 		if (channel->isMonoforum()) {
 			return;
@@ -1694,6 +1711,9 @@ void Filler::addToggleNoForwards() {
 }
 
 void Filler::addTTLSubmenu(bool addSeparator) {
+	if constexpr (true) {
+		return; // MTS Link has no auto-delete.
+	}
 	if (_thread->asTopic() || !_peer || _peer->isMonoforum()) {
 		return; // #TODO later forum
 	}
@@ -4413,7 +4433,9 @@ Fn<void()> DeleteAndLeaveHandler(
 		}
 		return false;
 	}();
-	if (isCreator) {
+	// MTS Link: no future owner request, the delete box offers to
+	// delete the chat for everyone or just to leave it.
+	if (isCreator && !MtsLink::hasChatId(peer->id)) {
 		const auto requestId = std::make_shared<mtpRequestId>(0);
 		return [=] {
 			if (controller->showFrozenError() || (*requestId > 0)) {

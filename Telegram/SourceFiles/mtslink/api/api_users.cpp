@@ -5,6 +5,8 @@ based on Telegram Desktop.
 #include "mtslink/api/api_users.h"
 #include "mtslink/rpc.h"
 
+#include <QtCore/QJsonArray>
+
 namespace MtsLink::Api {
 
 Users::Users(Rpc *rpc, QObject *parent)
@@ -110,15 +112,20 @@ void Users::searchMembers(
 		const QString &query,
 		int offset,
 		int limit,
-		std::function<void(QList<MemberProfile>)> done) {
+		std::function<void(QList<MemberProfile>)> done,
+		const QStringList &excludeUserIds) {
+	auto param = QJsonObject{
+		{ "query", query },
+		{ "offset", offset },
+		{ "limit", limit },
+		{ "highlightSize", 255 },
+	};
+	if (!excludeUserIds.isEmpty()) {
+		param.insert("excludeUserIds", QJsonArray::fromStringList(excludeUserIds));
+	}
 	_rpc->call(
 		"Member.SearchMembers",
-		QJsonObject{
-			{ "query", query },
-			{ "offset", offset },
-			{ "limit", limit },
-			{ "highlightSize", 255 },
-		},
+		param,
 		[=](const QJsonObject &result) {
 			QList<MemberProfile> list;
 			const auto items = result.value("value").toObject()

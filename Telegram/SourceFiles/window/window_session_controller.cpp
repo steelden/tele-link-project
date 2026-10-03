@@ -1941,6 +1941,11 @@ bool SessionController::hasTabbedSelectorOwnership() const {
 }
 
 void SessionController::showEditPeerBox(PeerData *peer) {
+	if (peer && MtsLink::hasChatId(peer->id)) {
+		// No full peer requests in MTS Link, all the info is known.
+		show(Box<EditPeerInfoBox>(this, peer));
+		return;
+	}
 	_showEditPeer = peer;
 	session().api().requestFullPeer(peer);
 }

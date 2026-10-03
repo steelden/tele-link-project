@@ -1955,7 +1955,22 @@ void InnerWidget::paintPeerSearchResult(
 	QRect tr(context.st->textLeft, context.st->textTop, namewidth, st::dialogsTextFont->height);
 	p.setFont(st::dialogsTextFont);
 	QString username = peer->username();
-	if (!context.active && username.startsWith(_peerSearchQuery, Qt::CaseInsensitive)) {
+	if (username.isEmpty() && MtsLink::hasChatId(peer->id)) {
+		// MTS Link channels have no usernames: description or the type.
+		const auto about = peer->about().split(QChar(10)).front().trimmed();
+		const auto text = !about.isEmpty()
+			? about
+			: MtsLink::isGroupChat(peer->id)
+			? tr::lng_mtslink_search_group(tr::now)
+			: tr::lng_mtslink_search_channel(tr::now);
+		p.setPen(context.active
+			? st::dialogsTextFgActive
+			: st::dialogsTextFgService);
+		p.drawText(
+			tr.left(),
+			tr.top() + st::dialogsTextFont->ascent,
+			st::dialogsTextFont->elided(text, tr.width()));
+	} else if (!context.active && username.startsWith(_peerSearchQuery, Qt::CaseInsensitive)) {
 		auto first = '@' + username.mid(0, _peerSearchQuery.size());
 		auto second = username.mid(_peerSearchQuery.size());
 		auto w = st::dialogsTextFont->width(first);
@@ -4754,6 +4769,10 @@ void InnerWidget::peerSearchReceived(Api::PeerSearchResult result) {
 	}
 
 	_peerSearchQuery = result.query.toLower().trimmed();
+	LOG(("MtsLink Search: peer results '%1' my=%2 peers=%3"
+		).arg(_peerSearchQuery
+		).arg(result.my.size()
+		).arg(result.peers.size()));
 	clearPeerSearchResults();
 	_peerSearchResults.reserve(result.peers.size()
 		+ result.sponsored.size());

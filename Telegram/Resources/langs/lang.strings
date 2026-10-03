@@ -6456,6 +6456,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_make_owner" = "Make owner";
 "lng_mtslink_make_owner_confirm" = "Transfer ownership of {chat} to {user}? You will become a regular member, only the new owner can make you an administrator.";
 "lng_mtslink_remove_member" = "Remove from channel";
+"lng_mtslink_remove_from_group" = "Remove from group";
+"lng_mtslink_search_channel" = "Channel";
+"lng_mtslink_search_group" = "Group";
 "lng_mtslink_remove_member_confirm" = "Remove {user} from {chat}?";
 "lng_mtslink_role_owner" = "owner";
 "lng_mtslink_role_admin" = "administrator";

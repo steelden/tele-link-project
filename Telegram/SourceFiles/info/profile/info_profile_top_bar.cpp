@@ -1215,7 +1215,9 @@ void TopBar::setupActions(not_null<Window::SessionController*> controller) {
 	if (chechMax()) {
 		return;
 	}
-	if (!topic
+	// MTS Link has no reports.
+	if (false
+		&& !topic
 		&& canJoin
 		&& ((chat && !chat->amCreator() && !chat->hasAdminRights())
 			|| (channel
@@ -1279,6 +1281,9 @@ void TopBar::setupUserpicButton(
 		base::unique_qptr<Ui::PopupMenu>
 	>();
 	const auto canReport = [=, peer = _peer] {
+		if (peer) {
+			return false; // MTS Link has no reports.
+		}
 		if (!peer->hasUserpic()) {
 			return false;
 		}

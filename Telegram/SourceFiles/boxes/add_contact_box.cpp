@@ -754,6 +754,41 @@ void GroupInfoBox::createGroup(
 	if (_creationRequestId) {
 		return;
 	}
+	{
+		auto members = std::vector<not_null<UserData*>>();
+		for (const auto &peer : users) {
+			if (const auto user = peer->asUser(); user && !user->isSelf()) {
+				members.push_back(user);
+			}
+		}
+		_creationRequestId = -1;
+		const auto weak = base::make_weak(this);
+		const auto navigation = _navigation;
+		MtsLink::createGroupChat(
+			&_navigation->session(),
+			title,
+			members,
+			_photo->takeResultImage(),
+			[=](ChannelData *channel) {
+				if (!channel) {
+					if (weak) {
+						_creationRequestId = 0;
+					}
+					return;
+				}
+				if (const auto strong = selectUsersBox.get()) {
+					strong->closeBox();
+				}
+				if (weak) {
+					closeBox();
+				}
+				navigation->parentController()->showPeerHistory(
+					channel,
+					Window::SectionShow::Way::ClearStack,
+					ShowAtTheEndMsgId);
+			});
+		return;
+	}
 	using TLUsers = MTPInputUser;
 	auto inputs = QVector<TLUsers>();
 	inputs.reserve(users.size());

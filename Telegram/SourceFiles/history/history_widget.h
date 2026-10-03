@@ -857,6 +857,12 @@ private:
 	MsgId _showAtMsgId = ShowAtUnreadMsgId;
 	base::flat_set<MsgId> _topicsRequested;
 	Window::SectionShow _showAtMsgParams;
+	MsgId _mtsLinkJumpRetried = 0;
+	// No message events come for a public channel preview (not a member).
+	void mtsLinkPreviewPoll();
+	base::Timer _mtsLinkPreviewPollTimer = base::Timer([this] {
+		mtsLinkPreviewPoll();
+	});
 	bool _showAndMaybeSendStart = false;
 
 	int _firstLoadRequest = 0; // Not real mtpRequestId.

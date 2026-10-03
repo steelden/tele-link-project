@@ -7,6 +7,23 @@ based on Telegram Desktop.
 
 namespace MtsLink::Api {
 
+namespace {
+
+QJsonArray UsersWithOrganization(
+		const QStringList &userIds,
+		const OrganizationId &organizationId) {
+	auto result = QJsonArray();
+	for (const auto &userId : userIds) {
+		result.push_back(QJsonObject{
+			{ "userId", userId },
+			{ "organizationId", organizationId },
+		});
+	}
+	return result;
+}
+
+} // namespace
+
 Channels::Channels(Rpc *rpc, QObject *parent)
 : QObject(parent)
 , _rpc(rpc) {
@@ -261,22 +278,6 @@ void Channels::giveOwnership(
 	}, std::move(done));
 }
 
-namespace {
-
-QJsonArray UsersWithOrganization(
-		const QStringList &userIds,
-		const OrganizationId &organizationId) {
-	auto result = QJsonArray();
-	for (const auto &userId : userIds) {
-		result.push_back(QJsonObject{
-			{ "userId", userId },
-			{ "organizationId", organizationId },
-		});
-	}
-	return result;
-}
-
-} // namespace
 
 void Channels::addUsers(
 		const ChatId &chatId,
@@ -359,6 +360,93 @@ void Channels::deleteChannel(const ChatId &chatId, Done done) {
 	}, std::move(done));
 }
 
+void Channels::joinChat(const ChatId &chatId, Done done) {
+	simpleCall("Chat.JoinToChat", QJsonObject{
+		{ "chatId", chatId },
+	}, std::move(done));
+}
+
+void Channels::createGroupChat(
+		const QString &name,
+		const OrganizationId &organizationId,
+		const QStringList &userIds,
+		std::function<void(std::optional<ChannelData>)> done) {
+	_rpc->call(
+		"Chat.CreateGroupChatV2",
+		QJsonObject{
+			{ "name", name },
+			{ "organizationId", organizationId },
+			{ "usersWithOrg", UsersWithOrganization(userIds, organizationId) },
+		},
+		[=](const QJsonObject &result) {
+			if (result.value("type").toString()
+				!= QStringLiteral("GroupChat")) {
+				done(std::nullopt);
+				return;
+			}
+			auto chat = parseChat(result);
+			chat.type = ChatType::GroupChat;
+			const auto value = result.value("value").toObject();
+			if (chat.memberRole.isEmpty()) {
+				chat.memberRole = value.value("ownerID").toString();
+			}
+			if (chat.id.isEmpty()) {
+				done(std::nullopt);
+			} else {
+				done(chat);
+			}
+		},
+		[=](const QString &) { done(std::nullopt); });
+}
+
+void Channels::addGroupChatCover(
+		const ChatId &chatId,
+		const FileId &fileId,
+		Done done) {
+	simpleCall("Chat.AddGroupChatCover", QJsonObject{
+		{ "chatId", chatId },
+		{ "fileId", fileId },
+	}, std::move(done));
+}
+
+void Channels::addGroupUsers(
+		const ChatId &chatId,
+		const QStringList &userIds,
+		const OrganizationId &organizationId,
+		Done done) {
+	simpleCall("Chat.AddUsersToGroupChatV2", QJsonObject{
+		{ "chatId", chatId },
+		{ "users", UsersWithOrganization(userIds, organizationId) },
+	}, std::move(done));
+}
+
+void Channels::removeGroupUsers(
+		const ChatId &chatId,
+		const QStringList &userIds,
+		const OrganizationId &organizationId,
+		Done done) {
+	simpleCall("Chat.RemoveUsersFromGroupChatV2", QJsonObject{
+		{ "chatId", chatId },
+		{ "users", UsersWithOrganization(userIds, organizationId) },
+	}, std::move(done));
+}
+
+void Channels::giveGroupOwnership(
+		const ChatId &chatId,
+		const QString &userId,
+		Done done) {
+	simpleCall("Chat.GiveGroupChatOwnership", QJsonObject{
+		{ "chatId", chatId },
+		{ "userId", userId },
+	}, std::move(done));
+}
+
+void Channels::deleteGroupChat(const ChatId &chatId, Done done) {
+	simpleCall("Chat.DeleteGroupChat", QJsonObject{
+		{ "chatId", chatId },
+	}, std::move(done));
+}
+
 void Channels::searchChannels(
 		const QString &query,
 		const OrganizationId &organizationId,
@@ -400,6 +488,7 @@ void Channels::searchChannels(
 
 void Channels::searchNonMembers(
 		const ChatId &chatId,
+		bool groupChat,
 		const QString &query,
 		int offset,
 		int limit,
@@ -413,12 +502,24 @@ void Channels::searchNonMembers(
 		param.insert("query", query);
 	}
 	_rpc->call(
-		"Chat.SearchNonChatMembersAndTeamsV2",
+		groupChat
+			? "Chat.SearchNonChatMembersV2"
+			: "Chat.SearchNonChatMembersAndTeamsV2",
 		param,
 		[=](const QJsonObject &result) {
 			auto list = QList<MemberProfile>();
-			const auto items = result.value("value").toObject()
-				.value("items").toArray();
+			const auto value = result.value("value").toObject();
+			// Group chats: {members: [{profile}]}, no teams.
+			for (const auto &entry : value.value("members").toArray()) {
+				auto profile = ParseMemberProfile(
+					entry.toObject().value("profile").toObject());
+				profile.presence = MemberPresence::Unknown;
+				profile.role = MemberRole::Member;
+				if (!profile.userId.isEmpty()) {
+					list.push_back(std::move(profile));
+				}
+			}
+			const auto items = value.value("items").toArray();
 			for (const auto &entry : items) {
 				const auto obj = entry.toObject();
 				if (obj.value("type").toString()

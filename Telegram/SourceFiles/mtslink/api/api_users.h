@@ -29,7 +29,8 @@ public:
 		const QString &query,
 		int offset,
 		int limit,
-		std::function<void(QList<MemberProfile>)> done);
+		std::function<void(QList<MemberProfile>)> done,
+		const QStringList &excludeUserIds = {});
 	void loadPresence(const UserId &userId, const QString &organizationId);
 
 	[[nodiscard]] MemberProfile cachedProfile(const UserId &userId) const;

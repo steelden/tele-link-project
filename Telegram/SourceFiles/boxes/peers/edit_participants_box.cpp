@@ -1850,6 +1850,7 @@ void ParticipantsBoxController::loadMoreRows() {
 			// Members and roles change by server events, rebuild the list
 			// on every members reload.
 			_mtsLinkMembersSubscribed = true;
+			MtsLink::reloadChannelMembers(&channel->session(), channel->id);
 			using UpdateFlag = Data::PeerUpdate::Flag;
 			channel->session().changes().peerUpdates(
 				channel,
@@ -1865,22 +1866,41 @@ void ParticipantsBoxController::loadMoreRows() {
 				loadMoreRows();
 			}, lifetime());
 		}
+		// Roles come from the MTS Link members list, for broadcast
+		// channels too (they have no megagroup info).
 		const auto mega = channel->asMegagroup();
-		if (mega && mega->mgInfo
+		auto users = std::vector<not_null<UserData*>>();
+		if (mega
+			&& mega->mgInfo
 			&& !mega->mgInfo->lastParticipants.empty()) {
-			_additional.fillFromPeer();
-			for (const auto &user : mega->mgInfo->lastParticipants) {
-				if (acceptsMtsLinkRow(user)) {
-					appendRow(user);
-				}
-			}
+			const auto &list = mega->mgInfo->lastParticipants;
+			users.assign(list.begin(), list.end());
 		} else {
-			const auto users = MtsLink::chatMtsLinkUsers(
-				&_peer->session(), _peer->id);
-			for (const auto &user : users) {
-				if (acceptsMtsLinkRow(user)) {
-					appendRow(user);
-				}
+			users = MtsLink::chatMtsLinkUsers(&_peer->session(), _peer->id);
+		}
+		const auto owner = MtsLink::channelOwner(channel->id);
+		using Type = Api::ChatParticipant::Type;
+		for (const auto &user : users) {
+			const auto isOwner = (user->id == owner);
+			const auto isAdmin = isOwner
+				|| MtsLink::isChannelAdmin(channel->id, user->id);
+			const auto type = isOwner
+				? Type::Creator
+				: isAdmin
+				? Type::Admin
+				: Type::Member;
+			_additional.applyParticipant(
+				Api::ChatParticipant(
+					type,
+					user->id,
+					UserId(),
+					ChatRestrictionsInfo(),
+					ChatAdminRightsInfo()),
+				Role::Profile);
+			if (_role == Role::Admins && !isAdmin) {
+				continue;
+			} else if (acceptsMtsLinkRow(user)) {
+				appendRow(user);
 			}
 		}
 		_allLoaded = true;
@@ -2065,8 +2085,11 @@ void ParticipantsBoxController::fillMtsLinkMemberActions(
 		not_null<Ui::PopupMenu*> menu,
 		not_null<ChannelData*> channel,
 		not_null<UserData*> user) {
+	const auto group = MtsLink::isGroupChat(channel->id);
 	if (user->isSelf()
-		|| MtsLink::chatTypeForPeer(channel->id) != MtsLink::ChatType::Channel) {
+		|| (!group
+			&& MtsLink::chatTypeForPeer(channel->id)
+				!= MtsLink::ChatType::Channel)) {
 		return;
 	}
 	const auto myRole = MtsLink::myChannelRole(channel->id);
@@ -2080,7 +2103,9 @@ void ParticipantsBoxController::fillMtsLinkMemberActions(
 	}
 	const auto session = &channel->session();
 	const auto show = delegate()->peerListUiShow();
-	if (!targetAdmin) {
+	if (group) {
+		// Group chats have only an owner.
+	} else if (!targetAdmin) {
 		menu->addAction(
 			tr::lng_mtslink_make_admin(tr::now),
 			[=] { MtsLink::setChannelAdmin(session, channel, user, true); },
@@ -2112,9 +2137,11 @@ void ParticipantsBoxController::fillMtsLinkMemberActions(
 			},
 			&st::menuIconPromote);
 	}
-	if (iAmOwner || !targetAdmin) {
+	if (iAmOwner || (!group && !targetAdmin)) {
 		menu->addAction(
-			tr::lng_mtslink_remove_member(tr::now),
+			(group
+				? tr::lng_mtslink_remove_from_group
+				: tr::lng_mtslink_remove_member)(tr::now),
 			[=] {
 				show->show(Ui::MakeConfirmBox({
 					.text = tr::lng_mtslink_remove_member_confirm(

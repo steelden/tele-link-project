@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/moderate_messages_box.h"
 
+#include "mtslink/data_adapters.h"
 #include "api/api_blocked_peers.h"
 #include "api/api_chat_participants.h"
 #include "api/api_messages_search.h"
@@ -1614,7 +1615,10 @@ void DeleteChatBox(not_null<Ui::GenericBox*> box, not_null<PeerData*> peer) {
 				? tr::lng_sure_delete_history(
 					lt_contact,
 					rpl::single(peer->name()))
-				: (peer->isChannel() && !peer->isMegagroup())
+				: (peer->isChannel()
+					&& (MtsLink::hasChatId(peer->id)
+						? !MtsLink::isGroupChat(peer->id)
+						: !peer->isMegagroup()))
 				? tr::lng_sure_leave_channel()
 				: tr::lng_sure_leave_group(),
 			st::boxLabel));

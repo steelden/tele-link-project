@@ -4348,9 +4348,15 @@ void ChatWidget::restoreState(not_null<ChatMemento*> memento) {
 			Window::SectionShow::Way::Forward,
 			anim::type::instant);
 		params.highlight = memento->highlight();
+		const auto fullId = ResolveHighlightId(_history, highlight);
+		// MTS Link message ids are not chronological, the position must
+		// have the date to be found in the loaded slices.
+		const auto known = MtsLink::hasChatId(_peer->id)
+			? session().data().message(fullId)
+			: nullptr;
 		showAtPosition(Data::MessagePosition{
-			.fullId = ResolveHighlightId(_history, highlight),
-			.date = TimeId(0),
+			.fullId = fullId,
+			.date = known ? known->date() : TimeId(0),
 		}, memento->originId(), params);
 	}
 	if (memento->activateChooseForReport()) {

@@ -13,6 +13,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_report.h"
 #include "api/api_statistics.h"
 #include "apiwrap.h"
+#include "mtslink/data_adapters.h"
+#include "ui/boxes/confirm_box.h"
+#include "data/data_peer_values.h"
 #include "base/call_delayed.h"
 #include "base/event_filter.h"
 #include "base/options.h"
@@ -1302,6 +1305,7 @@ private:
 	void addBotCommandActions(not_null<UserData*> user);
 	void addFastButtonsMode(not_null<UserData*> user);
 	void addReportAction();
+	void addDeleteChannelAction(not_null<ChannelData*> channel);
 	void addBlockAction(not_null<UserData*> user);
 	void addLeaveChannelAction(not_null<ChannelData*> channel);
 	void addJoinChannelAction(not_null<ChannelData*> channel);
@@ -3070,6 +3074,10 @@ void ActionsFiller::addBotCommandActions(not_null<UserData*> user) {
 }
 
 void ActionsFiller::addReportAction() {
+	// MTS Link has no reports.
+	if constexpr (true) {
+		return;
+	}
 	const auto peer = _peer;
 	const auto controller = _controller->parentController();
 	const auto report = [=] {
@@ -3151,6 +3159,31 @@ void ActionsFiller::addLeaveChannelAction(not_null<ChannelData*> channel) {
 		&st::infoIconLeave);
 }
 
+void ActionsFiller::addDeleteChannelAction(
+		not_null<ChannelData*> channel) {
+	const auto controller = _controller->parentController();
+	const auto group = channel->isMegagroup();
+	AddActionButton(
+		_wrap,
+		group ? tr::lng_profile_delete_group() : tr::lng_profile_delete_channel(),
+		Data::PeerFlagValue(channel.get(), ChannelDataFlag::Creator),
+		[=] {
+			controller->show(Ui::MakeConfirmBox({
+				.text = (group
+					? tr::lng_sure_delete_group
+					: tr::lng_sure_delete_channel)(tr::now),
+				.confirmed = [=](Fn<void()> close) {
+					close();
+					Core::App().closeChatFromWindows(channel);
+					MtsLink::deleteChannel(&channel->session(), channel);
+				},
+				.confirmText = tr::lng_box_delete(tr::now),
+				.confirmStyle = &st::attentionBoxButton,
+			}));
+		},
+		&st::infoIconDeleteRed);
+}
+
 void ActionsFiller::addJoinChannelAction(
 		not_null<ChannelData*> channel) {
 	using namespace rpl::mappers;
@@ -3183,10 +3216,11 @@ void ActionsFiller::fillChannelActions(
 	using namespace rpl::mappers;
 
 	addJoinChannelAction(channel);
-	addLeaveChannelAction(channel);
-	if (!channel->amCreator()) {
-		addReportAction();
+	if (MtsLink::hasChatId(channel->id)) {
+		// Leave and manage are the buttons under the name.
+		return;
 	}
+	addLeaveChannelAction(channel);
 }
 
 object_ptr<Ui::RpWidget> ActionsFiller::fill() {
@@ -3200,7 +3234,7 @@ object_ptr<Ui::RpWidget> ActionsFiller::fill() {
 			fillUserActions(user);
 		});
 	} else if (auto channel = _peer->asChannel()) {
-		if (channel->isMegagroup()) {
+		if (channel->isMegagroup() && !MtsLink::hasChatId(channel->id)) {
 			return { nullptr };
 		}
 		return wrapResult([=] {

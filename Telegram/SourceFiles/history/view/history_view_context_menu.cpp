@@ -1280,6 +1280,9 @@ void AddReportAction(
 		const ContextMenuRequest &request,
 		not_null<ListWidget*> list) {
 	const auto item = request.item;
+	if constexpr (true) {
+		return; // MTS Link has no reports.
+	}
 	if (!request.selectedItems.empty()) {
 		return;
 	} else if (!item

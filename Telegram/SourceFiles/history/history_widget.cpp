@@ -5038,6 +5038,17 @@ void HistoryWidget::firstLoadMessages() {
 
 	if (MtsLink::hasChatId(_history->peer->id)) {
 		const auto chatId = MtsLink::peerIdToChatId(_history->peer->id);
+		if (IsServerMsgId(_showAtMsgId)
+			&& !MtsLink::msgIdToMtsLinkId(
+				_history->peer->id,
+				_showAtMsgId).isEmpty()) {
+			// A jump to a message (search, link): load around it instead
+			// of the newest ones, as Telegram does with offset_id.
+			LOG(("MtsLink Messages: first load %1 around %2"
+				).arg(chatId).arg(_showAtMsgId.bare));
+			delayedShowAt(_showAtMsgId, _showAtMsgParams);
+			return;
+		}
 		if (!chatId.isEmpty()) {
 			if (const auto mts = _history->session().account().mtsLinkSession()) {
 				_history->destroyUnreadBar();
@@ -5045,6 +5056,11 @@ void HistoryWidget::firstLoadMessages() {
 				_history->setMtsLinkInboxReadDate(0);
 				_history->getReadyFor(ShowAtTheEndMsgId);
 				_firstLoadRequest = -1;
+				LOG(("MtsLink Messages: first load %1 connected=%2 amIn=%3"
+					).arg(chatId
+					).arg(mts->rpc()->isConnected() ? 1 : 0
+					).arg((_peer->asChannel()
+						&& !_peer->asChannel()->amIn()) ? 0 : 1));
 				if (mts->rpc()->isConnected()) {
 					mts->messages()->load(chatId);
 				}
@@ -5387,13 +5403,13 @@ void HistoryWidget::delayedShowAt(
 						if (_migrated) {
 							_migrated->forgetScrollState();
 						}
-						setMsgId(targetMsgId);
+						setMsgId(targetMsgId, _delayedShowAtMsgParams);
 						const auto to = countInitialScrollTop();
 						animatedScrollToY(
 							std::clamp(to, 0, _scroll->scrollTopMax()),
 							getItemFromHistoryOrMigrated(targetMsgId));
 					} else {
-						setMsgId(targetMsgId);
+						setMsgId(targetMsgId, _delayedShowAtMsgParams);
 						historyLoaded();
 					}
 				});
@@ -8639,7 +8655,22 @@ int HistoryWidget::countInitialScrollTop() {
 			|| IsServerMsgId(-_showAtMsgId))) {
 		const auto item = getItemFromHistoryOrMigrated(_showAtMsgId);
 		const auto itemTop = _list->itemTop(item);
-		if (itemTop < 0) {
+		if (itemTop < 0
+			&& MtsLink::hasChatId(_history->peer->id)
+			&& _mtsLinkJumpRetried != _showAtMsgId) {
+			// Not loaded yet: load around it once before "not found".
+			const auto target = _showAtMsgId;
+			const auto params = _showAtMsgParams;
+			_mtsLinkJumpRetried = target;
+			LOG(("MtsLink Messages: jump target %1 not loaded yet"
+				).arg(target.bare));
+			crl::on_main(this, [=] {
+				if (_history) {
+					delayedShowAt(target, params);
+				}
+			});
+			return _scroll->scrollTopMax();
+		} else if (itemTop < 0) {
 			setMsgId(ShowAtUnreadMsgId);
 			controller()->showToast(tr::lng_message_not_found(tr::now));
 			return countInitialScrollTop();
@@ -11172,7 +11203,28 @@ void HistoryWidget::fullInfoUpdated() {
 	}
 }
 
+void HistoryWidget::mtsLinkPreviewPoll() {
+	const auto channel = _peer ? _peer->asChannel() : nullptr;
+	const auto preview = channel
+		&& !channel->amIn()
+		&& MtsLink::hasChatId(channel->id);
+	if (!preview) {
+		_mtsLinkPreviewPollTimer.cancel();
+		return;
+	} else if (!_mtsLinkPreviewPollTimer.isActive()) {
+		constexpr auto kPreviewPollTimeout = crl::time(10000);
+		_mtsLinkPreviewPollTimer.callEach(kPreviewPollTimeout);
+		return;
+	}
+	const auto mts = session().account().mtsLinkSession();
+	const auto chatId = MtsLink::peerIdToChatId(channel->id);
+	if (mts && mts->rpc()->isConnected() && !chatId.isEmpty()) {
+		mts->messages()->load(chatId);
+	}
+}
+
 void HistoryWidget::handlePeerUpdate() {
+	mtsLinkPreviewPoll();
 	bool resize = false;
 	updateSendRestriction();
 	updateHistoryGeometry();

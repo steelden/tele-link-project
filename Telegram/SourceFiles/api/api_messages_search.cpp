@@ -129,7 +129,13 @@ void MessagesSearch::searchRequest() {
 			MessageIdsList ids;
 			ids.reserve(messages.size());
 			for (const auto &src : messages) {
-				const auto item = MtsLink::addMessage(&session, src);
+				// Detached: not new messages, no notifications.
+				auto detached = std::vector<not_null<HistoryItem*>>();
+				const auto item = MtsLink::addMessage(
+					&session,
+					src,
+					false,
+					&detached);
 				if (item) {
 					if (isPinnedSearch) {
 						item->setIsPinned(true);
