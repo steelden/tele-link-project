@@ -6049,13 +6049,30 @@ bool tryNavigateDirectUrl(
 
 } // namespace
 
+// Conference links (https://my.mts-link.ru/j/MTC/<id>...) are opened in
+// the call window or the system browser, as set in the settings.
+[[nodiscard]] bool tryOpenConferenceUrl(const QUrl &original) {
+	// A link in a text may come without the scheme.
+	const auto url = original.host().isEmpty()
+		? QUrl::fromUserInput(original.toString())
+		: original;
+	if (!url.host().endsWith(u"mts-link.ru"_q, Qt::CaseInsensitive)
+		|| !url.path().startsWith(u"/j/"_q)) {
+		return false;
+	}
+	LOG(("MtsLink Navigate: conference link %1").arg(url.toString()));
+	openCallLink(url.toString());
+	return true;
+}
+
 void handleMtsLinkUrl(
 		const QString &url,
 		const QVariant &context) {
 	LOG(("MtsLink Navigate: handleMtsLinkUrl url='%1'").arg(url));
 	const auto parsed = QUrl(url);
 	const auto path = parsed.path();
-	if (tryNavigateDirectUrl(parsed, context)) {
+	if (tryOpenConferenceUrl(parsed)
+		|| tryNavigateDirectUrl(parsed, context)) {
 		return;
 	}
 	if (!path.startsWith(u"/r/"_q)) {
@@ -6089,7 +6106,8 @@ void handleMtsLinkUrl(
 			if (!origin.isEmpty()) {
 				LOG(("MtsLink Navigate: origin='%1'").arg(origin));
 				const auto originUrl = QUrl(origin);
-				if (!tryNavigateDirectUrl(originUrl, context)) {
+				if (!tryOpenConferenceUrl(originUrl)
+					&& !tryNavigateDirectUrl(originUrl, context)) {
 					File::OpenUrl(origin);
 				}
 			} else {
