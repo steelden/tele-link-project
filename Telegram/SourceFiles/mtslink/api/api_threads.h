@@ -35,6 +35,11 @@ public:
 	explicit Threads(Rpc *rpc, QObject *parent = nullptr);
 
 	void loadMyThreads(int limit = 100, int offset = 0);
+	void loadThread(const MessageId &threadId);
+	void setThreadNotifications(
+		const ChatId &chatId,
+		const MessageId &threadId,
+		bool isNotifiable);
 	void joinThread(const ChatId &chatId, const MessageId &threadId);
 	void leaveThread(const ChatId &chatId, const MessageId &threadId);
 	void getUnreadCounter(const OrganizationId &orgId);
@@ -43,6 +48,10 @@ Q_SIGNALS:
 	void threadsLoaded(const QList<ThreadData> &threads);
 	void threadJoined(const ChatId &chatId, const MessageId &threadId);
 	void threadLeft(const ChatId &chatId, const MessageId &threadId);
+	void threadNotificationsChanged(
+		const ChatId &chatId,
+		const MessageId &threadId,
+		bool isNotifiable);
 	void unreadCounterLoaded(int count);
 
 private:

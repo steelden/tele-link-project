@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/dialogs_inner_widget.h"
 
 #include "dialogs/dialogs_three_state_icon.h"
+#include "mtslink/data_adapters.h"
 #include "dialogs/ui/chat_search_empty.h"
 #include "dialogs/ui/chat_search_in.h"
 #include "dialogs/ui/dialogs_layout.h"
@@ -577,6 +578,12 @@ InnerWidget::InnerWidget(
 		};
 		update(previous);
 		update(next);
+	}, lifetime());
+
+	// Thread rows are active while their thread is open in the parent chat.
+	MtsLink::openThreadChanges(
+	) | rpl::on_next([=] {
+		update();
 	}, lifetime());
 
 	_controller->window().widget()->globalForceClicks(
@@ -1817,6 +1824,15 @@ bool InnerWidget::isRowActive(
 	const auto key = row->key();
 	if (entry.key == key) {
 		return true;
+	} else if (const auto history = key.history()
+		; history && MtsLink::isThreadPeer(history->peer->id)) {
+		// The opened thread is shown as its parent chat in Replies mode.
+		const auto active = entry.key.history();
+		const auto [parentPeerId, rootId] = MtsLink::threadParentInfo(
+			history->peer->id);
+		return active
+			&& (active->peer->id == parentPeerId)
+			&& (MtsLink::currentOpenThreadRoot(parentPeerId) == rootId);
 	} else if (const auto topic = entry.key.topic()) {
 		if (const auto history = key.history()) {
 			return (history->peer == topic->peer())

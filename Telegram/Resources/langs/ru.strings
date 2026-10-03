@@ -606,6 +606,10 @@ Based on Telegram Desktop lang.strings format
 "lng_mtslink_call_start" = "Позвонить";
 "lng_mtslink_call_join" = "Присоединиться";
 "lng_mtslink_status_in_call" = "в звонке";
+"lng_mtslink_thread_subscribe" = "Подписаться на тред";
+"lng_mtslink_thread_unsubscribe" = "Отписаться от треда";
+"lng_mtslink_thread_mute" = "Отключить уведомления треда";
+"lng_mtslink_thread_unmute" = "Включить уведомления треда";
 "lng_duration_minsec_minutes#one" = "{count} мин";
 "lng_duration_minsec_minutes#few" = "{count} мин";
 "lng_duration_minsec_minutes#many" = "{count} мин";

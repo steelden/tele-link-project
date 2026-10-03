@@ -31,6 +31,19 @@ void Threads::loadMyThreads(int limit, int offset) {
 		});
 }
 
+void Threads::loadThread(const MessageId &threadId) {
+	_rpc->call(
+		"Chat.GetMyThreadV2",
+		QJsonObject{ { "threadId", threadId } },
+		[this](const QJsonObject &result) {
+			const auto thread = result.value("value").toObject()
+				.value("thread").toObject();
+			if (!thread.isEmpty()) {
+				Q_EMIT threadsLoaded({ parseThread(thread) });
+			}
+		});
+}
+
 void Threads::joinThread(
 		const ChatId &chatId,
 		const MessageId &threadId) {
@@ -56,6 +69,27 @@ void Threads::leaveThread(
 		},
 		[this, chatId, threadId](const QJsonObject &) {
 			Q_EMIT threadLeft(chatId, threadId);
+		});
+}
+
+void Threads::setThreadNotifications(
+		const ChatId &chatId,
+		const MessageId &threadId,
+		bool isNotifiable) {
+	_rpc->call(
+		"Chat.SetThreadNotifications",
+		QJsonObject{
+			{ "chatId", chatId },
+			{ "messageId", threadId },
+			{ "isNotifiable", isNotifiable },
+		},
+		[=](const QJsonObject &result) {
+			if (result.value("type").toString() != u"BusinessError"_q) {
+				Q_EMIT threadNotificationsChanged(
+					chatId,
+					threadId,
+					isNotifiable);
+			}
 		});
 }
 

@@ -32,6 +32,7 @@ based on Telegram Desktop.
 #include "dialogs/dialogs_pinned_list.h"
 #include "ui/text/format_values.h"
 #include "ui/boxes/confirm_box.h"
+#include "styles/style_menu_icons.h"
 #include "dialogs/dialogs_key.h"
 #include "data/data_lastseen_status.h"
 #include "data/data_types.h"
@@ -114,6 +115,7 @@ struct PeerMsgKey {
 }
 
 QHash<PeerMsgKey, PeerId> ThreadReverseMap;
+QHash<PeerId, MsgId> CurrentOpenThreads; // parent peer -> open root
 
 
 QString myUserIdFilePath() {
@@ -237,6 +239,8 @@ bool FolderPinsSyncScheduled = false;
 QSet<PeerId> InCallUsers;
 QSet<PeerId> PresenceKnownUsers;
 QSet<PeerId> PresenceRequestedUsers;
+QHash<PeerId, bool> ThreadNotifiable; // thread peer -> isNotifiable
+QSet<QString> ThreadLoadRequested;
 
 // MTS Link reports presence explicitly: a user stays online until
 // MemberOffline, so the online status must not expire on its own.
@@ -1111,9 +1115,42 @@ void handleNotificationEvent(
 	not_null<Main::Session*> session,
 	const QJsonObject &param);
 
+// MTS Link ids are UUIDv6: the leading 60 bits are a Gregorian timestamp
+// in 100ns units, "1f1becd2-d550-652e-..." -> 1f1becd2 d550 52e.
+[[nodiscard]] TimeId uuidV6Time(const QString &uuid) {
+	const auto parts = uuid.split('-');
+	if (parts.size() != 5
+		|| parts[0].size() != 8
+		|| parts[1].size() != 4
+		|| parts[2].size() != 4
+		|| parts[2][0] != QChar('6')) {
+		return 0;
+	}
+	auto ok1 = false, ok2 = false, ok3 = false;
+	const auto high = parts[0].toULongLong(&ok1, 16);
+	const auto mid = parts[1].toULongLong(&ok2, 16);
+	const auto low = parts[2].mid(1).toULongLong(&ok3, 16);
+	if (!ok1 || !ok2 || !ok3) {
+		return 0;
+	}
+	const auto ticks = (high << 28) | (mid << 12) | low;
+	constexpr auto kGregorianToUnix = 0x01B21DD213814000ULL;
+	return (ticks > kGregorianToUnix)
+		? TimeId((ticks - kGregorianToUnix) / 10000000ULL)
+		: 0;
+}
+
+MTPPeerNotifySettings makeMuteSettings(bool muted);
+void applyThreadNotifiable(
+	not_null<Main::Session*> session,
+	const QString &chatId,
+	const QString &threadId,
+	bool notifiable);
+
 void applyThreadsList(
 		not_null<Main::Session*> session,
 		const QList<Api::ThreadData> &threads) {
+	auto previousActivity = TimeId(0);
 	for (const auto &thread : threads) {
 		const auto peerId = chatIdToPeerId(
 			thread.id, ChatType::Thread);
@@ -1136,6 +1173,10 @@ void applyThreadsList(
 		if (!history->folderKnown()) {
 			history->clearFolder();
 		}
+		ThreadNotifiable.insert(peerId, thread.isNotifiable);
+		session->data().notifySettings().apply(
+			channel,
+			makeMuteSettings(!thread.isNotifiable));
 
 		const auto createdAt = thread.message.value("createdAt");
 		const auto dateMs = createdAt.isDouble()
@@ -1195,6 +1236,11 @@ void applyThreadsList(
 				MTP_messageMediaEmpty());
 		}
 		const auto parentPeerId = chatIdToPeerId(thread.chatId);
+		// The parent message may never be loaded in its chat, but the thread
+		// view resolves the root uuid through this map to load replies.
+		if (msgIdToMtsLinkId(parentPeerId, rootId).isEmpty()) {
+			registerMessageId(parentPeerId, rootId, thread.id);
+		}
 		ThreadTopicMap.insert(rootId, { thread.chatId, thread.id });
 		ThreadPeerInfoMap.insert(peerId, { parentPeerId, rootId });
 		ThreadReverseMap.insert({ parentPeerId, rootId }, peerId);
@@ -1206,6 +1252,15 @@ void applyThreadsList(
 			ThreadAuthorMap.insert(peerId, PeerId(::UserId(authorBare)));
 		}
 
+		// Keep exactly the server order: the list comes newest first, so
+		// each next thread gets an earlier time than the previous one.
+		auto activity = std::max(date, uuidV6Time(thread.lastChildId));
+		if (previousActivity && activity >= previousActivity) {
+			activity = previousActivity - 1;
+		}
+		previousActivity = activity;
+		history->setChatListTimeId(activity);
+		history->updateChatListExistence();
 		session->data().refreshChatListEntry(
 			Dialogs::Key(history));
 	}
@@ -1218,6 +1273,11 @@ QList<Api::ChannelData> PendingChannelsList;
 QList<Api::ChannelData> LoadedDialogsList;
 bool DialogsApplied = false;
 bool ActiveChatRestored = false;
+
+void applyThreadLeft(
+	not_null<Main::Session*> session,
+	const QString &chatId,
+	const QString &threadId);
 
 void connectToSession(
 		not_null<Main::Session*> mainSession,
@@ -1759,6 +1819,30 @@ void connectToSession(
 		[mainSession](const QList<Api::ThreadData> &threads) {
 			applyThreadsList(mainSession, threads);
 		});
+	QObject::connect(
+		mtsSession->threads(),
+		&Api::Threads::threadJoined,
+		[mtsSession](const ChatId &, const MessageId &threadId) {
+			LOG(("MtsLink Thread: joined %1").arg(threadId));
+			ThreadLoadRequested.insert(threadId);
+			mtsSession->threads()->loadThread(threadId);
+		});
+	QObject::connect(
+		mtsSession->threads(),
+		&Api::Threads::threadNotificationsChanged,
+		[mainSession](
+				const ChatId &chatId,
+				const MessageId &threadId,
+				bool isNotifiable) {
+			applyThreadNotifiable(mainSession, chatId, threadId, isNotifiable);
+		});
+	QObject::connect(
+		mtsSession->threads(),
+		&Api::Threads::threadLeft,
+		[mainSession](const ChatId &chatId, const MessageId &threadId) {
+			LOG(("MtsLink Thread: left %1").arg(threadId));
+			applyThreadLeft(mainSession, chatId, threadId);
+		});
 
 	{
 		using Flag = Data::ChatFilter::Flag;
@@ -1979,6 +2063,245 @@ QString firstPendingThreadUnreadUuid(PeerId chatPeerId) {
 		}
 	}
 	return {};
+}
+
+namespace {
+
+History *threadEntryHistory(
+		not_null<Main::Session*> session,
+		PeerId parentPeerId,
+		MsgId rootId) {
+	const auto it = ThreadReverseMap.constFind({ parentPeerId, rootId });
+	if (it == ThreadReverseMap.constEnd()) {
+		return nullptr;
+	}
+	const auto history = session->data().historyLoaded(it.value());
+	return (history && history->folderKnown()) ? history : nullptr;
+}
+
+} // namespace
+
+MsgId currentOpenThreadRoot(PeerId parentPeerId) {
+	return CurrentOpenThreads.value(parentPeerId);
+}
+
+PeerId threadPeerFor(PeerId parentPeerId, MsgId rootId) {
+	return ThreadReverseMap.value({ parentPeerId, rootId });
+}
+
+void requestMessageData(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		MsgId msgId,
+		Fn<void()> done) {
+	const auto mts = session->account().mtsLinkSession();
+	const auto chatId = peerIdToChatId(peerId);
+	const auto rootUuid = msgIdToMtsLinkId(peerId, msgId);
+	if (!mts || !mts->messages() || chatId.isEmpty() || rootUuid.isEmpty()) {
+		LOG(("MtsLink: can't load message chat='%1' msg='%2' (id %3)")
+			.arg(chatId)
+			.arg(rootUuid)
+			.arg(msgId.bare));
+		if (done) {
+			done();
+		}
+		return;
+	}
+	const auto weak = base::make_weak(session);
+	const auto conn = std::make_shared<QMetaObject::Connection>();
+	*conn = QObject::connect(
+		mts->messages(),
+		&Api::Messages::aroundMessagesLoaded,
+		[=](
+				const ChatId &loadedChatId,
+				const MessageId &targetId,
+				const QList<Api::MessageData> &messages,
+				const QList<Api::MemberProfile> &profiles) {
+			if (loadedChatId != chatId || targetId != rootUuid) {
+				return;
+			}
+			QObject::disconnect(*conn);
+			const auto strong = weak.get();
+			if (!strong) {
+				return;
+			}
+			for (const auto &p : profiles) {
+				applyUserData(strong, p);
+			}
+			auto found = false;
+			for (const auto &message : messages) {
+				if (message.id == rootUuid) {
+					addMessage(strong, message, true);
+					found = true;
+				}
+			}
+			LOG(("MtsLink: message %1 loaded=%2 (messages=%3)")
+				.arg(rootUuid)
+				.arg(found ? 1 : 0)
+				.arg(messages.size()));
+			if (done) {
+				done();
+			}
+		});
+	// "Around" with limit 2 loads one message after the previous one: the root.
+	mts->messages()->loadAround(chatId, rootUuid, 2);
+}
+
+bool isThreadSubscribed(
+		not_null<Main::Session*> session,
+		PeerId parentPeerId,
+		MsgId rootId) {
+	const auto it = ThreadReverseMap.constFind({ parentPeerId, rootId });
+	if (it == ThreadReverseMap.constEnd()) {
+		return false;
+	}
+	const auto channel = session->data().channelLoaded(
+		peerToChannel(it.value()));
+	return channel && channel->amIn();
+}
+
+void setThreadSubscribed(
+		not_null<Main::Session*> session,
+		PeerId parentPeerId,
+		MsgId rootId,
+		bool subscribed) {
+	const auto mts = session->account().mtsLinkSession();
+	const auto chatId = peerIdToChatId(parentPeerId);
+	const auto threadId = msgIdToMtsLinkId(parentPeerId, rootId);
+	if (!mts || !mts->threads() || chatId.isEmpty() || threadId.isEmpty()) {
+		LOG(("MtsLink Thread: can't change subscription chat='%1' thread='%2'")
+			.arg(chatId)
+			.arg(threadId));
+		return;
+	}
+	if (subscribed) {
+		mts->threads()->joinThread(chatId, threadId);
+	} else {
+		mts->threads()->leaveThread(chatId, threadId);
+	}
+}
+
+void fillThreadSubscriptionActions(
+		not_null<Main::Session*> session,
+		PeerId parentPeerId,
+		MsgId rootId,
+		Fn<void(const QString&, Fn<void()>, const style::icon*)> addAction,
+		bool withSubscribe) {
+	const auto subscribed = isThreadSubscribed(session, parentPeerId, rootId);
+	if (withSubscribe || subscribed) {
+		addAction((subscribed
+			? tr::lng_mtslink_thread_unsubscribe
+			: tr::lng_mtslink_thread_subscribe)(tr::now), [=] {
+			setThreadSubscribed(session, parentPeerId, rootId, !subscribed);
+		}, subscribed ? &st::menuIconLeave : &st::menuIconAddToFolder);
+	}
+	if (subscribed) {
+		const auto notifiable = isThreadNotifiable(parentPeerId, rootId);
+		addAction((notifiable
+			? tr::lng_mtslink_thread_mute
+			: tr::lng_mtslink_thread_unmute)(tr::now), [=] {
+			setThreadNotifiable(session, parentPeerId, rootId, !notifiable);
+		}, notifiable ? &st::menuIconMute : &st::menuIconUnmute);
+	}
+}
+
+bool isThreadNotifiable(PeerId parentPeerId, MsgId rootId) {
+	const auto it = ThreadReverseMap.constFind({ parentPeerId, rootId });
+	return (it == ThreadReverseMap.constEnd())
+		|| ThreadNotifiable.value(it.value(), true);
+}
+
+void setThreadNotifiable(
+		not_null<Main::Session*> session,
+		PeerId parentPeerId,
+		MsgId rootId,
+		bool notifiable) {
+	const auto mts = session->account().mtsLinkSession();
+	const auto chatId = peerIdToChatId(parentPeerId);
+	const auto threadId = msgIdToMtsLinkId(parentPeerId, rootId);
+	if (mts && mts->threads() && !chatId.isEmpty() && !threadId.isEmpty()) {
+		mts->threads()->setThreadNotifications(chatId, threadId, notifiable);
+	}
+}
+
+void applyThreadNotifiable(
+		not_null<Main::Session*> session,
+		PeerId threadPeerId,
+		bool notifiable) {
+	ThreadNotifiable.insert(threadPeerId, notifiable);
+	if (const auto peer = session->data().peerLoaded(threadPeerId)) {
+		session->data().notifySettings().apply(
+			peer,
+			makeMuteSettings(!notifiable));
+	}
+}
+
+void applyThreadNotifiable(
+		not_null<Main::Session*> session,
+		const QString &chatId,
+		const QString &threadId,
+		bool notifiable) {
+	const auto parentPeerId = chatIdToPeerId(chatId);
+	const auto rootId = MsgId(uuidToBareId(threadId) & 0x7FFFFFFFLL);
+	const auto it = ThreadReverseMap.constFind({ parentPeerId, rootId });
+	if (it != ThreadReverseMap.constEnd()) {
+		applyThreadNotifiable(session, it.value(), notifiable);
+	}
+}
+
+void applyThreadLeft(
+		not_null<Main::Session*> session,
+		const QString &chatId,
+		const QString &threadId) {
+	const auto parentPeerId = chatIdToPeerId(chatId);
+	const auto rootId = MsgId(uuidToBareId(threadId) & 0x7FFFFFFFLL);
+	const auto it = ThreadReverseMap.constFind({ parentPeerId, rootId });
+	if (it == ThreadReverseMap.constEnd()) {
+		return;
+	}
+	const auto channel = session->data().channelLoaded(
+		peerToChannel(it.value()));
+	if (!channel) {
+		return;
+	}
+	channel->setFlags(channel->flags() | ChannelDataFlag::Left);
+	if (const auto history = session->data().historyLoaded(channel)) {
+		history->setUnreadCount(0);
+		// Threads live in the "Threads" folder list only, refreshing
+		// drops the entry there, as ChatFilter::contains() is false now.
+		session->data().refreshChatListEntry(Dialogs::Key(history));
+	}
+	ThreadLoadRequested.remove(threadId);
+}
+
+void addThreadEntryUnread(
+		not_null<Main::Session*> session,
+		PeerId parentPeerId,
+		MsgId rootId,
+		int delta,
+		TimeId date) {
+	const auto history = threadEntryHistory(session, parentPeerId, rootId);
+	if (!history) {
+		return;
+	}
+	if (delta > 0) {
+		history->setUnreadCount(history->unreadCount() + delta);
+	}
+	if (date > history->chatListTimeId()) {
+		history->setChatListTimeId(date);
+	}
+	session->data().refreshChatListEntry(Dialogs::Key(history));
+}
+
+void resetThreadEntryUnread(
+		not_null<Main::Session*> session,
+		PeerId parentPeerId,
+		MsgId rootId) {
+	const auto history = threadEntryHistory(session, parentPeerId, rootId);
+	if (history && history->unreadCount() > 0) {
+		history->setUnreadCount(0);
+		session->data().refreshChatListEntry(Dialogs::Key(history));
+	}
 }
 
 void updateThreadParticipants(
@@ -3039,8 +3362,33 @@ void handleChatEvent(
 				info.count++;
 				info.parentUuid = msg.parentId;
 			}
-			if (threadIsOpen) {
-				// Thread view is open — no scroll to parent needed.
+			const auto threadIt = ThreadReverseMap.constFind(
+				{ chatPeerId, parentMsgId });
+			if (threadIt != ThreadReverseMap.constEnd()) {
+				addThreadEntryUnread(
+					session,
+					chatPeerId,
+					parentMsgId,
+					(isOwn || threadIsOpen) ? 0 : 1,
+					TimeId(msg.createdAt / 1000));
+				const auto notifiable = ThreadNotifiable.value(
+					threadIt.value(),
+					true);
+				if (newItem && !isOwn && !threadIsOpen && notifiable) {
+					auto notification = Data::ItemNotification{
+						.item = newItem,
+						.type = Data::ItemNotificationType::Message,
+					};
+					newItem->notificationThread()->pushNotification(
+						notification);
+					Core::App().notifications().schedule(notification);
+				}
+			} else if (mts
+				&& mts->threads()
+				&& !ThreadLoadRequested.contains(msg.parentId)) {
+				// A thread missing from the list: subscribed just now.
+				ThreadLoadRequested.insert(msg.parentId);
+				mts->threads()->loadThread(msg.parentId);
 			}
 			const auto history = session->data().history(chatPeerId);
 			const auto last = history->lastMessage();
@@ -3160,6 +3508,23 @@ void handleChatEvent(
 		}
 		if (const auto last = history->lastMessage()) {
 			last->invalidateChatListEntry();
+		}
+	} else if (type == "ThreadNotificationsSettedEvent") {
+		applyThreadNotifiable(
+			session,
+			value.value("chatId").toString(),
+			value.value("messageId").toString(),
+			value.value("isNotifiable").toBool(true));
+	} else if (type == "LeaveFromThreadEvent") {
+		applyThreadLeft(
+			session,
+			value.value("chatId").toString(),
+			value.value("threadId").toString());
+	} else if (type == "JoinToThreadEvent") {
+		const auto threadId = value.value("threadId").toString();
+		const auto mts = session->account().mtsLinkSession();
+		if (!threadId.isEmpty() && mts && mts->threads()) {
+			mts->threads()->loadThread(threadId);
 		}
 	} else if (type == "PinnedChatEvent") {
 		const auto eventChatId = value.value("chatId").toString();
@@ -3686,14 +4051,29 @@ std::optional<ThreadScrollState> threadScroll(PeerId peerId, MsgId rootId) {
 	return std::nullopt;
 }
 
-static QHash<PeerId, MsgId> CurrentOpenThreads;
 
-void setCurrentOpenThread(PeerId peerId, MsgId rootId) {
-	CurrentOpenThreads[peerId] = rootId;
+rpl::event_stream<> &OpenThreadChangesStream() {
+	static auto result = rpl::event_stream<>();
+	return result;
 }
 
-void clearCurrentOpenThread(PeerId peerId) {
-	CurrentOpenThreads.remove(peerId);
+void setCurrentOpenThread(PeerId peerId, MsgId rootId) {
+	if (CurrentOpenThreads.value(peerId) != rootId) {
+		CurrentOpenThreads[peerId] = rootId;
+		OpenThreadChangesStream().fire({});
+	}
+}
+
+void clearCurrentOpenThread(PeerId peerId, MsgId rootId) {
+	const auto i = CurrentOpenThreads.find(peerId);
+	if (i != CurrentOpenThreads.end() && i.value() == rootId) {
+		CurrentOpenThreads.erase(i);
+		OpenThreadChangesStream().fire({});
+	}
+}
+
+rpl::producer<> openThreadChanges() {
+	return OpenThreadChangesStream().events();
 }
 
 bool isThreadOpen(PeerId peerId, MsgId rootId) {

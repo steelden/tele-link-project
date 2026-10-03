@@ -1292,6 +1292,10 @@ void RepliesList::readTill(
 					root->setCommentsInboxReadTill(views->commentsMaxId);
 				}
 			}
+			MtsLink::resetThreadEntryUnread(
+				&_history->session(),
+				_history->peer->id,
+				_rootId);
 			auto threadUnread = 0;
 			if (tillIdItem && oldMtsReadDate < tillIdItem->date()) {
 				for (const auto &msgId : _list) {

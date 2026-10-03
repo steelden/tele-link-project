@@ -12,6 +12,7 @@ Bridges MTS Link API data into tdesktop's data model
 #include "mtslink/api/api_messages.h"
 #include "mtslink/api/api_threads.h"
 #include "ui/text/text_entity.h"
+#include "ui/style/style_core_types.h"
 
 #include <QtNetwork/QNetworkCookie>
 
@@ -69,6 +70,53 @@ void applyPendingThreadUnreads(
 [[nodiscard]] int pendingThreadUnreadCount(PeerId chatPeerId);
 [[nodiscard]] MsgId firstPendingThreadUnreadParent(PeerId chatPeerId);
 [[nodiscard]] QString firstPendingThreadUnreadUuid(PeerId chatPeerId);
+
+[[nodiscard]] MsgId currentOpenThreadRoot(PeerId parentPeerId);
+[[nodiscard]] PeerId threadPeerFor(PeerId parentPeerId, MsgId rootId);
+
+// Loads a single message of the chat from the server, done() is always called.
+void requestMessageData(
+	not_null<Main::Session*> session,
+	PeerId peerId,
+	MsgId msgId,
+	Fn<void()> done);
+[[nodiscard]] bool isThreadSubscribed(
+	not_null<Main::Session*> session,
+	PeerId parentPeerId,
+	MsgId rootId);
+void setThreadSubscribed(
+	not_null<Main::Session*> session,
+	PeerId parentPeerId,
+	MsgId rootId,
+	bool subscribed);
+
+[[nodiscard]] bool isThreadNotifiable(PeerId parentPeerId, MsgId rootId);
+
+// Adds "subscribe / unsubscribe" and, when subscribed, "mute / unmute"
+// thread actions through the given menu callback.
+void fillThreadSubscriptionActions(
+	not_null<Main::Session*> session,
+	PeerId parentPeerId,
+	MsgId rootId,
+	Fn<void(const QString&, Fn<void()>, const style::icon*)> addAction,
+	bool withSubscribe = true);
+void setThreadNotifiable(
+	not_null<Main::Session*> session,
+	PeerId parentPeerId,
+	MsgId rootId,
+	bool notifiable);
+
+// Unread counter of the thread entry in the "Threads" folder.
+void addThreadEntryUnread(
+	not_null<Main::Session*> session,
+	PeerId parentPeerId,
+	MsgId rootId,
+	int delta,
+	TimeId date);
+void resetThreadEntryUnread(
+	not_null<Main::Session*> session,
+	PeerId parentPeerId,
+	MsgId rootId);
 
 void applyThreadsList(
 	not_null<Main::Session*> session,
@@ -141,7 +189,10 @@ void saveThreadScroll(PeerId peerId, MsgId rootId, const ThreadScrollState &stat
 [[nodiscard]] std::optional<ThreadScrollState> threadScroll(PeerId peerId, MsgId rootId);
 
 void setCurrentOpenThread(PeerId peerId, MsgId rootId);
-void clearCurrentOpenThread(PeerId peerId);
+// Clears only if rootId is still the open one: a new thread view of the same
+// chat is created before the previous one is destroyed.
+void clearCurrentOpenThread(PeerId peerId, MsgId rootId);
+[[nodiscard]] rpl::producer<> openThreadChanges();
 [[nodiscard]] bool isThreadOpen(PeerId peerId, MsgId rootId);
 
 void cacheRepliesList(PeerId peerId, MsgId rootId, std::shared_ptr<Data::RepliesList> replies);

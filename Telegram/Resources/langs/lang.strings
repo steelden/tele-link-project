@@ -6443,6 +6443,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_call_start" = "Call";
 "lng_mtslink_call_join" = "Join";
 "lng_mtslink_status_in_call" = "in a call";
+"lng_mtslink_thread_subscribe" = "Subscribe to thread";
+"lng_mtslink_thread_unsubscribe" = "Unsubscribe from thread";
+"lng_mtslink_thread_mute" = "Mute thread";
+"lng_mtslink_thread_unmute" = "Unmute thread";
 "lng_call_invitation" = "Group call invitation";
 "lng_call_ongoing" = "Ongoing group call";
 

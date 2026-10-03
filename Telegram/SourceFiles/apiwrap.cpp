@@ -643,6 +643,10 @@ void ApiWrap::requestMessageData(
 		PeerData *peer,
 		MsgId msgId,
 		Fn<void()> done) {
+	if (peer && MtsLink::hasChatId(peer->id)) {
+		MtsLink::requestMessageData(_session, peer->id, msgId, std::move(done));
+		return;
+	}
 	auto &requests = (peer && peer->isChannel())
 		? _channelMessageDataRequests[peer->asChannel()][msgId]
 		: _messageDataRequests[msgId];

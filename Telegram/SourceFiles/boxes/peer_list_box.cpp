@@ -1471,6 +1471,11 @@ void PeerListContent::removeRow(not_null<PeerListRow*> row) {
 	_hiddenRows.remove(row);
 	removeRowAtIndex(eraseFrom, index);
 
+	// Section headers map Y to row indices, keep them in sync before
+	// restoreSelection() resolves the row under the mouse.
+	if (_sections) {
+		refreshSectionHeaders();
+	}
 	restoreSelection();
 	setPressed(restoreSelectedData(pressedData));
 	setContexted(restoreSelectedData(contextedData));
@@ -2652,6 +2657,9 @@ void PeerListContent::selectByMouse(QPoint globalPosition) {
 		: (rowsPointY < shownRowsCount() * _rowHeight)
 		? (rowsPointY / _rowHeight)
 		: -1;
+	if (selected.index.value >= shownRowsCount()) {
+		selected.index.value = -1;
+	}
 	if (selected.index.value >= 0) {
 		const auto row = getRow(selected.index);
 		if (row->disabled()

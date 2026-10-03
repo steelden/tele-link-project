@@ -64,7 +64,9 @@ rpl::producer<Ui::MessageBarContent> RootViewContent(
 		std::move(repaint)
 	) | rpl::map([=](Ui::MessageBarContent &&content) {
 		const auto item = history->owner().message(history->peer, rootId);
-		if (!item) {
+		if (!item && content.text.text.isEmpty()) {
+			// Empty content means loading finished without the message,
+			// while loading the content shows a "Loading..." text.
 			content.text = tr::link(tr::lng_deleted_message(tr::now));
 		}
 		PeerData *sender = history->peer;

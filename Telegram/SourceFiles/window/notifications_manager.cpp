@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio.h"
 #include "mtproto/mtproto_config.h"
 #include "mtslink/data_adapters.h"
+#include "data/data_chat_filters.h"
 #include "history/history.h"
 #include "history/history_item_components.h"
 #include "history/history_item_helpers.h"
@@ -1402,6 +1403,40 @@ Window::SessionController *Manager::openNotificationMessage(
 			separateId,
 			itemId)->sessionController()
 		: history->session().tryResolveWindow();
+	const auto mtsLinkThreadRoot = (item && MtsLink::hasChatId(history->peer->id))
+		? MtsLink::threadRootFor(history->peer->id, item->id)
+		: MsgId();
+	if (window && mtsLinkThreadRoot) {
+		window->widget()->showFromTray();
+		using Flag = Data::ChatFilter::Flag;
+		const auto &filters = history->session().data().chatsFilters().list();
+		const auto hasThreadsFolder = ranges::any_of(
+			filters,
+			[](const Data::ChatFilter &filter) {
+				return (filter.flags() & Flag::Threads) != 0;
+			});
+		const auto threadPeerId = MtsLink::threadPeerFor(
+			history->peer->id,
+			mtsLinkThreadRoot);
+		if (hasThreadsFolder && threadPeerId) {
+			// Same as a click on the thread row in the "Threads" folder.
+			window->showPeerHistory(
+				threadPeerId,
+				SectionShow::Way::ClearStack,
+				messageId);
+		} else if (hasThreadsFolder) {
+			window->showRepliesForMessage(
+				history,
+				mtsLinkThreadRoot,
+				messageId);
+		} else {
+			window->showPeerHistory(
+				history->peer->id,
+				SectionShow::Way::Forward,
+				mtsLinkThreadRoot);
+		}
+		return window;
+	}
 	if (window) {
 		window->widget()->showFromTray();
 		if (topic) {

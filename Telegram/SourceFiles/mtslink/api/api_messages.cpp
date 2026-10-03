@@ -409,76 +409,74 @@ void Messages::loadAround(
 		int limit) {
 	const auto half = limit / 2;
 
-	QJsonObject beforeParam;
-	beforeParam["chatId"] = chatId;
-	beforeParam["from"] = messageId;
-	beforeParam["direction"] = QStringLiteral("Before");
-	beforeParam["limit"] = 1;
+	const auto emitEmpty = [=] {
+		Q_EMIT aroundMessagesLoaded(chatId, messageId, {}, {});
+	};
+	const auto emitResult = [=](const QJsonObject &r) {
+		const auto v = r.value("value").toObject();
+		const auto arr = v.value("messages").toArray();
+		const auto profArr = v.value("memberProfiles").toArray();
 
-	_rpc->call(
-		"Chat.GetMessagesV2",
-		beforeParam,
-		[this, chatId, messageId, half](const QJsonObject &result) {
-			const auto value = result.value("value").toObject();
-			const auto msgArray = value.value("messages").toArray();
-
-			QString prevId;
-			if (!msgArray.isEmpty()) {
-				prevId = msgArray.first().toObject()
-					.value("id").toString();
+		QList<MessageData> messages;
+		messages.reserve(arr.size());
+		for (const auto &item : arr) {
+			auto msg = parseMessage(item.toObject());
+			if (msg.isDeleted) {
+				continue;
 			}
-			if (prevId.isEmpty()) {
-				Q_EMIT aroundMessagesLoaded(
-					chatId, messageId, {}, {});
-				return;
+			if (msg.chatId.isEmpty()) {
+				msg.chatId = chatId;
 			}
+			messages.push_back(std::move(msg));
+		}
 
-			QJsonObject afterParam;
-			afterParam["chatId"] = chatId;
-			afterParam["from"] = prevId;
-			afterParam["direction"] = QStringLiteral("After");
-			afterParam["limit"] = half;
+		QList<MemberProfile> profiles;
+		profiles.reserve(profArr.size());
+		for (const auto &item : profArr) {
+			profiles.push_back(parseProfile(item.toObject()));
+		}
 
-			_rpc->call(
-				"Chat.GetMessagesV2",
-				afterParam,
-				[this, chatId, messageId](const QJsonObject &r) {
-					const auto v = r.value("value").toObject();
-					const auto arr = v.value("messages").toArray();
-					const auto profArr =
-						v.value("memberProfiles").toArray();
+		Q_EMIT aroundMessagesLoaded(chatId, messageId, messages, profiles);
+	};
+	const auto firstId = [](const QJsonObject &result) {
+		const auto list = result.value("value").toObject()
+			.value("messages").toArray();
+		return list.isEmpty()
+			? QString()
+			: list.first().toObject().value("id").toString();
+	};
+	const auto request = [=](
+			const QString &from,
+			const QString &direction,
+			int count,
+			Fn<void(const QJsonObject&)> done) {
+		_rpc->call(
+			"Chat.GetMessagesV2",
+			QJsonObject{
+				{ "chatId", chatId },
+				{ "from", from },
+				{ "direction", direction },
+				{ "limit", count },
+			},
+			std::move(done),
+			[=](const QString &) { emitEmpty(); });
+	};
 
-					QList<MessageData> messages;
-					messages.reserve(arr.size());
-					for (const auto &item : arr) {
-						auto msg = parseMessage(item.toObject());
-						if (msg.isDeleted) {
-							continue;
-						}
-						if (msg.chatId.isEmpty()) {
-							msg.chatId = chatId;
-						}
-						messages.push_back(std::move(msg));
-					}
-
-					QList<MemberProfile> profiles;
-					profiles.reserve(profArr.size());
-					for (const auto &item : profArr) {
-						profiles.push_back(
-							parseProfile(item.toObject()));
-					}
-
-					Q_EMIT aroundMessagesLoaded(
-						chatId, messageId, messages, profiles);
-				},
-				[this, chatId, messageId](const QString &) {
-					Q_EMIT aroundMessagesLoaded(
-						chatId, messageId, {}, {});
-				});
-		},
-		[this, chatId, messageId](const QString &) {
-			Q_EMIT aroundMessagesLoaded(chatId, messageId, {}, {});
+	request(messageId, u"Before"_q, 1, [=](const QJsonObject &result) {
+		if (const auto prevId = firstId(result); !prevId.isEmpty()) {
+			request(prevId, u"After"_q, half, emitResult);
+			return;
+		}
+		// The target is the first message in the chat: nothing before it,
+		// so take the next one and load "Before" it, which includes it.
+		request(messageId, u"After"_q, 1, [=](const QJsonObject &next) {
+			if (const auto nextId = firstId(next); !nextId.isEmpty()) {
+				request(nextId, u"Before"_q, std::max(half, 1), emitResult);
+			} else {
+				emitEmpty();
+			}
 		});
+	});
 }
 
 bool Messages::isLoading(const ChatId &chatId) const {

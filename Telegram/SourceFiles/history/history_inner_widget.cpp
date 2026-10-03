@@ -3022,6 +3022,16 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					rootId,
 					highlightId);
 			}, &st::menuIconViewReplies);
+			if (isMtsLink && !topicRootId) {
+				const auto menu = _menu.get();
+				MtsLink::fillThreadSubscriptionActions(
+					&_history->session(),
+					_history->peer->id,
+					rootId,
+					[=](const QString &text, Fn<void()> callback, const style::icon *icon) {
+						menu->addAction(text, std::move(callback), icon);
+					});
+			}
 		} else if (isMtsLink && !withReplies) {
 			const auto rootId = item->id;
 			_menu->addAction(tr::lng_replies_view_thread(tr::now), [=] {

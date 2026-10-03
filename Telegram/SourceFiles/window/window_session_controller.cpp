@@ -3200,7 +3200,11 @@ void SessionController::showPeerHistory(
 			MtsLink::setCurrentOpenThread(parentPeerId, rootId);
 			const auto parentHistory =
 				session().data().history(parentPeerId);
-			showRepliesForMessage(parentHistory, rootId, MsgId(0), params);
+			showRepliesForMessage(
+				parentHistory,
+				rootId,
+				IsServerMsgId(msgId) ? msgId : MsgId(0),
+				params);
 			return;
 		}
 	}

@@ -372,6 +372,12 @@ bool ChatFilter::contains(
 		return false;
 	}
 	const auto channel = history->peer->asChannel();
+	if (channel
+		&& !channel->amIn()
+		&& MtsLink::isThreadPeer(history->peer->id)) {
+		// Unsubscribed MTS Link thread.
+		return false;
+	}
 	if (channel && channel->isCommunity()) {
 		// A community never matches a filter by chat type (it is neither a
 		// group nor a channel); it can only be included explicitly by id.

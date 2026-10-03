@@ -938,6 +938,15 @@ bool AddViewRepliesAction(
 			rootId,
 			highlightId);
 	}), &st::menuIconViewReplies);
+	if (isMtsLink && !topicRootId) {
+		MtsLink::fillThreadSubscriptionActions(
+			&history->session(),
+			history->peer->id,
+			rootId,
+			[=](const QString &text, Fn<void()> callback, const style::icon *icon) {
+				menu->addAction(text, std::move(callback), icon);
+			});
+	}
 	return true;
 }
 

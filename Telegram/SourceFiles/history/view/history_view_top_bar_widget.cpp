@@ -1359,7 +1359,11 @@ void TopBarWidget::updateControlsVisibility() {
 		: (section == Section::WelcomeMessages)
 		? true
 		: (section == Section::Replies)
-		? (hasPollsMenu || hasTodoListsMenu || hasTopicMenu)
+		? (hasPollsMenu
+			|| hasTodoListsMenu
+			|| hasTopicMenu
+			|| (_activeChat.key.peer()
+				&& MtsLink::hasChatId(_activeChat.key.peer()->id)))
 		: (section == Section::ChatsList)
 		? (_activeChat.key.folder()
 			|| (_activeChat.key.peer() && _activeChat.key.peer()->isForum())

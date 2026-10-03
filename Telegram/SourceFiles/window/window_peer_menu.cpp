@@ -1940,6 +1940,21 @@ void Filler::addVideoChat() {
 }
 
 void Filler::fillContextMenuActions() {
+	if (_peer && MtsLink::isThreadPeer(_peer->id)) {
+		const auto [parentPeerId, rootId] = MtsLink::threadParentInfo(
+			_peer->id);
+		if (parentPeerId && rootId) {
+			MtsLink::fillThreadSubscriptionActions(
+				&_peer->session(),
+				parentPeerId,
+				rootId,
+				[&](const QString &text, Fn<void()> callback, const style::icon *icon) {
+					_addAction(text, std::move(callback), icon);
+				},
+				false);
+		}
+		return;
+	}
 	addNewWindow();
 	addCopyLink();
 	addUngroup();
@@ -2018,6 +2033,20 @@ void Filler::fillProfileActions() {
 }
 
 void Filler::fillRepliesActions() {
+	if (_peer && MtsLink::hasChatId(_peer->id)) {
+		const auto peerId = _peer->id;
+		const auto rootId = MtsLink::currentOpenThreadRoot(peerId);
+		if (rootId) {
+			MtsLink::fillThreadSubscriptionActions(
+				&_peer->session(),
+				peerId,
+				rootId,
+				[&](const QString &text, Fn<void()> callback, const style::icon *icon) {
+					_addAction(text, std::move(callback), icon);
+				});
+		}
+		return;
+	}
 	if (_topic) {
 		addInfo();
 		addManageTopic();
