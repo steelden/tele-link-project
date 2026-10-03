@@ -98,6 +98,8 @@ QHash<quint64, MsgId> ThreadRootMap;
 QString FileAuthTokenValue;
 QString FileRefreshTokenValue;
 QList<QNetworkCookie> FileAuthCookies;
+// The members of a chat loaded last time, they are not reloaded too often.
+QHash<QString, crl::time> MembersLoadedAt;
 // Incoming call messages: their notifications open the incoming call.
 base::flat_set<FullMsgId> CallMessages;
 std::function<void()> TokenRefreshCallback;
@@ -1957,6 +1959,7 @@ void connectToSession(
 		[mainSession, mtsSession](
 				const ChatId &chatId,
 				const QList<Api::MemberProfile> &members) {
+			MembersLoadedAt.insert(chatId, crl::now());
 			const auto peerId = chatIdToPeerId(chatId);
 			auto &stored = ChatMembersMap[peerId];
 			stored.clear();
@@ -6668,9 +6671,17 @@ void reloadChannelMembers(
 		not_null<Main::Session*> session,
 		PeerId channelPeerId) {
 	const auto chatId = peerIdToChatId(channelPeerId);
-	if (!chatId.isEmpty()) {
-		scheduleChannelMembersReload(session, chatId);
+	if (chatId.isEmpty()) {
+		return;
 	}
+	// The members panel is created on every chat opening, the members
+	// themselves change by server events (they reload the list).
+	constexpr auto kReloadTimeout = crl::time(60 * 1000);
+	const auto loaded = MembersLoadedAt.value(chatId);
+	if (loaded && crl::now() - loaded < kReloadTimeout) {
+		return;
+	}
+	scheduleChannelMembersReload(session, chatId);
 }
 
 rpl::producer<bool> channelPublicValue(PeerId channelPeerId) {
