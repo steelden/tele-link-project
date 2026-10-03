@@ -52,6 +52,10 @@ void Users::loadMember(const UserId &userId, const QString &organizationId) {
 			if (value.contains("inCall")) {
 				profile.inCall = int(value.value("inCall").toBool());
 			}
+			if (value.contains("customStatus")) {
+				profile.customStatus = value.value("customStatus").toObject();
+				profile.customStatusKnown = true;
+			}
 			_cache.insert(profile.userId, profile);
 			Q_EMIT memberLoaded(profile);
 		});
@@ -101,6 +105,10 @@ void Users::loadOrganizationMembers(int offset, int limit) {
 				if (obj.contains("inCall")) {
 					profile.inCall = int(obj.value("inCall").toBool());
 				}
+				if (obj.contains("customStatus")) {
+					profile.customStatus = obj.value("customStatus").toObject();
+					profile.customStatusKnown = true;
+				}
 				_cache.insert(profile.userId, profile);
 				members.push_back(std::move(profile));
 			}
@@ -147,6 +155,10 @@ void Users::searchMembers(
 					.avatarFileId = prof.value("avatarFileId").toString(),
 					.role = MemberRole::Member,
 				};
+				if (obj.contains("customStatus")) {
+					profile.customStatus = obj.value("customStatus").toObject();
+					profile.customStatusKnown = true;
+				}
 				if (!profile.userId.isEmpty()
 					&& !obj.value("isBot").toBool()) {
 					list.push_back(std::move(profile));
@@ -186,7 +198,7 @@ void Users::loadChatMembers(const ChatId &chatId) {
 				} else if (chatRole.contains("Admin")) {
 					role = MemberRole::Admin;
 				}
-				return MemberProfile{
+				auto result = MemberProfile{
 					.userId = obj.value("userId").toString(),
 					.organizationId =
 						obj.value("organizationId").toString(),
@@ -200,6 +212,11 @@ void Users::loadChatMembers(const ChatId &chatId) {
 						obj.value("avatarFileId").toString(),
 					.role = role,
 				};
+				if (obj.contains("customStatus")) {
+					result.customStatus = obj.value("customStatus").toObject();
+					result.customStatusKnown = true;
+				}
+				return result;
 			};
 
 			QList<MemberProfile> members;

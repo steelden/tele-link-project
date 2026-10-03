@@ -8,7 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 using "window/window.style";
 
 mainMenuWidth: 274px;
-mainMenuCoverHeight: 134px;
+mainMenuCoverHeight: 152px;
 mainMenuUserpicLeft: 24px;
 mainMenuUserpicTop: 20px;
 mainMenuCloudButton: IconButton {
@@ -51,3 +51,10 @@ mainMenuTelegramBottom: 38px;
 mainMenuVersionBottom: 17px;
 mainMenuToggleSize: 6px;
 mainMenuTogglePosition: point(30px, 30px);
+
+// The MTS Link status text: clickable, but not underlined as a link.
+mainMenuMtsStatusText: FlatLabel(defaultFlatLabel) {
+	style: TextStyle(defaultTextStyle) {
+		linkUnderline: kLinkUnderlineNever;
+	}
+}

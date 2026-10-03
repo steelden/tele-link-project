@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_peer.h"
 
+#include "ui/emoji_config.h"
 #include "api/api_sensitive_content.h"
 #include "data/data_user.h"
 #include "data/data_chat.h"
@@ -474,6 +475,33 @@ void PeerData::paintUserpic(
 		size * ratio,
 		context.shape);
 	p.drawImage(QRect(context.position, QSize(size, size)), view.cached);
+
+	paintStatusEmoji(p, QRect(context.position, QSize(size, size)));
+}
+
+void PeerData::paintStatusEmoji(QPainter &p, QRect userpic) const {
+	constexpr auto kMinStatusUserpic = 28;
+	const auto size = userpic.width();
+	if (!isUser() || size < kMinStatusUserpic) {
+		return;
+	}
+	const auto text = MtsLink::userStatusEmoji(id);
+	const auto emoji = text.isEmpty() ? nullptr : Ui::Emoji::Find(text);
+	if (!emoji) {
+		return;
+	}
+	const auto ratio = style::DevicePixelRatio();
+	const auto large = Ui::Emoji::GetSizeLarge() / float64(ratio);
+	const auto side = std::max(size * 0.4, 12.);
+	const auto scale = side / large;
+	p.save();
+	p.setRenderHint(QPainter::SmoothPixmapTransform);
+	p.translate(
+		userpic.x() + size - side * 0.85,
+		userpic.y() - side * 0.15);
+	p.scale(scale, scale);
+	Ui::Emoji::Draw(p, emoji, Ui::Emoji::GetSizeLarge(), 0, 0);
+	p.restore();
 }
 
 void PeerData::loadUserpic() {

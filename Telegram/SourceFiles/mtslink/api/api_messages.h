@@ -33,6 +33,9 @@ struct MemberProfile {
 	QString avatarFileId;
 	MemberRole role;
 	int inCall = -1; // -1 unknown, 0 / 1 when reported by the server.
+	// "customStatus" {emoji, status, setting, expiresAt}, if it was sent.
+	QJsonObject customStatus;
+	bool customStatusKnown = false;
 };
 
 struct FileData {

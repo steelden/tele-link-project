@@ -1476,6 +1476,8 @@ PRIVATE
     mtslink/data_adapters.h
     mtslink/lang_overrides.cpp
     mtslink/lang_overrides.h
+    mtslink/my_profile.cpp
+    mtslink/my_profile.h
     mtslink/rpc.cpp
     mtslink/rpc.h
     mtslink/session.cpp

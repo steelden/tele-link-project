@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_information.h"
+#include "mtslink/my_profile.h"
+#include "main/main_account.h"
 
 #include "settings/sections/settings_main.h"
 #include "settings/settings_builder.h"
@@ -290,6 +292,11 @@ void SetupPhoto(
 		auto &image = chosen.image;
 		UpdatePhotoLocally(self, image);
 		photo->showCustom(base::duplicate(image));
+		if (self->session().account().mtsLinkSession()) {
+			// The avatar is set with the MTS Link profile update.
+			MtsLink::setMyAvatar(&self->session(), std::move(image));
+			return;
+		}
 		const auto isMarkup = (chosen.markup.documentId != 0);
 		self->session().api().peerPhoto().upload(
 			self,
@@ -683,6 +690,181 @@ void SetupRows(
 
 	Ui::AddSkip(container);
 	Ui::AddDividerText(container, tr::lng_settings_username_about());
+}
+
+// The MTS Link profile: the organization member fields.
+void SetupMtsLinkRows(
+		not_null<Ui::VerticalLayout*> container,
+		not_null<Window::SessionController*> controller,
+		not_null<UserData*> self) {
+	const auto session = &self->session();
+	MtsLink::loadMyProfile(session);
+
+	const auto current = container->lifetime().make_state<
+		MtsLink::MyProfile>();
+	MtsLink::myProfileValue(
+	) | rpl::on_next([=](const MtsLink::MyProfile &profile) {
+		*current = profile;
+	}, container->lifetime());
+
+	using Getter = Fn<QString(const MtsLink::MyProfile&)>;
+	const auto valueOf = [=](Getter getter) {
+		return MtsLink::myProfileValue(
+		) | rpl::map([=](const MtsLink::MyProfile &profile) {
+			const auto value = getter(profile);
+			return tr::marked(value.isEmpty()
+				? tr::lng_mtslink_profile_empty(tr::now)
+				: value);
+		});
+	};
+	const auto save = [=](
+			Fn<void(MtsLink::MyProfile&)> change,
+			Fn<void()> close) {
+		auto profile = *current;
+		change(profile);
+		MtsLink::saveMyProfile(session, std::move(profile), [=](bool ok) {
+			if (ok) {
+				close();
+			} else {
+				controller->showToast(tr::lng_cant_do_this(tr::now));
+			}
+		});
+	};
+	// One row with one or more fields in its edit box.
+	struct Field {
+		QString label;
+		Getter get;
+		Fn<void(MtsLink::MyProfile&, const QString&)> set;
+	};
+	const auto addRow = [=](
+			not_null<Ui::VerticalLayout*> to,
+			rpl::producer<QString> label,
+			rpl::producer<TextWithEntities> value,
+			QString title,
+			std::vector<Field> fields,
+			IconDescriptor &&icon) {
+		AddRow(
+			to,
+			std::move(label),
+			std::move(value),
+			tr::lng_mtslink_profile_copy(tr::now),
+			[=] {
+				if (!current->loaded) {
+					return;
+				}
+				auto args = MtsLink::EditProfileFieldsArgs{ .title = title };
+				for (const auto &field : fields) {
+					args.fields.emplace_back(
+						field.label,
+						field.get(*current));
+				}
+				args.save = [=](std::vector<QString> values, Fn<void()> close) {
+					save([=](MtsLink::MyProfile &profile) {
+						for (auto i = 0; i != int(fields.size()); ++i) {
+							fields[i].set(profile, values[i]);
+						}
+					}, close);
+				};
+				controller->show(Box(MtsLink::EditProfileFieldsBox, args));
+			},
+			std::move(icon));
+	};
+
+	Ui::AddSkip(container);
+
+	const auto first = Field{
+		tr::lng_mtslink_profile_first_name(tr::now),
+		[](const MtsLink::MyProfile &p) { return p.firstName; },
+		[](MtsLink::MyProfile &p, const QString &v) { p.firstName = v; },
+	};
+	const auto last = Field{
+		tr::lng_mtslink_profile_last_name(tr::now),
+		[](const MtsLink::MyProfile &p) { return p.lastName; },
+		[](MtsLink::MyProfile &p, const QString &v) { p.lastName = v; },
+	};
+	const auto patronymic = Field{
+		tr::lng_mtslink_profile_patronymic(tr::now),
+		[](const MtsLink::MyProfile &p) { return p.patronymicName; },
+		[](MtsLink::MyProfile &p, const QString &v) {
+			p.patronymicName = v;
+		},
+	};
+	addRow(
+		container,
+		tr::lng_settings_name_label(),
+		valueOf([](const MtsLink::MyProfile &p) {
+			return QStringList{ p.lastName, p.firstName, p.patronymicName }
+				.filter(QRegularExpression(u"\\S"_q)).join(' ');
+		}),
+		tr::lng_settings_name_label(tr::now),
+		{ last, first, patronymic },
+		{ &st::menuIconProfile });
+
+	const auto simple = [=](
+			not_null<Ui::VerticalLayout*> to,
+			QString label,
+			Getter get,
+			Fn<void(MtsLink::MyProfile&, const QString&)> set,
+			IconDescriptor &&icon) {
+		addRow(
+			to,
+			rpl::single(label),
+			valueOf(get),
+			label,
+			{ Field{ label, get, set } },
+			std::move(icon));
+	};
+	simple(
+		container,
+		tr::lng_mtslink_profile_display_name(tr::now),
+		[](const MtsLink::MyProfile &p) { return p.displayName; },
+		[](MtsLink::MyProfile &p, const QString &v) { p.displayName = v; },
+		{ &st::menuIconUsername });
+	simple(
+		container,
+		tr::lng_mtslink_profile_position(tr::now),
+		[](const MtsLink::MyProfile &p) { return p.position; },
+		[](MtsLink::MyProfile &p, const QString &v) { p.position = v; },
+		{ &st::menuIconInfo });
+	simple(
+		container,
+		tr::lng_mtslink_profile_department(tr::now),
+		[](const MtsLink::MyProfile &p) { return p.department; },
+		[](MtsLink::MyProfile &p, const QString &v) { p.department = v; },
+		{ &st::menuIconGroups });
+	simple(
+		container,
+		tr::lng_settings_phone_label(tr::now),
+		[](const MtsLink::MyProfile &p) { return p.phone; },
+		[](MtsLink::MyProfile &p, const QString &v) { p.phone = v; },
+		{ &st::menuIconPhone });
+
+	// Organization specific fields.
+	const auto additional = container->add(
+		object_ptr<Ui::VerticalLayout>(container));
+	MtsLink::profileFieldsValue(
+	) | rpl::on_next([=](const std::vector<MtsLink::ProfileField> &list) {
+		while (additional->count()) {
+			delete additional->widgetAt(0);
+		}
+		for (const auto &field : list) {
+			const auto id = field.id;
+			simple(
+				additional,
+				field.title,
+				[=](const MtsLink::MyProfile &p) {
+					return p.additionalValue(id);
+				},
+				[=](MtsLink::MyProfile &p, const QString &v) {
+					p.setAdditionalValue(id, v);
+				},
+				{ &st::menuIconInfo });
+		}
+		additional->resizeToWidth(container->width());
+	}, additional->lifetime());
+
+	Ui::AddSkip(container);
+	Ui::AddDividerText(container, tr::lng_mtslink_profile_about());
 }
 
 void SetupBio(
@@ -1349,10 +1531,15 @@ void Information::setupContent() {
 		auto targets = InformationHighlightTargets();
 
 		SetupPhoto(container, controller, self, &targets);
-		SetupBio(container, self, &targets);
-		SetupRows(container, controller, self, &targets);
-		SetupPersonalChannel(container, controller, self, &targets);
-		SetupBirthday(container, controller, self, &targets);
+		if (self->session().account().mtsLinkSession()) {
+			// No username, bio, birthday or personal channel in MTS Link.
+			SetupMtsLinkRows(container, controller, self);
+		} else {
+			SetupBio(container, self, &targets);
+			SetupRows(container, controller, self, &targets);
+			SetupPersonalChannel(container, controller, self, &targets);
+			SetupBirthday(container, controller, self, &targets);
+		}
 		SetupAccountsWrap(container, controller, &targets);
 
 		*photo = targets.photo;

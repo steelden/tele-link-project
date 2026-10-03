@@ -406,6 +406,8 @@ public:
 		QPainter &p,
 		Ui::PeerUserpicView &view,
 		PaintUserpicContext context) const;
+	// The MTS Link custom status emoji in the corner of a userpic.
+	void paintStatusEmoji(QPainter &p, QRect userpic) const;
 	void paintUserpic(
 			QPainter &p,
 			Ui::PeerUserpicView &view,

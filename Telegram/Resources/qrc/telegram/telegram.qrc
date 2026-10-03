@@ -85,6 +85,9 @@
     <file alias="settings/devices/device_web_firefox.lottie">../../icons/settings/devices/device_web_firefox.lottie</file>
     <file alias="settings/devices/device_web_safari.lottie">../../icons/settings/devices/device_web_safari.lottie</file>
   </qresource>
+  <qresource prefix="/mtslink">
+    <file alias="emoji_ids.txt">../../mtslink_emoji_ids.txt</file>
+  </qresource>
   <qresource prefix="/langs">
     <file alias="ru.strings">../../langs/ru.strings</file>
   </qresource>

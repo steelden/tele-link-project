@@ -37,6 +37,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/my_profile.h"
+#include "ui/emoji_config.h"
 #include "main/main_session_settings.h"
 #include "mtproto/mtproto_config.h"
 #include "settings/sections/settings_advanced.h"
@@ -102,6 +104,18 @@ constexpr auto kPlayStatusLimit = 2;
 
 [[nodiscard]] rpl::producer<TextWithEntities> SetStatusLabel(
 		not_null<Main::Session*> session) {
+	if (session->account().mtsLinkSession()) {
+		// The MTS Link status: shown as the link itself when set.
+		MtsLink::loadMyProfile(session);
+		return MtsLink::myStatusValue(
+		) | rpl::map([](const MtsLink::CustomStatus &status) {
+			if (status.empty()) {
+				return tr::lng_mtslink_status_set(tr::now, tr::link);
+			}
+			// A set status is a separate label, not underlined.
+			return TextWithEntities();
+		});
+	}
 	const auto self = session->user();
 	return session->changes().peerFlagsValue(
 		self,
@@ -629,6 +643,60 @@ void MainMenu::setupAccountsToggle() {
 }
 
 void MainMenu::setupSetEmojiStatus() {
+	if (_controller->session().account().mtsLinkSession()) {
+		_mtsStatusText.create(
+			this,
+			MtsLink::myStatusValue(
+			) | rpl::map([](const MtsLink::CustomStatus &status) {
+				// The status and its expiration under it, both open the
+				// status box.
+				auto result = tr::link(
+					status.text.isEmpty()
+						? tr::lng_mtslink_status_title(tr::now)
+						: status.text,
+					u"internal:mtslink_status"_q);
+				result.append(QChar(10));
+				result.append(tr::link(
+					MtsLink::CustomStatusUntilText(status),
+					u"internal:mtslink_status"_q));
+				return result;
+			}),
+			st::mainMenuMtsStatusText);
+		_mtsStatusText->setClickHandlerFilter([=](
+				const ClickHandlerPtr &,
+				Qt::MouseButton button) {
+			if (button == Qt::LeftButton) {
+				chooseEmojiStatus();
+			}
+			return false;
+		});
+		_mtsStatusEmoji.create(this);
+		_mtsStatusEmoji->setAttribute(Qt::WA_TransparentForMouseEvents);
+		const auto size = Ui::Emoji::GetSizeLarge()
+			/ style::DevicePixelRatio();
+		_mtsStatusEmoji->resize(size, size);
+		_mtsStatusEmoji->paintRequest() | rpl::on_next([=] {
+			auto p = QPainter(_mtsStatusEmoji.data());
+			if (const auto emoji = Ui::Emoji::Find(_mtsStatusEmojiText)) {
+				Ui::Emoji::Draw(p, emoji, Ui::Emoji::GetSizeLarge(), 0, 0);
+			}
+		}, _mtsStatusEmoji->lifetime());
+		MtsLink::myStatusValue(
+		) | rpl::on_next([=](const MtsLink::CustomStatus &status) {
+			_mtsStatusEmojiText = MtsLink::CustomStatusEmoji(status);
+			_mtsStatusEmoji->setVisible(!_mtsStatusEmojiText.isEmpty());
+			_mtsStatusText->setVisible(!status.empty());
+			_setEmojiStatus->setVisible(status.empty());
+			_mtsStatusEmoji->update();
+			crl::on_main(this, [=] { updateControlsGeometry(); });
+		}, lifetime());
+
+		// Two links: the status itself and its expiration.
+		_setEmojiStatus->overrideLinkClickHandler([=] {
+			chooseEmojiStatus();
+		});
+		return;
+	}
 	_setEmojiStatus->overrideLinkClickHandler([=] {
 		chooseEmojiStatus();
 	});
@@ -804,9 +872,25 @@ void MainMenu::updateControlsGeometry() {
 	if (_resetScaleButton) {
 		_resetScaleButton->moveToRight(0, 0);
 	}
+	auto statusLeft = st::mainMenuCoverStatusLeft;
+	auto statusTop = st::mainMenuCoverStatusTop;
+	const auto mtsStatus = _mtsStatusText && !_mtsStatusText->isHidden();
+	if (_mtsStatusEmoji && !_mtsStatusEmoji->isHidden()) {
+		// The large status emoji to the left of the two status lines.
+		const auto size = _mtsStatusEmoji->width();
+		const auto lines = mtsStatus
+			? _mtsStatusText->height()
+			: _setEmojiStatus->height();
+		const auto top = statusTop + (lines - size) / 2;
+		_mtsStatusEmoji->moveToLeft(statusLeft, top, width());
+		statusLeft += size + st::mainMenuCoverStatusLeft / 3;
+	}
+	if (mtsStatus) {
+		_mtsStatusText->moveToLeft(statusLeft, statusTop, width());
+	}
 	_setEmojiStatus->moveToLeft(
-		st::mainMenuCoverStatusLeft,
-		st::mainMenuCoverStatusTop,
+		statusLeft,
+		statusTop,
 		width());
 	_toggleAccounts->setGeometry(
 		0,
@@ -834,7 +918,11 @@ void MainMenu::updateInnerControlsGeometry() {
 }
 
 void MainMenu::chooseEmojiStatus() {
-	if (_controller->showFrozenError()) {
+	if (_controller->session().account().mtsLinkSession()) {
+		// No premium emoji statuses, the MTS Link custom status instead.
+		_controller->show(Box(MtsLink::SetStatusBox, _controller));
+		return;
+	} else if (_controller->showFrozenError()) {
 		return;
 	} else if (const auto widget = _badge->widget()) {
 		setupEmojiStatusDismiss();

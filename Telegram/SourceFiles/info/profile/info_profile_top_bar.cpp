@@ -2859,6 +2859,7 @@ void TopBar::paintUserpic(QPainter &p, const QRect &geometry) {
 		auto hq = PainterHighQualityEnabler(p);
 		p.drawImage(geometry, _cachedUserpic);
 	}
+	_peer->paintStatusEmoji(p, geometry);
 	if (_uploadOverlay && _uploadOverlay->shown()) {
 		_uploadOverlay->paint(p, geometry, {
 			.lineWidth = st::defaultUserpicButton.uploadProgressLine,

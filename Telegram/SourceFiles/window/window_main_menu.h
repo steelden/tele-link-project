@@ -93,6 +93,9 @@ private:
 	int _nameVersion = 0;
 	object_ptr<ToggleAccountsButton> _toggleAccounts;
 	object_ptr<Ui::FlatLabel> _setEmojiStatus;
+	object_ptr<Ui::RpWidget> _mtsStatusEmoji = { nullptr };
+	object_ptr<Ui::FlatLabel> _mtsStatusText = { nullptr };
+	QString _mtsStatusEmojiText;
 	std::unique_ptr<Info::Profile::EmojiStatusPanel> _emojiStatusPanel;
 	std::unique_ptr<Info::Profile::Badge> _badge;
 	object_ptr<ResetScaleButton> _resetScaleButton = { nullptr };

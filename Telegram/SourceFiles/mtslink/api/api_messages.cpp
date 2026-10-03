@@ -253,7 +253,7 @@ MemberProfile Messages::parseProfile(const QJsonObject &obj) const {
 
 MemberProfile ParseMemberProfile(const QJsonObject &obj) {
 	const auto roleStr = obj.value("role").toString();
-	return {
+	auto result = MemberProfile{
 		.userId = obj.value("userId").toString(),
 		.organizationId = obj.value("organizationId").toString(),
 		.email = obj.value("email").toString(),
@@ -271,6 +271,11 @@ MemberProfile ParseMemberProfile(const QJsonObject &obj) {
 					? MemberRole::Guest
 					: MemberRole::Member,
 	};
+	if (obj.contains("customStatus")) {
+		result.customStatus = obj.value("customStatus").toObject();
+		result.customStatusKnown = true;
+	}
+	return result;
 }
 
 void Messages::search(

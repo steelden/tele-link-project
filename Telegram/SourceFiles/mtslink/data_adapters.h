@@ -295,6 +295,14 @@ void handleMtsLinkUrl(
 
 [[nodiscard]] bool isUserInCall(PeerId userPeerId);
 
+// The emoji of the user's custom status, empty if none or expired.
+[[nodiscard]] QString userStatusEmoji(PeerId userPeerId);
+// {emoji, status, setting, expiresAt} from a profile or an event.
+void applyUserStatus(
+	not_null<Main::Session*> session,
+	const QString &userId,
+	const QJsonObject &status);
+
 // Typing: subscribe when a chat / thread is opened, send while typing.
 void subscribeTyping(
 	not_null<Main::Session*> session,

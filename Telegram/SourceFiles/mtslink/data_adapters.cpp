@@ -5,6 +5,7 @@ based on Telegram Desktop.
 #include "mtslink/data_adapters.h"
 #include "mtslink/session.h"
 #include "mtslink/env_config.h"
+#include "mtslink/my_profile.h"
 
 #include "main/main_session.h"
 #include "main/main_account.h"
@@ -54,6 +55,7 @@ based on Telegram Desktop.
 #include "core/click_handler_types.h"
 #include "core/file_utilities.h"
 #include "window/window_session_controller.h"
+#include "mainwindow.h"
 
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDataStream>
@@ -218,6 +220,29 @@ void ensureEmojiMapsInitialized() {
 	const auto heartId = QStringLiteral("1ee90646-44ca-6ff6-b7ec-52a330d3955f");
 	if (!EmojiToIdMap.contains(heartNoVs16)) {
 		EmojiToIdMap[heartNoVs16] = heartId;
+	}
+	// The full MTS Link catalogue (mf-host-orchestrator emojiUtils), the
+	// emoji there are without U+FE0F as the client strips it.
+	QFile catalogue(u":/mtslink/emoji_ids.txt"_q);
+	if (catalogue.open(QIODevice::ReadOnly)) {
+		auto count = 0;
+		for (const auto &line : QString::fromUtf8(
+				catalogue.readAll()).split(QChar(10))) {
+			const auto parts = line.split(QChar(9));
+			if (parts.size() != 2 || parts[1].trimmed().isEmpty()) {
+				continue;
+			}
+			const auto emoji = parts[0];
+			const auto id = parts[1].trimmed();
+			if (!IdToEmojiMap.contains(id)) {
+				IdToEmojiMap[id] = emoji;
+			}
+			if (!EmojiToIdMap.contains(emoji)) {
+				EmojiToIdMap[emoji] = id;
+			}
+			++count;
+		}
+		LOG(("MtsLink Emoji: catalogue of %1 emoji").arg(count));
 	}
 }
 PeerId FavoritesPeerIdValue = PeerId(0);
@@ -1751,6 +1776,40 @@ void connectToSession(
 								Data::PeerUpdate::Flag::OnlineStatus);
 						}
 					}
+				} else if (type == "CustomStatusChanged") {
+					applyUserStatus(
+						mainSession,
+						value.value("userId").toString(),
+						value);
+					if (value.value("userId").toString()
+							== mtsSession->userId()) {
+						LOG(("MtsLink Status: changed to '%1'"
+							).arg(value.value("status").toString()));
+						applyMyStatusChanged(value);
+					}
+				} else if (type == "MemberProfileChanged") {
+					const auto userId = value.value("userId").toString();
+					const auto prof = value.value("profile").toObject();
+					if (!userId.isEmpty() && !prof.isEmpty()) {
+						LOG(("MtsLink Profile: changed for %1").arg(userId));
+						applyUserData(mainSession, Api::MemberProfile{
+							.userId = userId,
+							.organizationId = value.value(
+								"organizationId").toString(),
+							.email = prof.value("email").toString(),
+							.phone = prof.value("phone").toString(),
+							.position = prof.value("position").toString(),
+							.department = prof.value("department").toString(),
+							.firstName = prof.value("firstName").toString(),
+							.lastName = prof.value("lastName").toString(),
+							.displayName = prof.value("displayName").toString(),
+							.avatarFileId = prof.value("avatarFileId").toString(),
+							.role = MemberRole::Member,
+						});
+						if (userId == mtsSession->userId()) {
+							applyMyProfileChanged(mainSession, prof);
+						}
+					}
 				} else if (type == "MemberInCallChanged") {
 					const auto userId = value.value("userId").toString();
 					if (!userId.isEmpty()) {
@@ -2863,6 +2922,9 @@ void applyChannelData(
 void applyUserData(
 		not_null<Main::Session*> session,
 		const Api::MemberProfile &src) {
+	if (src.customStatusKnown) {
+		applyUserStatus(session, src.userId, src.customStatus);
+	}
 	const auto bareId = uuidToBareId(src.userId);
 	UserBareIdToUuidMap.insert(bareId, src.userId);
 	const auto user = session->data().user(::UserId(bareId));
@@ -5735,7 +5797,13 @@ void setEmojiIdMapping(const QString &emojiId, const QString &emoji) {
 
 QString emojiToId(const QString &emoji) {
 	ensureEmojiMapsInitialized();
-	return EmojiToIdMap.value(emoji);
+	const auto result = EmojiToIdMap.value(emoji);
+	if (!result.isEmpty()) {
+		return result;
+	}
+	auto stripped = emoji;
+	stripped.remove(QChar(0xFE0F));
+	return EmojiToIdMap.value(stripped);
 }
 
 QString idToEmoji(const QString &emojiId) {
@@ -5979,6 +6047,68 @@ void performStartCall(
 
 bool isUserInCall(PeerId userPeerId) {
 	return InCallUsers.contains(userPeerId);
+}
+
+namespace {
+
+struct UserStatusEmoji {
+	QString emoji;
+	TimeId expiresAt = 0;
+};
+QHash<PeerId, UserStatusEmoji> UserStatuses;
+
+} // namespace
+
+QString userStatusEmoji(PeerId userPeerId) {
+	const auto i = UserStatuses.constFind(userPeerId);
+	if (i == UserStatuses.constEnd()
+		|| (i->expiresAt && i->expiresAt <= base::unixtime::now())) {
+		return QString();
+	}
+	return i->emoji;
+}
+
+void applyUserStatus(
+		not_null<Main::Session*> session,
+		const QString &userId,
+		const QJsonObject &status) {
+	if (userId.isEmpty()) {
+		return;
+	}
+	const auto peerId = PeerId(::UserId(uuidToBareId(userId)));
+	const auto emoji = idToEmoji(status.value("emoji").toString());
+	const auto expiresAt = TimeId(status.value("expiresAt").toDouble());
+	const auto was = UserStatuses.value(peerId);
+	if (was.emoji == emoji && was.expiresAt == expiresAt) {
+		return;
+	}
+	if (emoji.isEmpty()) {
+		UserStatuses.remove(peerId);
+	} else {
+		UserStatuses.insert(peerId, { emoji, expiresAt });
+	}
+	LOG(("MtsLink Status: user %1 emoji '%2' expires %3"
+		).arg(userId, emoji).arg(expiresAt));
+	if (const auto user = session->data().userLoaded(peerToUser(peerId))) {
+		// The status emoji is painted over the userpic.
+		session->changes().peerUpdated(
+			user,
+			Data::PeerUpdate::Flag::Photo | Data::PeerUpdate::Flag::EmojiStatus);
+	}
+	static auto repaintScheduled = false;
+	if (!repaintScheduled) {
+		repaintScheduled = true;
+		const auto weak = base::make_weak(session);
+		base::call_delayed(100, [=] {
+			repaintScheduled = false;
+			if (!weak) {
+				return;
+			}
+			for (const auto &window : weak->windows()) {
+				window->widget()->update();
+			}
+		});
+	}
 }
 
 namespace {
