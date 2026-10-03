@@ -61,6 +61,31 @@ Session::Session(QObject *parent)
 				"logging out").arg(error));
 			Q_EMIT authExpired();
 		});
+	QObject::connect(
+		&_auth,
+		&Api::Auth::refreshUnavailable,
+		this,
+		[this](const QString &error) {
+			if (_manualStop) {
+				return;
+			}
+			_refreshRetryDelay = _refreshRetryDelay
+				? std::min(_refreshRetryDelay * 2, 60000)
+				: 2000;
+			LOG(("MtsLink Session: %1, retrying refresh in %2 ms")
+				.arg(error)
+				.arg(_refreshRetryDelay));
+			QTimer::singleShot(_refreshRetryDelay, this, [this] {
+				if (!_manualStop) {
+					_auth.refreshTokens();
+				}
+			});
+		});
+	QObject::connect(
+		&_auth,
+		&Api::Auth::tokenRefreshed,
+		this,
+		[this](const QString &) { _refreshRetryDelay = 0; });
 }
 
 Session::~Session() {

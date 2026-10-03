@@ -237,6 +237,8 @@ constexpr auto kPreviewRetryLimit = 20;
 QHash<PeerId, MsgId> PendingChatThreadScroll;
 bool FolderPinsSyncScheduled = false;
 QSet<PeerId> InCallUsers;
+// Pinned messages of a chat ordered by date, MsgIds are not chronological.
+QHash<PeerId, std::vector<std::pair<TimeId, MsgId>>> PinnedByDate;
 QSet<PeerId> PresenceKnownUsers;
 QSet<PeerId> PresenceRequestedUsers;
 QHash<PeerId, bool> ThreadNotifiable; // thread peer -> isNotifiable
@@ -1794,6 +1796,18 @@ void connectToSession(
 					pinnedIds.push_back(item->id);
 				}
 			}
+			{
+				auto &byDate = PinnedByDate[peerId];
+				byDate.clear();
+				for (const auto id : pinnedIds) {
+					if (const auto item = mainSession->data().message(
+							peerId,
+							id)) {
+						byDate.push_back({ item->date(), id });
+					}
+				}
+				std::sort(byDate.begin(), byDate.end());
+			}
 			if (!pinnedIds.empty()) {
 				const auto history = mainSession->data()
 					.historyLoaded(peerId);
@@ -2083,6 +2097,51 @@ History *threadEntryHistory(
 
 MsgId currentOpenThreadRoot(PeerId parentPeerId) {
 	return CurrentOpenThreads.value(parentPeerId);
+}
+
+MsgId pinnedToShow(
+		PeerId peerId,
+		TimeId visibleBottomDate,
+		MsgId clickedId) {
+	const auto i = PinnedByDate.constFind(peerId);
+	if (i == PinnedByDate.constEnd() || i->empty()) {
+		return MsgId();
+	}
+	const auto &list = *i; // Oldest first.
+	if (clickedId) {
+		const auto j = ranges::find(
+			list,
+			clickedId,
+			&std::pair<TimeId, MsgId>::second);
+		if (j != end(list)) {
+			// After the oldest one we go back to the newest, like Telegram.
+			return (j == begin(list)) ? list.back().second : (j - 1)->second;
+		}
+	}
+	for (auto j = list.rbegin(); j != list.rend(); ++j) {
+		if (j->first <= visibleBottomDate) {
+			return j->second;
+		}
+	}
+	return list.front().second;
+}
+
+int pinnedDateIndex(PeerId peerId, MsgId msgId) {
+	const auto i = PinnedByDate.constFind(peerId);
+	if (i == PinnedByDate.constEnd()) {
+		return -1;
+	}
+	const auto j = ranges::find(*i, msgId, &std::pair<TimeId, MsgId>::second);
+	return (j == end(*i)) ? -1 : int(j - begin(*i));
+}
+
+TimeId pinnedDate(PeerId peerId, MsgId msgId) {
+	const auto i = PinnedByDate.constFind(peerId);
+	if (i == PinnedByDate.constEnd()) {
+		return 0;
+	}
+	const auto j = ranges::find(*i, msgId, &std::pair<TimeId, MsgId>::second);
+	return (j == end(*i)) ? 0 : j->first;
 }
 
 PeerId threadPeerFor(PeerId parentPeerId, MsgId rootId) {
@@ -3476,6 +3535,10 @@ void handleChatEvent(
 		if (item) {
 			item->setIsPinned(false);
 		}
+		auto &byDate = PinnedByDate[chatPeerId];
+		byDate.erase(
+			ranges::remove(byDate, msgId, &std::pair<TimeId, MsgId>::second),
+			end(byDate));
 	} else if (type == "PinnedMessageCountUpdatedEvent") {
 		const auto chatPeerId = chatIdToPeerId(chatId);
 		const auto mts = session->account().mtsLinkSession();
@@ -5083,15 +5146,15 @@ void navigateToChat(
 				*conn = QObject::connect(
 					mts->messages(),
 					&Api::Messages::aroundMessagesLoaded,
-					[weak, peerId, msgId, chatId, conn](
+					[weak, peerId, msgId, chatId, messageId, conn](
 							const ChatId &cid,
-							const MessageId &,
+							const MessageId &targetId,
 							const QList<Api::MessageData> &messages,
 							const QList<Api::MemberProfile> &profiles) {
-						QObject::disconnect(*conn);
-						if (cid != chatId) {
+						if (cid != chatId || targetId != messageId) {
 							return;
 						}
+						QObject::disconnect(*conn);
 						const auto ctrl = weak.get();
 						if (!ctrl) {
 							return;

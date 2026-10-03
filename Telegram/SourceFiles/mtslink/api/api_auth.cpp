@@ -159,6 +159,13 @@ void Auth::refreshTokens() {
 				const auto body = reply->readAll();
 				LOG(("MtsLink Auth: refresh error: %1")
 					.arg(QString::fromUtf8(body.left(200))));
+				if (statusCode == 0 || statusCode >= 500) {
+					// No answer from the server, the refresh token may be
+					// perfectly valid: retry instead of logging out.
+					Q_EMIT refreshUnavailable(
+						"RefreshTokens unavailable: " + reply->errorString());
+					return;
+				}
 				Q_EMIT authFailed(
 					"RefreshTokens failed: " + reply->errorString());
 				return;

@@ -80,6 +80,7 @@ private:
 	int _initPendingCalls = 0;
 	QTimer _reconnectTimer;
 	int _reconnectDelay = 0;
+	int _refreshRetryDelay = 0;
 };
 
 } // namespace MtsLink

@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_shared_media.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "mtslink/data_adapters.h"
 
 namespace HistoryView {
 namespace{
@@ -152,13 +153,22 @@ void PinnedTracker::refreshCurrentFromSlice() {
 			: _slice.skippedAfter.has_value()
 			? (count - *_slice.skippedAfter - after)
 			: 1;
-		if (i != begin(_slice.ids)) {
-			_current = PinnedId{ *(i - 1), index - 1, count };
-		} else if (!_slice.ids.empty()) {
-			_current = PinnedId{ _slice.ids.front(), 0, count };
-		} else {
-			_current = PinnedId();
+		auto result = (i != begin(_slice.ids))
+			? PinnedId{ *(i - 1), index - 1, count }
+			: !_slice.ids.empty()
+			? PinnedId{ _slice.ids.front(), 0, count }
+			: PinnedId();
+		if (result.message
+			&& MtsLink::hasChatId(result.message.peer)) {
+			// MTS Link MsgIds are not chronological, number by date.
+			const auto byDate = MtsLink::pinnedDateIndex(
+				result.message.peer,
+				result.message.msg);
+			if (byDate >= 0) {
+				result.index = byDate;
+			}
 		}
+		_current = result;
 	}
 	if (nearEnd) {
 		refreshViewer();

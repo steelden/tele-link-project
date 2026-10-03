@@ -3181,15 +3181,18 @@ void HistoryWidget::showHistory(
 								&MtsLink::Api::Messages
 									::aroundMessagesLoaded,
 								[weak, peerId, pendingParent,
-									chatId, conn](
+									chatId, parentUuid, conn](
 									const QString &cid,
-									const QString &,
+									const QString &targetId,
 									const QList<MtsLink::Api
 										::MessageData> &messages,
 									const QList<MtsLink::Api
 										::MemberProfile> &profiles) {
+								if (cid != chatId
+									|| targetId != parentUuid) {
+									return;
+								}
 								QObject::disconnect(*conn);
-								if (cid != chatId) return;
 								const auto ctrl = weak.get();
 								if (!ctrl) return;
 								for (const auto &p : profiles) {
@@ -5352,15 +5355,16 @@ void HistoryWidget::delayedShowAt(
 			*conn = QObject::connect(
 				mts->messages(),
 				&MtsLink::Api::Messages::aroundMessagesLoaded,
-				[this, peerId, chatId, targetMsgId, conn](
+				[this, peerId, chatId, messageId, targetMsgId, conn](
 						const QString &cid,
-						const QString &,
+						const QString &targetId,
 						const QList<MtsLink::Api::MessageData> &messages,
 						const QList<MtsLink::Api::MemberProfile> &profiles) {
-					QObject::disconnect(*conn);
-					if (cid != chatId) {
+					// Other loads (pinned bar, reply previews) emit too.
+					if (cid != chatId || targetId != messageId) {
 						return;
 					}
+					QObject::disconnect(*conn);
 					for (const auto &p : profiles) {
 						MtsLink::applyUserData(&session(), p);
 					}
@@ -5373,10 +5377,32 @@ void HistoryWidget::delayedShowAt(
 						_history->addCreatedOlderSlice(items);
 					}
 					_delayedShowAtMsgId = -1;
-					setMsgId(targetMsgId);
-					historyLoaded();
+					if (_historyInited && _history->peer->id == peerId) {
+						// Same as the "Showing instant" path: historyLoaded()
+						// re-inits the history and loses the jump target.
+						updateHistoryGeometry();
+						// Otherwise countInitialScrollTop() returns the saved
+						// scroll position instead of the jump target.
+						_history->forgetScrollState();
+						if (_migrated) {
+							_migrated->forgetScrollState();
+						}
+						setMsgId(targetMsgId);
+						const auto to = countInitialScrollTop();
+						animatedScrollToY(
+							std::clamp(to, 0, _scroll->scrollTopMax()),
+							getItemFromHistoryOrMigrated(targetMsgId));
+					} else {
+						setMsgId(targetMsgId);
+						historyLoaded();
+					}
 				});
 			mts->messages()->loadAround(chatId, messageId, 50);
+		} else {
+			LOG(("MtsLink: can't jump to msg=%1 chat='%2' uuid='%3'")
+				.arg(_delayedShowAtMsgId.bare)
+				.arg(chatId)
+				.arg(messageId));
 		}
 		return;
 	}
@@ -9758,6 +9784,26 @@ void HistoryWidget::updatePinnedViewer() {
 	}
 	const auto visibleBottom = _scroll->scrollTop() + _scroll->height();
 	auto [view, offset] = _list->findViewForPinnedTracking(visibleBottom);
+	if (MtsLink::hasChatId(_peer->id)) {
+		// MTS Link MsgIds are not chronological, choose the pinned by date.
+		const auto bottomDate = view
+			? view->data()->date()
+			: std::numeric_limits<TimeId>::max();
+		if (_pinnedClickedId
+			&& bottomDate < MtsLink::pinnedDate(_peer->id, _pinnedClickedId.msg)
+			&& !_scrollToAnimation.animating()) {
+			_pinnedClickedId = FullMsgId();
+		}
+		const auto target = MtsLink::pinnedToShow(
+			_peer->id,
+			bottomDate,
+			_pinnedClickedId.msg);
+		if (target) {
+			// The tracker shows the biggest pinned id below the given one.
+			_pinnedTracker->trackAround(target + 1);
+			return;
+		}
+	}
 	const auto lessThanId = !view
 		? (ServerMaxMsgId - 1)
 		: (view->history() != _history)
@@ -9953,6 +9999,19 @@ void HistoryWidget::checkPinnedBarState() {
 	_pinnedBar->barClicks(
 	) | rpl::on_next([=] {
 		const auto id = _pinnedTracker->currentMessageId();
+		if (!session().data().message(id.message)
+			&& id.message
+			&& MtsLink::hasChatId(id.message.peer)) {
+			// Not loaded yet, delayedShowAt() loads it around from the server.
+			controller()->showPeerHistory(
+				id.message.peer,
+				Window::SectionShow::Way::Forward,
+				id.message.msg);
+			_pinnedClickedId = id.message;
+			_minPinnedId = std::nullopt;
+			updatePinnedViewer();
+			return;
+		}
 		if (const auto item = session().data().message(id.message)) {
 			controller()->showPeerHistory(
 				item->history()->peer,

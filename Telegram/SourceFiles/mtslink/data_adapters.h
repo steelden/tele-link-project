@@ -74,6 +74,17 @@ void applyPendingThreadUnreads(
 [[nodiscard]] MsgId currentOpenThreadRoot(PeerId parentPeerId);
 [[nodiscard]] PeerId threadPeerFor(PeerId parentPeerId, MsgId rootId);
 
+// Pinned messages ordered by date (MsgIds of MTS Link are not chronological).
+// Returns the pinned message to show: the newest one not newer than
+// visibleBottomDate, or, after a click on clickedId, the previous one.
+[[nodiscard]] MsgId pinnedToShow(
+	PeerId peerId,
+	TimeId visibleBottomDate,
+	MsgId clickedId);
+// Index of the pinned message in date order (0 = oldest), -1 if unknown.
+[[nodiscard]] int pinnedDateIndex(PeerId peerId, MsgId msgId);
+[[nodiscard]] TimeId pinnedDate(PeerId peerId, MsgId msgId);
+
 // Loads a single message of the chat from the server, done() is always called.
 void requestMessageData(
 	not_null<Main::Session*> session,

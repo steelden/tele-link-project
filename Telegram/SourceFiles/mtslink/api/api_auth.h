@@ -49,6 +49,9 @@ Q_SIGNALS:
 	void organizationsReceived(const QList<OrganizationInfo> &orgs);
 	void authSuccess(const AuthResult &result);
 	void authFailed(const QString &error);
+	// Refresh could not reach the server (network / 5xx), the session is
+	// still valid and the refresh should be retried.
+	void refreshUnavailable(const QString &error);
 	void tokenRefreshed(const QString &newToken);
 
 private:

@@ -1901,11 +1901,30 @@ void History::addOlderSlice(const QVector<MTPMessage> &slice) {
 
 void History::addCreatedOlderSlice(
 		const std::vector<not_null<HistoryItem*>> &items) {
-	startBuildingFrontBlock(items.size());
-	for (const auto &item : items) {
-		addItemToBlock(item);
+	const auto insertByDate = [&] {
+		if (!MtsLink::hasChatId(peer->id) || isEmpty() || items.empty()) {
+			return false;
+		}
+		// A slice loaded around a jump target may be newer than the first
+		// loaded message, prepending it would break the order.
+		const auto firstDate = blocks.front()->messages.front()->data()->date();
+		return ranges::any_of(items, [&](not_null<HistoryItem*> item) {
+			return item->date() > firstDate;
+		});
+	}();
+	if (insertByDate) {
+		for (const auto &item : items) {
+			if (!item->mainView()) {
+				insertMessageToBlocks(item);
+			}
+		}
+	} else {
+		startBuildingFrontBlock(items.size());
+		for (const auto &item : items) {
+			addItemToBlock(item);
+		}
+		finishBuildingFrontBlock();
 	}
-	finishBuildingFrontBlock();
 
 	if (loadedAtBottom()) {
 		// Add photos to overview and authors to lastAuthors.
