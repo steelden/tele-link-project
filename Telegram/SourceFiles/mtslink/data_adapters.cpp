@@ -558,11 +558,48 @@ MTPMessageMedia buildFileMedia(
 		MTP_int(0));
 }
 
+// The userpic photo for the media viewer: a click on a userpic opens it
+// in the full size ("thumb_<id>.jpg", "_xl" redirects there).
+void ensureUserpicPhoto(
+		not_null<PeerData*> peer,
+		PhotoId photoId,
+		const QString &fileId) {
+	static auto created = QSet<PhotoId>();
+	if (created.contains(photoId)) {
+		return;
+	}
+	created.insert(photoId);
+	const auto base = avatarCdnBase() + fileId;
+	const auto image = [&](const QString &suffix, int size) {
+		return ImageWithLocation{
+			.location = ImageLocation(
+				DownloadLocation{ PlainUrlLocation{ base + suffix } },
+				size,
+				size),
+		};
+	};
+	peer->owner().photo(
+		photoId,
+		uint64(0),
+		QByteArray(),
+		base::unixtime::now(),
+		peer->session().mainDcId(),
+		false,
+		QByteArray(),
+		image(u"_s.jpg"_q, 160),
+		image(u"_m.jpg"_q, 256),
+		image(u".jpg"_q, 1024),
+		ImageWithLocation(),
+		ImageWithLocation(),
+		crl::time(0));
+}
+
 void applyUserpic(not_null<PeerData*> peer, const QString &fileId) {
 	if (fileId.isEmpty()) {
 		return;
 	}
 	const auto photoId = PhotoId(uuidToBareId(fileId));
+	ensureUserpicPhoto(peer, photoId, fileId);
 	if (peer->userpicPhotoId() == photoId) {
 		return;
 	}
