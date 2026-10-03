@@ -1885,6 +1885,12 @@ void ApiWrap::joinChannel(not_null<ChannelData*> channel) {
 }
 
 void ApiWrap::leaveChannel(not_null<ChannelData*> channel) {
+	if (MtsLink::hasChatId(channel->id)) {
+		if (channel->amIn()) {
+			MtsLink::leaveChannel(_session, channel);
+		}
+		return;
+	}
 	if (!channel->amIn()) {
 		session().changes().peerUpdated(
 			channel,
@@ -2132,6 +2138,16 @@ void ApiWrap::clearHistory(not_null<PeerData*> peer, bool revoke) {
 }
 
 void ApiWrap::deleteConversation(not_null<PeerData*> peer, bool revoke) {
+	if (const auto channel = peer->asChannel()
+		; channel && MtsLink::hasChatId(peer->id)
+		&& MtsLink::chatTypeForPeer(peer->id) == MtsLink::ChatType::Channel) {
+		if (revoke && channel->canDelete()) {
+			MtsLink::deleteChannel(_session, channel);
+		} else {
+			MtsLink::leaveChannel(_session, channel);
+		}
+		return;
+	}
 	if (const auto chat = peer->asChat()) {
 		request(MTPmessages_DeleteChatUser(
 			MTP_flags(0),

@@ -27,7 +27,12 @@ void Threads::loadMyThreads(int limit, int offset) {
 			for (const auto &item : list) {
 				threads.push_back(parseThread(item.toObject()));
 			}
-			Q_EMIT threadsLoaded(threads);
+			// Authors of the parent messages.
+			QList<MemberProfile> profiles;
+			for (const auto &item : value.value("memberProfiles").toArray()) {
+				profiles.push_back(ParseMemberProfile(item.toObject()));
+			}
+			Q_EMIT threadsLoaded(threads, profiles);
 		});
 }
 
@@ -36,10 +41,15 @@ void Threads::loadThread(const MessageId &threadId) {
 		"Chat.GetMyThreadV2",
 		QJsonObject{ { "threadId", threadId } },
 		[this](const QJsonObject &result) {
-			const auto thread = result.value("value").toObject()
-				.value("thread").toObject();
+			const auto value = result.value("value").toObject();
+			const auto thread = value.value("thread").toObject();
 			if (!thread.isEmpty()) {
-				Q_EMIT threadsLoaded({ parseThread(thread) });
+				QList<MemberProfile> profiles;
+				for (const auto &item
+						: value.value("memberProfiles").toArray()) {
+					profiles.push_back(ParseMemberProfile(item.toObject()));
+				}
+				Q_EMIT threadsLoaded({ parseThread(thread) }, profiles);
 			}
 		});
 }

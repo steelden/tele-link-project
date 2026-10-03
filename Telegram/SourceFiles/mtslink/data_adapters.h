@@ -15,6 +15,7 @@ Bridges MTS Link API data into tdesktop's data model
 #include "ui/style/style_core_types.h"
 
 #include <QtNetwork/QNetworkCookie>
+#include <QtGui/QImage>
 
 namespace Ui {
 struct GroupCallBarContent;
@@ -293,6 +294,67 @@ void handleMtsLinkUrl(
 	const QVariant &context);
 
 [[nodiscard]] bool isUserInCall(PeerId userPeerId);
+
+// Channel roles: "Owner", "Admin", "Member" or empty when unknown.
+[[nodiscard]] QString myChannelRole(PeerId channelPeerId);
+[[nodiscard]] PeerId channelOwner(PeerId channelPeerId);
+[[nodiscard]] bool isChannelAdmin(PeerId channelPeerId, PeerId userPeerId);
+
+// Channel management, the result arrives as server events.
+void setChannelAdmin(
+	not_null<Main::Session*> session,
+	not_null<PeerData*> channel,
+	not_null<UserData*> user,
+	bool admin);
+void giveChannelOwnership(
+	not_null<Main::Session*> session,
+	not_null<PeerData*> channel,
+	not_null<UserData*> user);
+void removeChannelMember(
+	not_null<Main::Session*> session,
+	not_null<PeerData*> channel,
+	not_null<UserData*> user);
+void inviteChannelMembers(
+	not_null<Main::Session*> session,
+	not_null<PeerData*> channel,
+	const std::vector<not_null<UserData*>> &users);
+// Creates an MTS Link channel, done(nullptr) on failure.
+void createChannel(
+	not_null<Main::Session*> session,
+	const QString &title,
+	const QString &description,
+	bool isPublic,
+	bool isReadOnly,
+	QImage cover,
+	Fn<void(ChannelData*)> done);
+void leaveChannel(
+	not_null<Main::Session*> session,
+	not_null<ChannelData*> channel);
+void deleteChannel(
+	not_null<Main::Session*> session,
+	not_null<ChannelData*> channel);
+
+// Global search: my channels and organization members.
+void searchPeersGlobal(
+	not_null<Main::Session*> session,
+	const QString &query,
+	Fn<void(
+		std::vector<not_null<PeerData*>> my,
+		std::vector<not_null<PeerData*>> peers)> done);
+// Global messages search, done(items, total, full).
+void searchMessagesGlobal(
+	not_null<Main::Session*> session,
+	const QString &query,
+	int offset,
+	int limit,
+	Fn<void(std::vector<not_null<HistoryItem*>>, int, bool)> done);
+
+// Organization members not in the channel, empty query lists everyone.
+void searchChannelNonMembers(
+	not_null<Main::Session*> session,
+	not_null<PeerData*> channel,
+	const QString &query,
+	Fn<void(std::vector<not_null<UserData*>>)> done);
 
 // Creates an MTS Link video conference for the chat and opens its link.
 void startCall(not_null<Main::Session*> session, not_null<PeerData*> peer);

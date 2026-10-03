@@ -334,6 +334,10 @@ private:
 	[[nodiscard]] std::vector<not_null<UserData*>> mtsLinkMembers() const;
 	[[nodiscard]] bool acceptsMtsLinkRow(not_null<UserData*> user) const;
 	void mtsLinkOnlineChanged(not_null<UserData*> user);
+	void fillMtsLinkMemberActions(
+		not_null<Ui::PopupMenu*> menu,
+		not_null<ChannelData*> channel,
+		not_null<UserData*> user);
 
 	// It may be nullptr in subclasses of this controller.
 	Window::SessionNavigation *_navigation = nullptr;
@@ -352,6 +356,7 @@ private:
 	rpl::variable<int> _onlineCountValue;
 	rpl::variable<int> _fullCountValue;
 	bool _mtsLinkOnlineOnly = false;
+	bool _mtsLinkMembersSubscribed = false;
 	rpl::lifetime _mtsLinkOnlineLifetime;
 	Ui::BoxPointer _editBox;
 	Ui::BoxPointer _addBox;

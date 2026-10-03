@@ -32,9 +32,48 @@ void Files::uploadFile(
 		ProgressHandler progress) {
 	QJsonObject param;
 	param["filename"] = filename;
-
-	_rpc->call(
+	requestUpload(
 		"Mediacontent.CreatePrivateFile",
+		param,
+		filename,
+		content,
+		mime,
+		std::move(done),
+		std::move(fail),
+		std::move(progress));
+}
+
+void Files::uploadAvatar(
+		const QString &filename,
+		const QByteArray &content,
+		const QString &mime,
+		DoneHandler done,
+		FailHandler fail) {
+	requestUpload(
+		"Mediacontent.CreateAvatar",
+		QJsonObject{
+			{ "filename", filename },
+			{ "downscale", 1024 },
+		},
+		filename,
+		content,
+		mime,
+		std::move(done),
+		std::move(fail),
+		nullptr);
+}
+
+void Files::requestUpload(
+		const QString &rpcMethod,
+		const QJsonObject &param,
+		const QString &filename,
+		const QByteArray &content,
+		const QString &mime,
+		DoneHandler done,
+		FailHandler fail,
+		ProgressHandler progress) {
+	_rpc->call(
+		rpcMethod,
 		param,
 		[=](const QJsonObject &result) {
 			const auto value = result.value("value").isObject()
@@ -51,9 +90,10 @@ void Files::uploadFile(
 			}
 
 			if (id.isEmpty() || url.isEmpty()) {
-				LOG(("MtsLink Files: CreatePrivateFile returned empty id or url"));
+				LOG(("MtsLink Files: %1 returned empty id or url"
+					).arg(rpcMethod));
 				if (fail) {
-					fail("CreatePrivateFile returned empty response");
+					fail(rpcMethod + " returned empty response");
 				}
 				return;
 			}
@@ -71,8 +111,8 @@ void Files::uploadFile(
 
 			doHttpUpload(url, method, headers, content, uploadResult, done, fail, progress);
 		},
-		[fail](const QString &error) {
-			LOG(("MtsLink Files: CreatePrivateFile error: %1").arg(error));
+		[fail, rpcMethod](const QString &error) {
+			LOG(("MtsLink Files: %1 error: %2").arg(rpcMethod, error));
 			if (fail) {
 				fail(error);
 			}

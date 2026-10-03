@@ -5,6 +5,7 @@ based on Telegram Desktop.
 #pragma once
 
 #include "mtslink/types.h"
+#include "mtslink/api/api_messages.h"
 
 #include <QObject>
 #include <QJsonObject>
@@ -55,6 +56,63 @@ public:
 		std::function<void(QString joinLink)> done,
 		std::function<void()> fail);
 
+	// Channel membership and roles, done(ok) is called on the response.
+	using Done = std::function<void(bool ok)>;
+	void addAdministrators(
+		const ChatId &chatId,
+		const QStringList &userIds,
+		Done done);
+	void removeAdministrators(
+		const ChatId &chatId,
+		const QStringList &userIds,
+		Done done);
+	void giveOwnership(
+		const ChatId &chatId,
+		const QString &userId,
+		Done done);
+	void addUsers(
+		const ChatId &chatId,
+		const QStringList &userIds,
+		const OrganizationId &organizationId,
+		Done done);
+	void removeUsers(
+		const ChatId &chatId,
+		const QStringList &userIds,
+		const OrganizationId &organizationId,
+		Done done);
+
+	// done(nullopt) on failure.
+	void createChannel(
+		const QString &name,
+		const QString &description,
+		bool isPublic,
+		bool isReadOnly,
+		const OrganizationId &organizationId,
+		std::function<void(std::optional<ChannelData>)> done);
+	void addChannelCover(
+		const ChatId &chatId,
+		const FileId &fileId,
+		Done done);
+	void leaveChat(const ChatId &chatId, Done done);
+	void deleteChannel(const ChatId &chatId, Done done);
+
+	// Channels of the organization by name / description.
+	void searchChannels(
+		const QString &query,
+		const OrganizationId &organizationId,
+		int from,
+		int size,
+		std::function<void(QList<ChannelData>)> done);
+
+	// Organization members that are not in the chat yet.
+	using MembersDone = std::function<void(QList<MemberProfile>)>;
+	void searchNonMembers(
+		const ChatId &chatId,
+		const QString &query,
+		int offset,
+		int limit,
+		MembersDone done);
+
 Q_SIGNALS:
 	void channelsLoaded(const QList<ChannelData> &channels);
 	void dialogsLoaded(const QList<ChannelData> &dialogs);
@@ -63,6 +121,10 @@ Q_SIGNALS:
 	void chatUnpinned(const ChatId &chatId);
 
 private:
+	void simpleCall(
+		const QString &method,
+		const QJsonObject &param,
+		Done done);
 	[[nodiscard]] ChannelData parseChat(const QJsonObject &obj) const;
 	[[nodiscard]] ChatType parseChatType(const QString &type) const;
 

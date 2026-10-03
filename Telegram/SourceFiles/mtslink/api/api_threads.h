@@ -5,6 +5,7 @@ based on Telegram Desktop.
 #pragma once
 
 #include "mtslink/types.h"
+#include "mtslink/api/api_messages.h"
 
 #include <QObject>
 #include <QJsonObject>
@@ -45,7 +46,9 @@ public:
 	void getUnreadCounter(const OrganizationId &orgId);
 
 Q_SIGNALS:
-	void threadsLoaded(const QList<ThreadData> &threads);
+	void threadsLoaded(
+		const QList<ThreadData> &threads,
+		const QList<MemberProfile> &profiles);
 	void threadJoined(const ChatId &chatId, const MessageId &threadId);
 	void threadLeft(const ChatId &chatId, const MessageId &threadId);
 	void threadNotificationsChanged(

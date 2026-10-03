@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/abstract_box.h"
 #include "boxes/premium_limits_box.h"
 #include "boxes/peers/add_participants_box.h"
+#include "mtslink/data_adapters.h"
 #include "boxes/peers/edit_peer_common.h"
 #include "boxes/peers/edit_participant_box.h"
 #include "core/application.h"
@@ -612,6 +613,18 @@ void GroupInfoBox::prepare() {
 			_description,
 			&_navigation->session());
 	}
+	if (_type == Type::Channel) {
+		_mtsLinkPublic.create(
+			this,
+			tr::lng_mtslink_channel_public(tr::now),
+			false,
+			st::defaultBoxCheckbox);
+		_mtsLinkReadOnly.create(
+			this,
+			tr::lng_mtslink_channel_read_only(tr::now),
+			false,
+			st::defaultBoxCheckbox);
+	}
 	_title->submits(
 	) | rpl::on_next([=] { submitName(); }, _title->lifetime());
 
@@ -699,6 +712,20 @@ void GroupInfoBox::resizeEvent(QResizeEvent *e) {
 			+ st::defaultUserpicButton.size.height()
 			+ st::newGroupDescriptionPadding.top();
 		_description->moveToLeft(descriptionLeft, descriptionTop);
+		if (_mtsLinkPublic && _mtsLinkReadOnly) {
+			const auto available = width()
+				- descriptionLeft
+				- st::boxPadding.right();
+			_mtsLinkPublic->resizeToNaturalWidth(available);
+			_mtsLinkReadOnly->resizeToNaturalWidth(available);
+			const auto top = descriptionTop
+				+ _description->height()
+				+ st::newGroupDescriptionPadding.bottom();
+			_mtsLinkPublic->moveToLeft(descriptionLeft, top);
+			_mtsLinkReadOnly->moveToLeft(
+				descriptionLeft,
+				top + _mtsLinkPublic->heightNoMargins() + st::boxLittleSkip);
+		}
 	}
 }
 
@@ -823,6 +850,37 @@ void GroupInfoBox::createChannel(
 		const QString &title,
 		const QString &description) {
 	Expects(!_creationRequestId);
+
+	if (_type == Type::Channel) {
+		_creationRequestId = -1;
+		const auto weak = base::make_weak(this);
+		const auto navigation = _navigation;
+		MtsLink::createChannel(
+			&_navigation->session(),
+			title,
+			description,
+			_mtsLinkPublic && _mtsLinkPublic->checked(),
+			_mtsLinkReadOnly && _mtsLinkReadOnly->checked(),
+			_photo->takeResultImage(),
+			[=](ChannelData *channel) {
+				if (!channel) {
+					if (weak) {
+						_creationRequestId = 0;
+					}
+					return;
+				}
+				if (weak) {
+					closeBox();
+				}
+				// As in Telegram: open the new channel and invite members.
+				navigation->parentController()->showPeerHistory(
+					channel,
+					Window::SectionShow::Way::ClearStack,
+					ShowAtTheEndMsgId);
+				AddParticipantsBoxController::Start(navigation, channel);
+			});
+		return;
+	}
 
 	using Flag = MTPchannels_CreateChannel::Flag;
 	const auto flags = Flag()
@@ -958,6 +1016,12 @@ void GroupInfoBox::updateMaxHeight() {
 		newHeight += st::newGroupDescriptionPadding.top()
 			+ _description->height()
 			+ st::newGroupDescriptionPadding.bottom();
+		if (_mtsLinkPublic && _mtsLinkReadOnly) {
+			newHeight += _mtsLinkPublic->heightNoMargins()
+				+ st::boxLittleSkip
+				+ _mtsLinkReadOnly->heightNoMargins()
+				+ st::boxLittleSkip;
+		}
 	}
 	setDimensions(st::boxWideWidth, newHeight);
 }

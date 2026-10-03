@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_peer_info_box.h"
 
 #include "apiwrap.h"
+#include "mtslink/data_adapters.h"
 #include "api/api_communities.h"
 #include "api/api_credits.h"
 #include "api/api_peer_photo.h"
@@ -3092,6 +3093,10 @@ void Controller::deleteChannel() {
 
 	_navigation->parentController()->hideLayer();
 	Core::App().closeChatFromWindows(channel);
+	if (MtsLink::hasChatId(channel->id)) {
+		MtsLink::deleteChannel(session, channel);
+		return;
+	}
 	if (chat) {
 		session->api().deleteConversation(chat, false);
 	}

@@ -211,6 +211,243 @@ void Channels::createCall(
 		[=](const QString &) { fail(); });
 }
 
+void Channels::simpleCall(
+		const QString &method,
+		const QJsonObject &param,
+		Done done) {
+	_rpc->call(
+		method,
+		param,
+		[=](const QJsonObject &result) {
+			if (done) {
+				done(result.value("type").toString()
+					!= QStringLiteral("BusinessError"));
+			}
+		},
+		[=](const QString &) {
+			if (done) {
+				done(false);
+			}
+		});
+}
+
+void Channels::addAdministrators(
+		const ChatId &chatId,
+		const QStringList &userIds,
+		Done done) {
+	simpleCall("Chat.AddChannelAdministrators", QJsonObject{
+		{ "chatId", chatId },
+		{ "users", QJsonArray::fromStringList(userIds) },
+	}, std::move(done));
+}
+
+void Channels::removeAdministrators(
+		const ChatId &chatId,
+		const QStringList &userIds,
+		Done done) {
+	simpleCall("Chat.RemoveChannelAdministrators", QJsonObject{
+		{ "chatId", chatId },
+		{ "users", QJsonArray::fromStringList(userIds) },
+	}, std::move(done));
+}
+
+void Channels::giveOwnership(
+		const ChatId &chatId,
+		const QString &userId,
+		Done done) {
+	simpleCall("Chat.GiveChannelOwnership", QJsonObject{
+		{ "chatId", chatId },
+		{ "userId", userId },
+	}, std::move(done));
+}
+
+namespace {
+
+QJsonArray UsersWithOrganization(
+		const QStringList &userIds,
+		const OrganizationId &organizationId) {
+	auto result = QJsonArray();
+	for (const auto &userId : userIds) {
+		result.push_back(QJsonObject{
+			{ "userId", userId },
+			{ "organizationId", organizationId },
+		});
+	}
+	return result;
+}
+
+} // namespace
+
+void Channels::addUsers(
+		const ChatId &chatId,
+		const QStringList &userIds,
+		const OrganizationId &organizationId,
+		Done done) {
+	simpleCall("Chat.AddUsersAndTeamsToChannelV2", QJsonObject{
+		{ "chatId", chatId },
+		{ "users", UsersWithOrganization(userIds, organizationId) },
+		{ "teams", QJsonArray() },
+	}, std::move(done));
+}
+
+void Channels::removeUsers(
+		const ChatId &chatId,
+		const QStringList &userIds,
+		const OrganizationId &organizationId,
+		Done done) {
+	simpleCall("Chat.RemoveUsersFromChannelV2", QJsonObject{
+		{ "chatId", chatId },
+		{ "users", UsersWithOrganization(userIds, organizationId) },
+	}, std::move(done));
+}
+
+void Channels::createChannel(
+		const QString &name,
+		const QString &description,
+		bool isPublic,
+		bool isReadOnly,
+		const OrganizationId &organizationId,
+		std::function<void(std::optional<ChannelData>)> done) {
+	_rpc->call(
+		"Chat.CreateChannelV2",
+		QJsonObject{
+			{ "name", name },
+			{ "description", description },
+			{ "isPublic", isPublic },
+			{ "isReadOnly", isReadOnly },
+			{ "organizationId", organizationId },
+		},
+		[=](const QJsonObject &result) {
+			if (result.value("type").toString() != QStringLiteral("Channel")) {
+				done(std::nullopt);
+				return;
+			}
+			auto channel = parseChat(result);
+			channel.type = ChatType::Channel;
+			const auto value = result.value("value").toObject();
+			if (channel.memberRole.isEmpty()) {
+				channel.memberRole = value.value("ownerID").toString();
+			}
+			if (channel.id.isEmpty()) {
+				done(std::nullopt);
+			} else {
+				done(channel);
+			}
+		},
+		[=](const QString &) { done(std::nullopt); });
+}
+
+void Channels::addChannelCover(
+		const ChatId &chatId,
+		const FileId &fileId,
+		Done done) {
+	simpleCall("Chat.AddChannelCover", QJsonObject{
+		{ "channelId", chatId },
+		{ "fileId", fileId },
+	}, std::move(done));
+}
+
+void Channels::leaveChat(const ChatId &chatId, Done done) {
+	simpleCall("Chat.LeaveFromChatV2", QJsonObject{
+		{ "chatId", chatId },
+	}, std::move(done));
+}
+
+void Channels::deleteChannel(const ChatId &chatId, Done done) {
+	simpleCall("Chat.DeleteChannel", QJsonObject{
+		{ "chatId", chatId },
+	}, std::move(done));
+}
+
+void Channels::searchChannels(
+		const QString &query,
+		const OrganizationId &organizationId,
+		int from,
+		int size,
+		std::function<void(QList<ChannelData>)> done) {
+	_rpc->call(
+		"Chat.SearchChannelsV3",
+		QJsonObject{
+			{ "query", query },
+			{ "organizationId", organizationId },
+			{ "from", from },
+			{ "size", size },
+			{ "previewCharsSize", 255 },
+		},
+		[=](const QJsonObject &result) {
+			QList<ChannelData> list;
+			const auto items = result.value("value").toObject()
+				.value("items").toArray();
+			for (const auto &item : items) {
+				const auto obj = item.toObject();
+				auto channel = ChannelData();
+				channel.id = obj.value("id").toString();
+				channel.name = obj.value("name").toString();
+				channel.description = obj.value("description").toString();
+				channel.type = ChatType::Channel;
+				channel.organizationId =
+					obj.value("organizationId").toString();
+				channel.isPublic = obj.value("isPublic").toBool();
+				channel.isReadOnly = obj.value("isReadOnly").toBool();
+				if (!channel.id.isEmpty()) {
+					list.push_back(std::move(channel));
+				}
+			}
+			done(std::move(list));
+		},
+		[=](const QString &) { done({}); });
+}
+
+void Channels::searchNonMembers(
+		const ChatId &chatId,
+		const QString &query,
+		int offset,
+		int limit,
+		MembersDone done) {
+	auto param = QJsonObject{
+		{ "chatId", chatId },
+		{ "limit", limit },
+		{ "offset", offset },
+	};
+	if (!query.isEmpty()) {
+		param.insert("query", query);
+	}
+	_rpc->call(
+		"Chat.SearchNonChatMembersAndTeamsV2",
+		param,
+		[=](const QJsonObject &result) {
+			auto list = QList<MemberProfile>();
+			const auto items = result.value("value").toObject()
+				.value("items").toArray();
+			for (const auto &entry : items) {
+				const auto obj = entry.toObject();
+				if (obj.value("type").toString()
+					!= QStringLiteral("SearchNonChatItemOrganizationMemberProfile")) {
+					continue; // Teams are not supported yet.
+				}
+				const auto prof = obj.value("value").toObject()
+					.value("item").toObject();
+				auto profile = MemberProfile{
+					.userId = prof.value("userId").toString(),
+					.organizationId =
+						prof.value("organizationId").toString(),
+					.email = prof.value("email").toString(),
+					.firstName = prof.value("firstName").toString(),
+					.lastName = prof.value("lastName").toString(),
+					.displayName = prof.value("displayName").toString(),
+					.presence = MemberPresence::Unknown,
+					.avatarFileId = prof.value("avatarFileId").toString(),
+					.role = MemberRole::Member,
+				};
+				if (!profile.userId.isEmpty()) {
+					list.push_back(std::move(profile));
+				}
+			}
+			done(std::move(list));
+		},
+		[=](const QString &) { done({}); });
+}
+
 ChatType Channels::parseChatType(const QString &type) const {
 	if (type == "Dialog") return ChatType::Dialog;
 	if (type == "Channel") return ChatType::Channel;

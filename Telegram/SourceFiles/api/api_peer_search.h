@@ -70,6 +70,7 @@ private:
 	base::flat_map<QString, CacheEntry> _cache;
 	base::flat_map<mtpRequestId, QString> _peerRequests;
 	base::flat_map<mtpRequestId, QString> _sponsoredRequests;
+	std::shared_ptr<bool> _alive = std::make_shared<bool>(true);
 
 };
 

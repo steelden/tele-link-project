@@ -8,6 +8,7 @@ based on Telegram Desktop.
 
 #include <QObject>
 #include <QByteArray>
+#include <QJsonObject>
 #include <functional>
 
 QT_BEGIN_NAMESPACE
@@ -48,7 +49,24 @@ public:
 		FailHandler fail = nullptr,
 		ProgressHandler progress = nullptr);
 
+	// Chat cover / avatar, the server downscales it to 1024px.
+	void uploadAvatar(
+		const QString &filename,
+		const QByteArray &content,
+		const QString &mime,
+		DoneHandler done,
+		FailHandler fail = nullptr);
+
 private:
+	void requestUpload(
+		const QString &rpcMethod,
+		const QJsonObject &param,
+		const QString &filename,
+		const QByteArray &content,
+		const QString &mime,
+		DoneHandler done,
+		FailHandler fail,
+		ProgressHandler progress);
 	void doHttpUpload(
 		const QString &url,
 		const QString &method,

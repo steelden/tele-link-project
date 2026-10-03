@@ -6447,6 +6447,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_thread_unsubscribe" = "Unsubscribe from thread";
 "lng_mtslink_thread_mute" = "Mute thread";
 "lng_mtslink_thread_unmute" = "Unmute thread";
+"lng_mtslink_role_admin_granted" = "You are now an administrator of {chat}";
+"lng_mtslink_role_admin_revoked" = "You are no longer an administrator of {chat}";
+"lng_mtslink_role_owner_granted" = "You are now the owner of {chat}";
+"lng_mtslink_removed_from_channel" = "You were removed from {chat}";
+"lng_mtslink_make_admin" = "Make administrator";
+"lng_mtslink_remove_admin" = "Remove administrator";
+"lng_mtslink_make_owner" = "Make owner";
+"lng_mtslink_make_owner_confirm" = "Transfer ownership of {chat} to {user}? You will become a regular member, only the new owner can make you an administrator.";
+"lng_mtslink_remove_member" = "Remove from channel";
+"lng_mtslink_remove_member_confirm" = "Remove {user} from {chat}?";
+"lng_mtslink_role_owner" = "owner";
+"lng_mtslink_role_admin" = "administrator";
+"lng_mtslink_channel_public" = "Public channel: everyone in the organization can find and join it";
+"lng_mtslink_channel_read_only" = "Only administrators can post";
 "lng_call_invitation" = "Group call invitation";
 "lng_call_ongoing" = "Ongoing group call";
 

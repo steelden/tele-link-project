@@ -106,6 +106,50 @@ void Users::loadOrganizationMembers(int offset, int limit) {
 		});
 }
 
+void Users::searchMembers(
+		const QString &query,
+		int offset,
+		int limit,
+		std::function<void(QList<MemberProfile>)> done) {
+	_rpc->call(
+		"Member.SearchMembers",
+		QJsonObject{
+			{ "query", query },
+			{ "offset", offset },
+			{ "limit", limit },
+			{ "highlightSize", 255 },
+		},
+		[=](const QJsonObject &result) {
+			QList<MemberProfile> list;
+			const auto items = result.value("value").toObject()
+				.value("items").toArray();
+			for (const auto &item : items) {
+				const auto obj = item.toObject();
+				const auto prof = obj.value("profile").toObject();
+				auto profile = MemberProfile{
+					.userId = obj.value("userId").toString(),
+					.organizationId =
+						obj.value("organizationId").toString(),
+					.email = prof.value("email").toString(),
+					.phone = prof.value("phone").toString(),
+					.position = prof.value("position").toString(),
+					.firstName = prof.value("firstName").toString(),
+					.lastName = prof.value("lastName").toString(),
+					.displayName = prof.value("displayName").toString(),
+					.presence = MemberPresence::Unknown,
+					.avatarFileId = prof.value("avatarFileId").toString(),
+					.role = MemberRole::Member,
+				};
+				if (!profile.userId.isEmpty()
+					&& !obj.value("isBot").toBool()) {
+					list.push_back(std::move(profile));
+				}
+			}
+			done(std::move(list));
+		},
+		[=](const QString &) { done({}); });
+}
+
 void Users::loadChatMembers(const ChatId &chatId) {
 	_rpc->call(
 		"Chat.SearchChatMembersV2",

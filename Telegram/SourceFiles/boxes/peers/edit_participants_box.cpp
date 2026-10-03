@@ -45,6 +45,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtslink/data_adapters.h"
 #include "styles/style_chat.h"
 #include "styles/style_menu_icons.h"
+#include "styles/style_layers.h"
 
 namespace {
 
@@ -743,7 +744,8 @@ void ParticipantsAdditionalData::fillFromChannel(
 	if (!information || !channel->canViewMembers()) {
 		return;
 	}
-	if (information->creator) {
+	if (information->creator || MtsLink::hasChatId(channel->id)) {
+		// MTS Link ownership can be transferred, null means no owner known.
 		_creator = information->creator;
 	}
 	for (const auto &user : information->lastParticipants) {
@@ -769,6 +771,11 @@ void ParticipantsAdditionalData::fillFromChannel(
 			_adminCanEdit.erase(user);
 			_adminPromotedBy.erase(user);
 			_restrictedRights.emplace(user, restricted->second.rights);
+		} else if (MtsLink::hasChatId(channel->id)) {
+			// Admin rights were removed or ownership transferred.
+			_adminRights.erase(user);
+			_adminCanEdit.erase(user);
+			_adminPromotedBy.erase(user);
 		}
 	}
 }
@@ -1839,6 +1846,25 @@ void ParticipantsBoxController::loadMoreRows() {
 	const auto channel = _peer->asChannel();
 	if (MtsLink::hasChatId(_peer->id)) {
 		_groupByRole = true;
+		if (!_mtsLinkMembersSubscribed) {
+			// Members and roles change by server events, rebuild the list
+			// on every members reload.
+			_mtsLinkMembersSubscribed = true;
+			using UpdateFlag = Data::PeerUpdate::Flag;
+			channel->session().changes().peerUpdates(
+				channel,
+				UpdateFlag::Members | UpdateFlag::Rights
+			) | rpl::on_next([=](const Data::PeerUpdate &) {
+				LOG(("MtsLink Members: rebuilding list of %1"
+					).arg(_peer->name()));
+				_allLoaded = false;
+				while (delegate()->peerListFullRowsCount() > 0) {
+					delegate()->peerListRemoveRow(
+						delegate()->peerListRowAt(0));
+				}
+				loadMoreRows();
+			}, lifetime());
+		}
 		const auto mega = channel->asMegagroup();
 		if (mega && mega->mgInfo
 			&& !mega->mgInfo->lastParticipants.empty()) {
@@ -1856,23 +1882,6 @@ void ParticipantsBoxController::loadMoreRows() {
 					appendRow(user);
 				}
 			}
-			using UpdateFlag = Data::PeerUpdate::Flag;
-			const auto done = std::make_shared<bool>(false);
-			channel->session().changes().peerUpdates(
-				channel,
-				UpdateFlag::Members
-			) | rpl::on_next([=](const Data::PeerUpdate &) {
-				if (*done) {
-					return;
-				}
-				*done = true;
-				_allLoaded = false;
-				while (delegate()->peerListFullRowsCount() > 0) {
-					delegate()->peerListRemoveRow(
-						delegate()->peerListRowAt(0));
-				}
-				loadMoreRows();
-			}, lifetime());
 		}
 		_allLoaded = true;
 		refreshDescription();
@@ -2052,6 +2061,81 @@ void ParticipantsBoxController::rowClicked(not_null<PeerListRow*> row) {
 	}
 }
 
+void ParticipantsBoxController::fillMtsLinkMemberActions(
+		not_null<Ui::PopupMenu*> menu,
+		not_null<ChannelData*> channel,
+		not_null<UserData*> user) {
+	if (user->isSelf()
+		|| MtsLink::chatTypeForPeer(channel->id) != MtsLink::ChatType::Channel) {
+		return;
+	}
+	const auto myRole = MtsLink::myChannelRole(channel->id);
+	const auto iAmOwner = (myRole == u"Owner"_q);
+	const auto iAmAdmin = iAmOwner || (myRole == u"Admin"_q);
+	const auto targetOwner = (MtsLink::channelOwner(channel->id) == user->id);
+	const auto targetAdmin = targetOwner
+		|| MtsLink::isChannelAdmin(channel->id, user->id);
+	if (!iAmAdmin || targetOwner) {
+		return;
+	}
+	const auto session = &channel->session();
+	const auto show = delegate()->peerListUiShow();
+	if (!targetAdmin) {
+		menu->addAction(
+			tr::lng_mtslink_make_admin(tr::now),
+			[=] { MtsLink::setChannelAdmin(session, channel, user, true); },
+			&st::menuIconAdmin);
+	} else {
+		menu->addAction(
+			tr::lng_mtslink_remove_admin(tr::now),
+			[=] { MtsLink::setChannelAdmin(session, channel, user, false); },
+			&st::menuIconRemove);
+	}
+	if (iAmOwner) {
+		menu->addAction(
+			tr::lng_mtslink_make_owner(tr::now),
+			[=] {
+				show->show(Ui::MakeConfirmBox({
+					.text = tr::lng_mtslink_make_owner_confirm(
+						tr::now,
+						lt_chat,
+						tr::bold(channel->name()),
+						lt_user,
+						tr::bold(user->name()),
+						tr::marked),
+					.confirmed = [=](Fn<void()> close) {
+						MtsLink::giveChannelOwnership(session, channel, user);
+						close();
+					},
+					.confirmText = tr::lng_mtslink_make_owner(tr::now),
+				}));
+			},
+			&st::menuIconPromote);
+	}
+	if (iAmOwner || !targetAdmin) {
+		menu->addAction(
+			tr::lng_mtslink_remove_member(tr::now),
+			[=] {
+				show->show(Ui::MakeConfirmBox({
+					.text = tr::lng_mtslink_remove_member_confirm(
+						tr::now,
+						lt_user,
+						tr::bold(user->name()),
+						lt_chat,
+						tr::bold(channel->name()),
+						tr::marked),
+					.confirmed = [=](Fn<void()> close) {
+						MtsLink::removeChannelMember(session, channel, user);
+						close();
+					},
+					.confirmText = tr::lng_box_remove(tr::now),
+					.confirmStyle = &st::attentionBoxButton,
+				}));
+			},
+			&st::menuIconRemoveAttention);
+	}
+}
+
 void ParticipantsBoxController::rowRightActionClicked(
 		not_null<PeerListRow*> row) {
 	rowElementClicked(row, Row::kRemoveElement);
@@ -2165,6 +2249,12 @@ base::unique_qptr<Ui::PopupMenu> ParticipantsBoxController::rowContextMenu(
 			(participant->isUser()
 				? &st::menuIconProfile
 				: &st::menuIconInfo));
+	}
+	if (MtsLink::hasChatId(_peer->id)) {
+		if (user && channel) {
+			fillMtsLinkMemberActions(result.get(), channel, user);
+		}
+		return result;
 	}
 	if (user && SupportsMemberTags(_peer)) {
 		const auto isSelf = user->isSelf();
@@ -2380,6 +2470,30 @@ void ParticipantsBoxController::editRestrictedDone(
 
 void ParticipantsBoxController::kickParticipant(not_null<PeerData*> participant) {
 	const auto user = participant->asUser();
+	if (MtsLink::hasChatId(_peer->id)) {
+		// The row disappears on the members reload after the server event.
+		const auto channel = _peer->asChannel();
+		if (!user || !channel) {
+			return;
+		}
+		const auto session = &channel->session();
+		showBox(Ui::MakeConfirmBox({
+			.text = tr::lng_mtslink_remove_member_confirm(
+				tr::now,
+				lt_user,
+				tr::bold(user->name()),
+				lt_chat,
+				tr::bold(channel->name()),
+				tr::marked),
+			.confirmed = [=](Fn<void()> close) {
+				MtsLink::removeChannelMember(session, channel, user);
+				close();
+			},
+			.confirmText = tr::lng_box_remove(),
+			.confirmStyle = &st::attentionBoxButton,
+		}));
+		return;
+	}
 	const auto kickFrom = _peer;
 	const auto restrictedRights = _additional.restrictedRights(participant);
 	const auto removeLocal = crl::guard(this, [=] {

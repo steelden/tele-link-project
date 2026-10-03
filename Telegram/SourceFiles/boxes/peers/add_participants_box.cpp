@@ -43,6 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "info/profile/info_profile_icon.h"
 #include "apiwrap.h"
+#include "mtslink/data_adapters.h"
 #include "styles/style_boxes.h"
 #include "styles/style_edit_peer_members.h"
 #include "styles/style_layers.h"
@@ -764,6 +765,86 @@ std::unique_ptr<ForbiddenRow> InviteForbiddenController::createRow(
 	return std::make_unique<ForbiddenRow>(user, lockSt, locked);
 }
 
+class MtsLinkNonMembersSearchController final
+	: public PeerListSearchController {
+public:
+	explicit MtsLinkNonMembersSearchController(not_null<PeerData*> peer)
+	: _peer(peer) {
+		_timer.setCallback([=] { searchOnServer(); });
+	}
+	~MtsLinkNonMembersSearchController() {
+		*_alive = false;
+	}
+
+	void searchQuery(const QString &query) override {
+		if (_query == query) {
+			return;
+		}
+		_query = query;
+		_loading = false;
+		_timer.cancel();
+		if (_query.isEmpty()) {
+			return;
+		} else if (const auto i = _cache.find(_query); i != end(_cache)) {
+			feed(i->second);
+		} else {
+			_timer.callOnce(kSearchDelay);
+		}
+	}
+	bool isLoading() override {
+		return _timer.isActive() || _loading;
+	}
+	bool loadMoreRows() override {
+		return false;
+	}
+
+private:
+	static constexpr auto kSearchDelay = crl::time(300);
+
+	void searchOnServer() {
+		const auto query = _query;
+		const auto alive = std::weak_ptr<bool>(_alive);
+		_loading = true;
+		MtsLink::searchChannelNonMembers(
+			&_peer->session(),
+			_peer,
+			query,
+			[=](std::vector<not_null<UserData*>> users) {
+				if (!alive.lock()) {
+					return;
+				}
+				_cache[query] = users;
+				if (_query == query) {
+					_loading = false;
+					feed(users);
+				}
+			});
+	}
+	void feed(const std::vector<not_null<UserData*>> &users) {
+		for (const auto &user : users) {
+			delegate()->peerListSearchAddRow(user);
+		}
+		delegate()->peerListSearchRefreshRows();
+	}
+
+	const not_null<PeerData*> _peer;
+	const std::shared_ptr<bool> _alive = std::make_shared<bool>(true);
+	base::Timer _timer;
+	QString _query;
+	bool _loading = false;
+	std::map<QString, std::vector<not_null<UserData*>>> _cache;
+
+};
+
+[[nodiscard]] std::unique_ptr<PeerListSearchController> MakeSearchController(
+		not_null<PeerData*> peer) {
+	if (MtsLink::hasChatId(peer->id)) {
+		return std::make_unique<MtsLinkNonMembersSearchController>(peer);
+	}
+	return std::make_unique<PeerListGlobalSearchController>(
+		&peer->session());
+}
+
 } // namespace
 
 AddParticipantsBoxController::AddParticipantsBoxController(
@@ -781,7 +862,7 @@ AddParticipantsBoxController::AddParticipantsBoxController(
 AddParticipantsBoxController::AddParticipantsBoxController(
 	not_null<PeerData*> peer,
 	base::flat_set<not_null<UserData*>> &&alreadyIn)
-: ContactsBoxController(&peer->session())
+: ContactsBoxController(&peer->session(), MakeSearchController(peer))
 , _peer(peer)
 , _alreadyIn(std::move(alreadyIn)) {
 	if (needsInviteLinkButton()) {
@@ -829,6 +910,29 @@ void AddParticipantsBoxController::itemDeselectedHook(
 
 void AddParticipantsBoxController::prepareViewHook() {
 	updateTitle();
+
+	if (_peer && MtsLink::hasChatId(_peer->id)) {
+		// Organization members not in the chat, as in MTS Link.
+		const auto alive = std::make_shared<bool>(true);
+		lifetime().add([=] { *alive = false; });
+		MtsLink::searchChannelNonMembers(
+			&_peer->session(),
+			_peer,
+			QString(),
+			[=](std::vector<not_null<UserData*>> users) {
+				if (!*alive) {
+					return;
+				}
+				for (const auto &user : users) {
+					if (delegate()->peerListFindRow(user->id.value)) {
+						continue;
+					} else if (auto row = createRow(user)) {
+						delegate()->peerListAppendRow(std::move(row));
+					}
+				}
+				delegate()->peerListRefreshRows();
+			});
+	}
 
 	TrackMessageMoneyRestrictionsChanges(this, lifetime());
 }
@@ -962,6 +1066,10 @@ void AddParticipantsBoxController::inviteSelectedUsers(
 	}) | ranges::to_vector;
 	if (users.empty()) {
 		return;
+	}
+	if (MtsLink::hasChatId(_peer->id)) {
+		MtsLink::inviteChannelMembers(&_peer->session(), _peer, users);
+		return done();
 	}
 	const auto show = box->uiShow();
 	const auto request = [=](bool checked) {

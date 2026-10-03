@@ -243,6 +243,10 @@ FileData Messages::parseFile(const QJsonObject &obj) const {
 }
 
 MemberProfile Messages::parseProfile(const QJsonObject &obj) const {
+	return ParseMemberProfile(obj);
+}
+
+MemberProfile ParseMemberProfile(const QJsonObject &obj) {
 	const auto roleStr = obj.value("role").toString();
 	return {
 		.userId = obj.value("userId").toString(),
@@ -305,6 +309,49 @@ void Messages::search(
 
 			Q_EMIT searchCompleted(chatId, messages, profiles, total);
 		});
+}
+
+void Messages::searchGlobal(
+		const QString &query,
+		const OrganizationId &organizationId,
+		int from,
+		int size,
+		GlobalSearchDone done) {
+	_rpc->call(
+		"Chat.SearchMessagesV4",
+		QJsonObject{
+			{ "query", query },
+			{ "organizationId", organizationId },
+			{ "from", from },
+			{ "size", size },
+			{ "previewCharsSize", 255 },
+		},
+		[=](const QJsonObject &result) {
+			const auto value = result.value("value").toObject();
+			const auto items = value.value("items").toArray();
+			QList<MessageData> messages;
+			for (const auto &item : items) {
+				const auto obj = item.toObject();
+				auto msg = parseMessage(obj);
+				if (msg.isDeleted || msg.id.isEmpty()) {
+					continue;
+				}
+				if (msg.parentId.isEmpty()) {
+					msg.parentId = obj.value("threadId").toString();
+				}
+				messages.push_back(std::move(msg));
+			}
+			QList<MemberProfile> profiles;
+			for (const auto &item : value.value("memberProfiles").toArray()) {
+				profiles.push_back(parseProfile(item.toObject()));
+			}
+			done(
+				std::move(messages),
+				std::move(profiles),
+				value.value("total").toInt(),
+				int(items.size()));
+		},
+		[=](const QString &) { done({}, {}, 0, 0); });
 }
 
 void Messages::loadPinned(const ChatId &chatId, int limit) {

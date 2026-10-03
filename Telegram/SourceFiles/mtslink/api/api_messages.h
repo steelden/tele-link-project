@@ -92,6 +92,8 @@ struct MessageData {
 	std::optional<CallMetadata> callMeta;
 };
 
+[[nodiscard]] MemberProfile ParseMemberProfile(const QJsonObject &obj);
+
 class Messages final : public QObject {
 	Q_OBJECT
 
@@ -126,6 +128,19 @@ public:
 		const ChatId &chatId,
 		const MessageId &messageId,
 		int limit = 50);
+
+	// Search in all my chats, done(messages, profiles, total, rawCount).
+	using GlobalSearchDone = std::function<void(
+		QList<MessageData>,
+		QList<MemberProfile>,
+		int,
+		int)>;
+	void searchGlobal(
+		const QString &query,
+		const OrganizationId &organizationId,
+		int from,
+		int size,
+		GlobalSearchDone done);
 
 Q_SIGNALS:
 	void messagesLoaded(

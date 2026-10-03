@@ -42,6 +42,7 @@ based on Telegram Desktop.
 #include "window/notifications_manager.h"
 #include "base/unixtime.h"
 #include "base/random.h"
+#include "base/call_delayed.h"
 #include "ui/image/image_location.h"
 #include "ui/text/text_entity.h"
 #include "ui/chat/group_call_bar.h"
@@ -55,6 +56,7 @@ based on Telegram Desktop.
 
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDataStream>
+#include <QtCore/QBuffer>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QRegularExpression>
@@ -237,6 +239,11 @@ constexpr auto kPreviewRetryLimit = 20;
 QHash<PeerId, MsgId> PendingChatThreadScroll;
 bool FolderPinsSyncScheduled = false;
 QSet<PeerId> InCallUsers;
+QHash<PeerId, QString> MyChannelRoles; // channel -> "Owner"/"Admin"/"Member"
+QHash<PeerId, PeerId> ChannelOwners; // channel -> owner user
+QSet<QString> MembersReloadScheduled;
+QHash<PeerId, QHash<PeerId, MemberRole>> ChatMembersRoles;
+QSet<QString> SelfLeavingChats; // Our own leave, no "removed" toast.
 // Pinned messages of a chat ordered by date, MsgIds are not chronological.
 QHash<PeerId, std::vector<std::pair<TimeId, MsgId>>> PinnedByDate;
 QSet<PeerId> PresenceKnownUsers;
@@ -1143,6 +1150,10 @@ void handleNotificationEvent(
 }
 
 MTPPeerNotifySettings makeMuteSettings(bool muted);
+void applyMyChannelRole(not_null<ChannelData*> channel, const QString &role);
+void removeStaleChannels(
+	not_null<Main::Session*> session,
+	const QList<Api::ChannelData> &channels);
 void applyThreadNotifiable(
 	not_null<Main::Session*> session,
 	const QString &chatId,
@@ -1360,6 +1371,7 @@ void connectToSession(
 		[mainSession, refreshLastMessages](const QList<Api::ChannelData> &list) {
 			if (DialogsApplied) {
 				applyChatList(mainSession, list);
+				removeStaleChannels(mainSession, list);
 				refreshLastMessages(list);
 				auto combined = LoadedDialogsList + list;
 				saveChatListToCache(mainSession, combined);
@@ -1377,6 +1389,7 @@ void connectToSession(
 			refreshLastMessages(list);
 			if (!PendingChannelsList.isEmpty()) {
 				applyChatList(mainSession, PendingChannelsList);
+				removeStaleChannels(mainSession, PendingChannelsList);
 				refreshLastMessages(PendingChannelsList);
 				auto combined = list + PendingChannelsList;
 				saveChatListToCache(mainSession, combined);
@@ -1387,6 +1400,8 @@ void connectToSession(
 		mtsSession->channels(),
 		&Api::Channels::chatInfoLoaded,
 		[mainSession, mtsSession](const Api::ChannelData &ch) {
+			LOG(("MtsLink: chat info loaded %1 type=%2 role=%3"
+				).arg(ch.id).arg(int(ch.type)).arg(ch.memberRole));
 			if (ch.type == ChatType::Dialog
 				|| ch.type == ChatType::Favorites) {
 				applyDialogData(mainSession, ch);
@@ -1656,6 +1671,21 @@ void connectToSession(
 		&Api::Users::memberLoaded,
 		[mainSession](const Api::MemberProfile &profile) {
 			applyUserData(mainSession, profile);
+			const auto authorPeerId = PeerId(
+				::UserId(uuidToBareId(profile.userId)));
+			for (auto it = ThreadAuthorMap.constBegin();
+				it != ThreadAuthorMap.constEnd(); ++it) {
+				if (it.value() != authorPeerId) {
+					continue;
+				}
+				const auto history = mainSession->data().historyLoaded(
+					it.key());
+				if (const auto last = history
+						? history->lastMessage()
+						: nullptr) {
+					last->invalidateChatListEntry();
+				}
+			}
 			const auto pending = PendingUserEvents.take(profile.userId);
 			for (const auto &ev : pending) {
 				handleChatEvent(mainSession, ev.dst, ev.param);
@@ -1748,8 +1778,48 @@ void connectToSession(
 			}
 			if (const auto channel = mainSession->data().channelLoaded(
 					peerToChannel(peerId))) {
+				const auto selfId = mtsSession->userId();
+				auto rolesLog = QStringList();
+				for (const auto &m : members) {
+					if (m.role == MemberRole::Owner) {
+						rolesLog.push_back(m.userId + u"=Owner"_q);
+					} else if (m.role == MemberRole::Admin) {
+						rolesLog.push_back(m.userId + u"=Admin"_q);
+					}
+				}
+				LOG(("MtsLink Members: %1 loaded %2, megagroup=%3, admins: %4"
+					).arg(chatId
+					).arg(members.size()
+					).arg(channel->isMegagroup() ? 1 : 0
+					).arg(rolesLog.join(u", "_q)));
+				ChannelOwners.remove(channel->id);
+				auto &roles = ChatMembersRoles[channel->id];
+				roles.clear();
+				for (const auto &m : members) {
+					roles.insert(
+						PeerId(::UserId(uuidToBareId(m.userId))),
+						m.role);
+					if (m.role == MemberRole::Owner) {
+						ChannelOwners.insert(
+							channel->id,
+							PeerId(::UserId(uuidToBareId(m.userId))));
+					}
+					if (m.userId == selfId) {
+						applyMyChannelRole(
+							channel,
+							(m.role == MemberRole::Owner)
+								? u"Owner"_q
+								: (m.role == MemberRole::Admin)
+								? u"Admin"_q
+								: u"Member"_q);
+					}
+				}
 				if (const auto mega = channel->asMegagroup()) {
 					if (mega->mgInfo) {
+						const auto owner = ChannelOwners.value(channel->id);
+						mega->mgInfo->creator = owner
+							? mainSession->data().userLoaded(peerToUser(owner))
+							: nullptr;
 						mega->mgInfo->lastParticipants.clear();
 						mega->mgInfo->lastAdmins.clear();
 						for (const auto &m : members) {
@@ -1838,8 +1908,42 @@ void connectToSession(
 	QObject::connect(
 		mtsSession->threads(),
 		&Api::Threads::threadsLoaded,
-		[mainSession](const QList<Api::ThreadData> &threads) {
+		[mainSession, mtsSession](
+				const QList<Api::ThreadData> &threads,
+				const QList<Api::MemberProfile> &profiles) {
+			for (const auto &profile : profiles) {
+				if (!profile.userId.isEmpty()) {
+					applyUserData(mainSession, profile);
+				}
+			}
+			// Authors missing in the profiles are loaded separately,
+			// the preview shows the name once the profile arrives.
+			auto missing = QSet<QString>();
+			for (const auto &thread : threads) {
+				const auto authorId = thread.message.value("authorId")
+					.toString();
+				if (authorId.isEmpty() || missing.contains(authorId)) {
+					continue;
+				}
+				const auto user = mainSession->data().userLoaded(
+					::UserId(uuidToBareId(authorId)));
+				if (!user || user->name().isEmpty()) {
+					missing.insert(authorId);
+				}
+			}
+			LOG(("MtsLink Thread: list %1 threads, %2 profiles, %3 missing"
+				).arg(threads.size()
+				).arg(profiles.size()
+				).arg(missing.size()));
 			applyThreadsList(mainSession, threads);
+			for (const auto &authorId : missing) {
+				if (!UserProfileRequested.contains(authorId)) {
+					UserProfileRequested.insert(authorId);
+					mtsSession->users()->loadMember(
+						authorId,
+						mtsSession->organizationId());
+				}
+			}
 		});
 	QObject::connect(
 		mtsSession->threads(),
@@ -2480,6 +2584,54 @@ void applyDialogData(
 	}
 }
 
+[[nodiscard]] QString normalizeChannelRole(const QString &role) {
+	return role.contains(u"Owner"_q)
+		? u"Owner"_q
+		: role.contains(u"Admin"_q)
+		? u"Admin"_q
+		: role.isEmpty()
+		? QString()
+		: u"Member"_q;
+}
+
+// Applies my role in the channel to the Telegram rights model.
+void applyMyChannelRole(
+		not_null<ChannelData*> channel,
+		const QString &role) {
+	const auto normalized = normalizeChannelRole(role);
+	if (!normalized.isEmpty()) {
+		MyChannelRoles.insert(channel->id, normalized);
+	}
+	const auto current = MyChannelRoles.value(channel->id);
+	const auto owner = (current == u"Owner"_q);
+	const auto admin = owner || (current == u"Admin"_q);
+
+	auto rights = ChatAdminRights(0);
+	if (chatTypeForPeer(channel->id) == ChatType::Channel
+		&& (!channel->isBroadcast() || admin)) {
+		rights |= ChatAdminRight::PostMessages;
+	}
+	if (admin) {
+		rights |= ChatAdminRight::PostMessages
+			| ChatAdminRight::EditMessages
+			| ChatAdminRight::PinMessages
+			| ChatAdminRight::DeleteMessages
+			| ChatAdminRight::InviteByLinkOrAdd
+			| ChatAdminRight::BanUsers;
+	}
+	if (owner) {
+		rights |= ChatAdminRight::AddAdmins;
+	}
+	channel->setAdminRights(rights);
+	auto flags = channel->flags();
+	if (owner) {
+		flags |= ChannelDataFlag::Creator;
+	} else {
+		flags &= ~ChannelDataFlag::Creator;
+	}
+	channel->setFlags(flags);
+}
+
 void applyChannelData(
 		not_null<Main::Session*> session,
 		const Api::ChannelData &src) {
@@ -2500,21 +2652,7 @@ void applyChannelData(
 		flags &= ~ChannelDataFlag::Broadcast;
 	}
 	channel->setFlags(flags);
-	{
-		auto adminRights = ChatAdminRights(0);
-		if (src.type == ChatType::Channel && !src.isReadOnly) {
-			adminRights |= ChatAdminRight::PostMessages;
-		}
-		const auto isAdmin =
-			src.memberRole.contains("Admin")
-			|| src.memberRole.contains("Owner");
-		if (isAdmin) {
-			adminRights |= ChatAdminRight::EditMessages;
-			adminRights |= ChatAdminRight::PinMessages;
-			adminRights |= ChatAdminRight::DeleteMessages;
-		}
-		channel->setAdminRights(adminRights);
-	}
+	applyMyChannelRole(channel, src.memberRole);
 	channel->setName(src.name, {});
 	applyUserpic(channel, src.avatarFileId);
 	if (src.memberCount > 0) {
@@ -2546,6 +2684,14 @@ void applyChannelData(
 	if (src.isPinned) {
 		session->data().setPinnedFromEntryList(
 			Dialogs::Key(history), true);
+	}
+	if (!history->inChatList() && history->folderKnown()) {
+		// Added back after leaving: the time is unchanged, so nothing
+		// above returns the entry to the chat list.
+		history->updateChatListExistence();
+		LOG(("MtsLink Channel: %1 back to chat list=%2"
+			).arg(src.id
+			).arg(history->inChatList() ? 1 : 0));
 	}
 }
 
@@ -3197,16 +3343,133 @@ void handleNotificationEvent(
 	}
 }
 
+void showMtsLinkToast(
+		not_null<Main::Session*> session,
+		const QString &text) {
+	LOG(("MtsLink Toast: '%1' windows=%2"
+		).arg(text).arg(session->windows().size()));
+	if (!session->windows().empty()) {
+		session->windows().front()->showToast(text, crl::time(5000));
+	}
+}
+
+// Members events come in bursts and twice (chat and chat-user streams).
+void scheduleChannelMembersReload(
+		not_null<Main::Session*> session,
+		const QString &chatId) {
+	if (MembersReloadScheduled.contains(chatId)) {
+		return;
+	}
+	MembersReloadScheduled.insert(chatId);
+	const auto weak = base::make_weak(session);
+	base::call_delayed(300, [=] {
+		MembersReloadScheduled.remove(chatId);
+		if (!weak) {
+			return;
+		}
+		if (const auto mts = weak->account().mtsLinkSession()) {
+			mts->users()->loadChatMembers(chatId);
+		}
+	});
+}
+
+void applyChannelLeft(
+		not_null<Main::Session*> session,
+		not_null<ChannelData*> channel) {
+	MyChannelRoles.remove(channel->id);
+	ChannelOwners.remove(channel->id);
+	ChatMembersRoles.remove(channel->id);
+	channel->setFlags(channel->flags() | ChannelDataFlag::Left);
+	// A private channel can't be joined back, only by an invitation,
+	// so the chat is closed and removed from the lists, as in Telegram.
+	Core::App().closeChatFromWindows(channel);
+	if (const auto history = session->data().historyLoaded(channel)) {
+		history->setUnreadCount(0);
+		if (history->folderKnown()) {
+			const auto key = Dialogs::Key(history);
+			if (history->isPinnedDialog(FilterId())) {
+				session->data().setChatPinned(key, FilterId(), false);
+			}
+			history->updateChatListExistence();
+			LOG(("MtsLink Channel: left %1, inChatList=%2"
+				).arg(channel->name()
+				).arg(history->inChatList() ? 1 : 0));
+		}
+	}
+}
+
+// GetMyChannelsV3 returns all my channels, the ones restored from the cache
+// and missing there were left or deleted while the app was closed.
+void removeStaleChannels(
+		not_null<Main::Session*> session,
+		const QList<Api::ChannelData> &channels) {
+	auto actual = QSet<QString>();
+	for (const auto &ch : channels) {
+		actual.insert(ch.id);
+	}
+	auto stale = std::vector<not_null<ChannelData*>>();
+	for (auto i = ChatToPeerMap.cbegin(); i != ChatToPeerMap.cend(); ++i) {
+		const auto peerId = i.value();
+		if (actual.contains(i.key())
+			|| isThreadPeer(peerId)
+			|| PeerToChatTypeMap.value(peerId) != ChatType::Channel) {
+			continue;
+		}
+		const auto channel = session->data().channelLoaded(
+			peerToChannel(peerId));
+		if (channel && channel->amIn()) {
+			stale.push_back(channel);
+		}
+	}
+	for (const auto &channel : stale) {
+		LOG(("MtsLink Channel: %1 is not in my channels anymore"
+			).arg(channel->name()));
+		applyChannelLeft(session, channel);
+	}
+}
+
+[[nodiscard]] QStringList eventUsers(const QJsonObject &value) {
+	auto result = QStringList();
+	for (const auto &user : value.value("users").toArray()) {
+		if (user.isString()) {
+			result.push_back(user.toString());
+		} else {
+			result.push_back(user.toObject().value("userId").toString());
+		}
+	}
+	return result;
+}
+
 void handleChatEvent(
 		not_null<Main::Session*> session,
 		const QString &dst,
 		const QJsonObject &param) {
 	const auto type = param.value("type").toString();
 	const auto value = param.value("value").toObject();
-	const auto isUserLevel = dst.startsWith(u"chat-user-"_q);
-	const auto chatId = isUserLevel
-		? value.value("chatId").toString()
-		: extractChatIdFromDst(dst);
+	const auto isUserLevel = dst.startsWith(u"chat-user-"_q)
+		|| dst.startsWith(u"chat-org-"_q);
+	const auto chatId = [&] {
+		auto result = isUserLevel
+			? value.value("chatId").toString()
+			: extractChatIdFromDst(dst);
+		if (result.isEmpty()) {
+			result = value.value("updated").toObject()
+				.value("chatId").toString();
+		}
+		// Channel events keep the id in other fields.
+		if (result.isEmpty()) {
+			result = value.value("channel").toObject()
+				.value("chatId").toString();
+		}
+		if (result.isEmpty()) {
+			result = value.value("chat").toObject()
+				.value("chatId").toString();
+		}
+		if (result.isEmpty()) {
+			result = value.value("channelId").toString();
+		}
+		return result;
+	}();
 	LOG(("MtsLink Event: type=%1 chatId=%2 dst=%3")
 		.arg(type).arg(chatId).arg(dst));
 
@@ -3839,6 +4102,174 @@ void handleChatEvent(
 				}
 				session->data().requestItemViewRefresh(item);
 			}
+		}
+	} else if (type == "AddChannelAdministratorsEvent"
+		|| type == "RemovedChannelAdministratorsEvent") {
+		const auto channel = session->data().channelLoaded(
+			peerToChannel(chatIdToPeerId(chatId)));
+		const auto mts = session->account().mtsLinkSession();
+		if (!channel || !mts) {
+			return;
+		}
+		const auto added = (type == "AddChannelAdministratorsEvent");
+		if (eventUsers(value).contains(mts->userId())) {
+			const auto was = MyChannelRoles.value(channel->id);
+			const auto now = added
+				? ((was == u"Owner"_q) ? was : u"Admin"_q)
+				: u"Member"_q;
+			LOG(("MtsLink Channel: my role %1 -> %2 in %3"
+				).arg(was, now, chatId));
+			if (was != now) {
+				applyMyChannelRole(channel, now);
+				// Ownership transfer makes the old owner an admin quietly.
+				if (now == u"Admin"_q && was != u"Owner"_q) {
+					showMtsLinkToast(
+						session,
+						tr::lng_mtslink_role_admin_granted(
+							tr::now,
+							lt_chat,
+							channel->name()));
+				} else if (now == u"Member"_q) {
+					showMtsLinkToast(
+						session,
+						tr::lng_mtslink_role_admin_revoked(
+							tr::now,
+							lt_chat,
+							channel->name()));
+				}
+				session->changes().peerUpdated(
+					channel,
+					Data::PeerUpdate::Flag::Rights);
+			}
+		}
+		scheduleChannelMembersReload(session, chatId);
+	} else if (type == "ChatOwnerChangedEvent") {
+		const auto channel = session->data().channelLoaded(
+			peerToChannel(chatIdToPeerId(chatId)));
+		const auto mts = session->account().mtsLinkSession();
+		if (!channel || !mts) {
+			return;
+		}
+		const auto userId = value.value("userId").toString();
+		const auto ownerPeerId = PeerId(::UserId(uuidToBareId(userId)));
+		const auto mine = (userId == mts->userId());
+		const auto was = MyChannelRoles.value(channel->id);
+		LOG(("MtsLink Channel: owner of %1 is %2, my role was %3"
+			).arg(chatId, userId, was));
+		ChannelOwners.insert(channel->id, ownerPeerId);
+		if (mine && was != u"Owner"_q) {
+			applyMyChannelRole(channel, u"Owner"_q);
+			showMtsLinkToast(
+				session,
+				tr::lng_mtslink_role_owner_granted(
+					tr::now,
+					lt_chat,
+					channel->name()));
+			session->changes().peerUpdated(
+				channel,
+				Data::PeerUpdate::Flag::Rights);
+		} else if (!mine && was == u"Owner"_q) {
+			// AddChannelAdministratorsEvent makes us an admin after that.
+			applyMyChannelRole(channel, u"Member"_q);
+			session->changes().peerUpdated(
+				channel,
+				Data::PeerUpdate::Flag::Rights);
+		}
+		scheduleChannelMembersReload(session, chatId);
+	} else if (type == "ChannelUsersAddedEvent"
+		|| type == "ChannelUsersRemovedEvent") {
+		const auto mts = session->account().mtsLinkSession();
+		if (!mts) {
+			return;
+		}
+		const auto removed = (type == "ChannelUsersRemovedEvent");
+		const auto self = eventUsers(value).contains(mts->userId());
+		const auto channel = session->data().channelLoaded(
+			peerToChannel(chatIdToPeerId(chatId)));
+		if (self && removed) {
+			if (channel && channel->amIn() && SelfLeavingChats.contains(chatId)) {
+				LOG(("MtsLink Channel: left %1").arg(chatId));
+				applyChannelLeft(session, channel);
+			} else if (channel && channel->amIn()) {
+				LOG(("MtsLink Channel: removed from %1").arg(chatId));
+				showMtsLinkToast(
+					session,
+					tr::lng_mtslink_removed_from_channel(
+						tr::now,
+						lt_chat,
+						channel->name()));
+				applyChannelLeft(session, channel);
+			}
+			return;
+		} else if (self && (!channel || !channel->amIn())) {
+			LOG(("MtsLink Channel: added to %1").arg(chatId));
+			mts->channels()->loadChatInfo(chatId);
+			return;
+		}
+		if (channel) {
+			scheduleChannelMembersReload(session, chatId);
+		}
+	} else if (type == "ChannelMembersCountChanged") {
+		const auto channel = session->data().channelLoaded(
+			peerToChannel(chatIdToPeerId(chatId)));
+		const auto count = value.value("membersCount").toInt();
+		if (channel && count > 0) {
+			channel->setMembersCount(count);
+		}
+	} else if (type == "ChannelUpdatedEvent"
+		|| type == "ChannelUpdatedEventV2") {
+		const auto channel = session->data().channelLoaded(
+			peerToChannel(chatIdToPeerId(chatId)));
+		if (!channel) {
+			return;
+		}
+		const auto updated = value.value("updated").toObject();
+		const auto name = updated.value("name").toString();
+		if (!name.isEmpty() && name != channel->name()) {
+			channel->setName(name, {});
+		}
+		if (updated.contains("description")) {
+			channel->setAbout(updated.value("description").toString());
+		}
+		if (updated.contains("isReadOnly")) {
+			const auto readOnly = updated.value("isReadOnly").toBool();
+			if (readOnly != channel->isBroadcast()) {
+				auto flags = channel->flags();
+				if (readOnly) {
+					flags |= ChannelDataFlag::Broadcast;
+					flags &= ~ChannelDataFlag::Megagroup;
+				} else {
+					flags |= ChannelDataFlag::Megagroup;
+					flags &= ~ChannelDataFlag::Broadcast;
+				}
+				channel->setFlags(flags);
+				applyMyChannelRole(channel, QString());
+			}
+		}
+	} else if (type == "ChannelCoverAddedEvent") {
+		const auto channel = session->data().channelLoaded(
+			peerToChannel(chatIdToPeerId(chatId)));
+		const auto fileId = value.value("coverFileId").toString();
+		if (channel && !fileId.isEmpty()) {
+			applyUserpic(channel, fileId);
+		}
+	} else if (type == "NewChannelEvent"
+		|| type == "MemberJoinedChannelEvent") {
+		const auto channel = session->data().channelLoaded(
+			peerToChannel(chatIdToPeerId(chatId)));
+		if (!channel || !channel->amIn()) {
+			if (const auto mts = session->account().mtsLinkSession()) {
+				LOG(("MtsLink Channel: %1, loading %2").arg(type, chatId));
+				mts->channels()->loadChatInfo(chatId);
+			}
+		}
+	} else if (type == "MemberLeftChannelEvent"
+		|| type == "ChannelDeletedEvent") {
+		const auto channel = session->data().channelLoaded(
+			peerToChannel(chatIdToPeerId(chatId)));
+		if (channel && channel->amIn()) {
+			LOG(("MtsLink Channel: %1 %2").arg(type, chatId));
+			applyChannelLeft(session, channel);
 		}
 	} else if (type == "CallStatusUpdatedEvent") {
 		const auto messageId = value.value("messageId").toString();
@@ -5324,6 +5755,418 @@ void performStartCall(
 
 bool isUserInCall(PeerId userPeerId) {
 	return InCallUsers.contains(userPeerId);
+}
+
+QString myChannelRole(PeerId channelPeerId) {
+	return MyChannelRoles.value(channelPeerId);
+}
+
+PeerId channelOwner(PeerId channelPeerId) {
+	return ChannelOwners.value(channelPeerId);
+}
+
+bool isChannelAdmin(PeerId channelPeerId, PeerId userPeerId) {
+	const auto it = ChatMembersRoles.constFind(channelPeerId);
+	if (it == ChatMembersRoles.constEnd()) {
+		return false;
+	}
+	const auto role = it->value(userPeerId, MemberRole::Member);
+	return (role == MemberRole::Admin) || (role == MemberRole::Owner);
+}
+
+namespace {
+
+void channelAction(
+		not_null<Main::Session*> session,
+		const QString &what,
+		Fn<void(not_null<Session*>, Api::Channels::Done)> call) {
+	const auto mts = session->account().mtsLinkSession();
+	if (!mts || !mts->channels()) {
+		return;
+	}
+	const auto weak = base::make_weak(session);
+	LOG(("MtsLink Channel: %1").arg(what));
+	call(mts, [=](bool ok) {
+		LOG(("MtsLink Channel: %1 -> %2").arg(what, ok ? "ok" : "fail"));
+		if (!ok && weak) {
+			showMtsLinkToast(weak.get(), tr::lng_cant_do_this(tr::now));
+		}
+	});
+}
+
+} // namespace
+
+void setChannelAdmin(
+		not_null<Main::Session*> session,
+		not_null<PeerData*> channel,
+		not_null<UserData*> user,
+		bool admin) {
+	const auto chatId = peerIdToChatId(channel->id);
+	const auto userId = userBareIdToUuid(peerToUser(user->id).bare);
+	channelAction(
+		session,
+		(admin ? u"add admin %1 in %2"_q : u"remove admin %1 in %2"_q)
+			.arg(userId, chatId),
+		[=](not_null<Session*> mts, Api::Channels::Done done) {
+			if (admin) {
+				mts->channels()->addAdministrators(
+					chatId,
+					{ userId },
+					std::move(done));
+			} else {
+				mts->channels()->removeAdministrators(
+					chatId,
+					{ userId },
+					std::move(done));
+			}
+		});
+}
+
+void giveChannelOwnership(
+		not_null<Main::Session*> session,
+		not_null<PeerData*> channel,
+		not_null<UserData*> user) {
+	const auto chatId = peerIdToChatId(channel->id);
+	const auto userId = userBareIdToUuid(peerToUser(user->id).bare);
+	channelAction(
+		session,
+		u"give ownership of %1 to %2"_q.arg(chatId, userId),
+		[=](not_null<Session*> mts, Api::Channels::Done done) {
+			mts->channels()->giveOwnership(chatId, userId, std::move(done));
+		});
+}
+
+void inviteChannelMembers(
+		not_null<Main::Session*> session,
+		not_null<PeerData*> channel,
+		const std::vector<not_null<UserData*>> &users) {
+	const auto chatId = peerIdToChatId(channel->id);
+	auto userIds = QStringList();
+	for (const auto &user : users) {
+		const auto id = userBareIdToUuid(peerToUser(user->id).bare);
+		if (!id.isEmpty()) {
+			userIds.push_back(id);
+		}
+	}
+	if (userIds.isEmpty()) {
+		return;
+	}
+	channelAction(
+		session,
+		u"invite %1 to %2"_q.arg(userIds.join(','), chatId),
+		[=](not_null<Session*> mts, Api::Channels::Done done) {
+			mts->channels()->addUsers(
+				chatId,
+				userIds,
+				mts->organizationId(),
+				std::move(done));
+		});
+}
+
+void createChannel(
+		not_null<Main::Session*> session,
+		const QString &title,
+		const QString &description,
+		bool isPublic,
+		bool isReadOnly,
+		QImage cover,
+		Fn<void(ChannelData*)> done) {
+	const auto mts = session->account().mtsLinkSession();
+	if (!mts || !mts->channels()) {
+		done(nullptr);
+		return;
+	}
+	const auto weak = base::make_weak(session);
+	const auto selfId = mts->userId();
+	LOG(("MtsLink Channel: create '%1' public=%2 readOnly=%3"
+		).arg(title).arg(isPublic ? 1 : 0).arg(isReadOnly ? 1 : 0));
+	mts->channels()->createChannel(
+		title,
+		description,
+		isPublic,
+		isReadOnly,
+		mts->organizationId(),
+		[=](std::optional<Api::ChannelData> result) {
+			if (!weak) {
+				return;
+			} else if (!result) {
+				LOG(("MtsLink Channel: create failed"));
+				showMtsLinkToast(weak.get(), tr::lng_cant_do_this(tr::now));
+				done(nullptr);
+				return;
+			}
+			auto data = *result;
+			// The creator is the owner, CreateChannelV2 returns ownerID.
+			data.memberRole = (data.memberRole == selfId
+				|| data.memberRole.isEmpty())
+				? u"Owner"_q
+				: data.memberRole;
+			LOG(("MtsLink Channel: created %1 role=%2"
+				).arg(data.id, data.memberRole));
+			applyChannelData(weak.get(), data);
+			const auto peerId = chatIdToPeerId(data.id, ChatType::Channel);
+			const auto channel = weak->data().channelLoaded(
+				peerToChannel(peerId));
+			if (const auto strong = weak->account().mtsLinkSession()) {
+				strong->users()->loadChatMembers(data.id);
+				if (!cover.isNull()) {
+					auto bytes = QByteArray();
+					QBuffer buffer(&bytes);
+					buffer.open(QIODevice::WriteOnly);
+					cover.save(&buffer, "PNG");
+					const auto chatId = data.id;
+					strong->files()->uploadAvatar(
+						u"Avatar.png"_q,
+						bytes,
+						u"image/png"_q,
+						[=](const Api::UploadResult &uploaded) {
+							if (!weak) {
+								return;
+							}
+							const auto mts = weak->account().mtsLinkSession();
+							if (!mts) {
+								return;
+							}
+							LOG(("MtsLink Channel: cover %1 uploaded for %2"
+								).arg(uploaded.id, chatId));
+							mts->channels()->addChannelCover(
+								chatId,
+								uploaded.id,
+								[=](bool ok) {
+									LOG(("MtsLink Channel: AddChannelCover %1"
+										).arg(ok ? "ok" : "fail"));
+								});
+						},
+						[=](const QString &error) {
+							LOG(("MtsLink Channel: cover upload failed: %1"
+								).arg(error));
+						});
+				}
+			}
+			done(channel);
+		});
+}
+
+void leaveChannel(
+		not_null<Main::Session*> session,
+		not_null<ChannelData*> channel) {
+	const auto chatId = peerIdToChatId(channel->id);
+	SelfLeavingChats.insert(chatId);
+	const auto weak = base::make_weak(session);
+	channelAction(
+		session,
+		u"leave %1"_q.arg(chatId),
+		[=](not_null<Session*> mts, Api::Channels::Done done) {
+			mts->channels()->leaveChat(chatId, [=](bool ok) {
+				if (ok && weak) {
+					if (const auto strong = weak->data().channelLoaded(
+							peerToChannel(channel->id))) {
+						applyChannelLeft(weak.get(), strong);
+					}
+				}
+				done(ok);
+			});
+		});
+}
+
+void deleteChannel(
+		not_null<Main::Session*> session,
+		not_null<ChannelData*> channel) {
+	const auto chatId = peerIdToChatId(channel->id);
+	SelfLeavingChats.insert(chatId);
+	const auto weak = base::make_weak(session);
+	channelAction(
+		session,
+		u"delete %1"_q.arg(chatId),
+		[=](not_null<Session*> mts, Api::Channels::Done done) {
+			mts->channels()->deleteChannel(chatId, [=](bool ok) {
+				if (ok && weak) {
+					if (const auto strong = weak->data().channelLoaded(
+							peerToChannel(channel->id))) {
+						applyChannelLeft(weak.get(), strong);
+					}
+				}
+				done(ok);
+			});
+		});
+}
+
+void searchPeersGlobal(
+		not_null<Main::Session*> session,
+		const QString &query,
+		Fn<void(
+			std::vector<not_null<PeerData*>> my,
+			std::vector<not_null<PeerData*>> peers)> done) {
+	const auto mts = session->account().mtsLinkSession();
+	if (!mts || !mts->channels() || !mts->users()) {
+		done({}, {});
+		return;
+	}
+	struct State {
+		std::vector<not_null<PeerData*>> my;
+		std::vector<not_null<PeerData*>> peers;
+		int waiting = 2;
+	};
+	const auto state = std::make_shared<State>();
+	const auto weak = base::make_weak(session);
+	const auto finish = [=] {
+		if (--state->waiting == 0 && weak) {
+			LOG(("MtsLink Search: peers '%1' my=%2 peers=%3"
+				).arg(query
+				).arg(state->my.size()
+				).arg(state->peers.size()));
+			done(std::move(state->my), std::move(state->peers));
+		}
+	};
+	mts->channels()->searchChannels(
+		query,
+		mts->organizationId(),
+		0,
+		30,
+		[=](QList<Api::ChannelData> channels) {
+			if (weak) {
+				for (const auto &ch : channels) {
+					// Joining public channels is not supported yet,
+					// only the channels I'm a member of are shown.
+					if (!ChatToPeerMap.contains(ch.id)) {
+						continue;
+					}
+					const auto channel = weak->data().channelLoaded(
+						peerToChannel(chatIdToPeerId(ch.id)));
+					if (channel && channel->amIn()) {
+						state->my.push_back(channel);
+					}
+				}
+			}
+			finish();
+		});
+	mts->users()->searchMembers(
+		query,
+		0,
+		30,
+		[=](QList<Api::MemberProfile> profiles) {
+			if (weak) {
+				const auto selfId = weak->account().mtsLinkSession()
+					? weak->account().mtsLinkSession()->userId()
+					: QString();
+				for (const auto &profile : profiles) {
+					if (profile.userId == selfId) {
+						continue;
+					}
+					applyUserData(weak.get(), profile);
+					state->peers.push_back(weak->data().user(
+						::UserId(uuidToBareId(profile.userId))));
+				}
+			}
+			finish();
+		});
+}
+
+void searchMessagesGlobal(
+		not_null<Main::Session*> session,
+		const QString &query,
+		int offset,
+		int limit,
+		Fn<void(std::vector<not_null<HistoryItem*>>, int, bool)> done) {
+	const auto mts = session->account().mtsLinkSession();
+	if (!mts || !mts->messages()) {
+		done({}, 0, true);
+		return;
+	}
+	const auto weak = base::make_weak(session);
+	mts->messages()->searchGlobal(
+		query,
+		mts->organizationId(),
+		offset,
+		limit,
+		[=](
+				QList<Api::MessageData> messages,
+				QList<Api::MemberProfile> profiles,
+				int total,
+				int rawCount) {
+			if (!weak) {
+				return;
+			}
+			for (const auto &profile : profiles) {
+				applyUserData(weak.get(), profile);
+			}
+			auto items = std::vector<not_null<HistoryItem*>>();
+			auto skipped = 0;
+			for (const auto &message : messages) {
+				// Messages of chats I'm not in can't be opened.
+				if (!ChatToPeerMap.contains(message.chatId)) {
+					++skipped;
+					continue;
+				}
+				if (const auto item = addMessage(weak.get(), message)) {
+					items.push_back(item);
+				}
+			}
+			const auto full = (rawCount < limit)
+				|| (offset + rawCount >= total);
+			LOG(("MtsLink Search: messages '%1' from %2: %3 of %4, "
+				"skipped %5, full=%6"
+				).arg(query
+				).arg(offset
+				).arg(items.size()
+				).arg(total
+				).arg(skipped
+				).arg(full ? 1 : 0));
+			done(std::move(items), total, full);
+		});
+}
+
+void searchChannelNonMembers(
+		not_null<Main::Session*> session,
+		not_null<PeerData*> channel,
+		const QString &query,
+		Fn<void(std::vector<not_null<UserData*>>)> done) {
+	const auto mts = session->account().mtsLinkSession();
+	const auto chatId = peerIdToChatId(channel->id);
+	if (!mts || !mts->channels() || chatId.isEmpty()) {
+		done({});
+		return;
+	}
+	const auto weak = base::make_weak(session);
+	LOG(("MtsLink Invite: search '%1' in %2").arg(query, chatId));
+	mts->channels()->searchNonMembers(
+		chatId,
+		query,
+		0,
+		50,
+		[=](QList<Api::MemberProfile> profiles) {
+			LOG(("MtsLink Invite: search '%1' found %2"
+				).arg(query).arg(profiles.size()));
+			if (!weak) {
+				return;
+			}
+			auto users = std::vector<not_null<UserData*>>();
+			users.reserve(profiles.size());
+			for (const auto &profile : profiles) {
+				applyUserData(weak.get(), profile);
+				users.push_back(weak->data().user(
+					::UserId(uuidToBareId(profile.userId))));
+			}
+			done(std::move(users));
+		});
+}
+
+void removeChannelMember(
+		not_null<Main::Session*> session,
+		not_null<PeerData*> channel,
+		not_null<UserData*> user) {
+	const auto chatId = peerIdToChatId(channel->id);
+	const auto userId = userBareIdToUuid(peerToUser(user->id).bare);
+	channelAction(
+		session,
+		u"remove %1 from %2"_q.arg(userId, chatId),
+		[=](not_null<Session*> mts, Api::Channels::Done done) {
+			mts->channels()->removeUsers(
+				chatId,
+				{ userId },
+				mts->organizationId(),
+				std::move(done));
+		});
 }
 
 void startCall(not_null<Main::Session*> session, not_null<PeerData*> peer) {

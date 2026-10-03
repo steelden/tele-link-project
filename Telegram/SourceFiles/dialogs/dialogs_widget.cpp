@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/dialogs_widget.h"
 
+#include "mtslink/data_adapters.h"
+#include "main/main_account.h"
+
 #include "base/call_delayed.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/options.h"
@@ -3559,6 +3562,43 @@ void Widget::requestMessages(bool fromStart) {
 	const auto type = SearchRequestType{
 		.start = fromStart,
 	};
+	if (session().account().mtsLinkSession()) {
+		static auto LastMtsLinkRequestId = mtpRequestId(0);
+		const auto requestId = --LastMtsLinkRequestId;
+		// The page size of the MTS Link client.
+		constexpr auto kPerPage = 30;
+		const auto offset = fromStart ? 0 : _searchProcess.nextRate;
+		_searchProcess.requestId = requestId;
+		MtsLink::searchMessagesGlobal(
+			&session(),
+			_searchQuery,
+			offset,
+			kPerPage,
+			crl::guard(this, [=](
+					std::vector<not_null<HistoryItem*>> items,
+					int total,
+					bool full) {
+				if (_searchProcess.requestId != requestId) {
+					return;
+				}
+				if (type.start) {
+					_searchProcess.lastPeer = nullptr;
+					_searchProcess.lastId = 0;
+				}
+				// MTS Link pages by offset, kept in nextRate.
+				_searchProcess.nextRate = offset + kPerPage;
+				_searchProcess.full = full;
+				if (!items.empty()) {
+					_searchProcess.lastPeer = items.back()->history()->peer;
+					_searchProcess.lastId = items.back()->id;
+				}
+				_inner->searchReceived(items, nullptr, type, total);
+				_searchProcess.requestId = 0;
+				listScrollUpdated();
+				update();
+			}));
+		return;
+	}
 	using Flag = MTPmessages_SearchGlobal::Flag;
 	const auto community = (_searchQueryTab == ChatSearchTab::ThisCommunity)
 		? _searchQueryCommunity

@@ -12,6 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "dialogs/ui/chat_search_in.h" // IsHashOrCashtagSearchQuery
 #include "main/main_session.h"
+#include "mtslink/data_adapters.h"
+#include "main/main_account.h"
 
 namespace Api {
 namespace {
@@ -62,6 +64,24 @@ void PeerSearch::request(
 }
 
 void PeerSearch::requestPeers() {
+	if (_session->account().mtsLinkSession()) {
+		static auto LastMtsLinkRequestId = mtpRequestId(0);
+		const auto requestId = --LastMtsLinkRequestId;
+		_peerRequests.emplace(requestId, _query);
+		const auto alive = std::weak_ptr<bool>(_alive);
+		MtsLink::searchPeersGlobal(_session, _query, [=](
+				std::vector<not_null<PeerData*>> my,
+				std::vector<not_null<PeerData*>> peers) {
+			if (!alive.lock() || !_peerRequests.contains(requestId)) {
+				return;
+			}
+			finishPeers(requestId, PeerSearchResult{
+				.my = std::move(my),
+				.peers = std::move(peers),
+			});
+		});
+		return;
+	}
 	const auto requestId = _session->api().request(MTPcontacts_Search(
 		MTP_flags(0),
 		MTP_string(_query),

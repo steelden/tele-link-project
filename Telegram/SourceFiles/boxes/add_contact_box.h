@@ -154,6 +154,8 @@ private:
 	object_ptr<Ui::UserpicButton> _photo = { nullptr };
 	object_ptr<Ui::InputField> _title = { nullptr };
 	object_ptr<Ui::InputField> _description = { nullptr };
+	object_ptr<Ui::Checkbox> _mtsLinkPublic = { nullptr };
+	object_ptr<Ui::Checkbox> _mtsLinkReadOnly = { nullptr };
 
 	// group / channel creation
 	mtpRequestId _creationRequestId = 0;

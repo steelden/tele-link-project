@@ -24,6 +24,12 @@ public:
 	void loadMember(const UserId &userId, const QString &organizationId);
 	void loadOrganizationMembers(int offset = 0, int limit = 100);
 	void loadChatMembers(const ChatId &chatId);
+	// Organization members by name / email, done(profiles).
+	void searchMembers(
+		const QString &query,
+		int offset,
+		int limit,
+		std::function<void(QList<MemberProfile>)> done);
 	void loadPresence(const UserId &userId, const QString &organizationId);
 
 	[[nodiscard]] MemberProfile cachedProfile(const UserId &userId) const;
