@@ -49,6 +49,7 @@ void Users::loadMember(const UserId &userId, const QString &organizationId) {
 							? MemberRole::Guest
 							: MemberRole::Member,
 			};
+			ParseProfileDetails(prof, profile);
 			if (value.contains("inCall")) {
 				profile.inCall = int(value.value("inCall").toBool());
 			}
@@ -155,6 +156,7 @@ void Users::searchMembers(
 					.avatarFileId = prof.value("avatarFileId").toString(),
 					.role = MemberRole::Member,
 				};
+				ParseProfileDetails(prof, profile);
 				if (obj.contains("customStatus")) {
 					profile.customStatus = obj.value("customStatus").toObject();
 					profile.customStatusKnown = true;

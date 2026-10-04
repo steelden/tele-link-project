@@ -100,6 +100,8 @@ QString FileRefreshTokenValue;
 QList<QNetworkCookie> FileAuthCookies;
 // The members of a chat loaded last time, they are not reloaded too often.
 QHash<QString, crl::time> MembersLoadedAt;
+
+void requestProfileFields(not_null<Main::Session*> session);
 // Incoming call messages: their notifications open the incoming call.
 base::flat_set<FullMsgId> CallMessages;
 std::function<void()> TokenRefreshCallback;
@@ -267,6 +269,8 @@ QHash<QString, QList<PendingChatEvent>> PendingChatEvents;
 QHash<QString, QList<PendingChatEvent>> PendingUserEvents;
 QSet<QString> ChatInfoRequested;
 QSet<QString> UserProfileRequested;
+// Authors whose messages are shown without waiting for the profile.
+QSet<QString> AuthorWaitExpired;
 QSet<QString> ReadRequestSentChats;
 struct PendingThreadUnreadInfo {
 	int count = 0;
@@ -1561,7 +1565,12 @@ void connectToSession(
 			if (!currentLast) {
 				mtsSession->messages()->loadPreview(ch.id, 1);
 			} else if (apiDate > currentLast->date()) {
-				mtsSession->messages()->load(ch.id, {}, 1);
+				// New messages while TeleLink was closed or disconnected:
+				// the newest ones together, not only the last one (the
+				// missed ones came later below it, out of order).
+				LOG(("MtsLink NewMsg: %1 has newer messages, loading"
+					).arg(ch.id));
+				mtsSession->messages()->load(ch.id, {}, 50);
 			}
 		}
 	};
@@ -1680,6 +1689,18 @@ void connectToSession(
 				}
 			}
 			const bool hasCachedMessages = (newestExistingDate > 0);
+			if (hasCachedMessages
+				&& !messages.isEmpty()
+				&& rawCount >= 50
+				&& TimeId(messages.back().createdAt / 1000)
+					> newestExistingDate) {
+				// Diagnostics: more new messages than loaded, a gap.
+				LOG(("MtsLink NewMsg: GAP in %1, the oldest loaded %2 is "
+					"newer than the newest known %3"
+					).arg(chatId
+					).arg(messages.back().createdAt / 1000
+					).arg(newestExistingDate));
+			}
 			std::vector<not_null<HistoryItem*>> newerItems;
 			for (int i = messages.size() - 1; i >= 0; --i) {
 				addMessage(
@@ -1850,6 +1871,12 @@ void connectToSession(
 							.displayName = prof.value("displayName").toString(),
 							.avatarFileId = prof.value("avatarFileId").toString(),
 							.role = MemberRole::Member,
+							.additionalFields = [&] {
+								auto parsed = Api::MemberProfile();
+								Api::ParseProfileDetails(prof, parsed);
+								return parsed.additionalFields;
+							}(),
+							.detailsKnown = true,
 						}, true);
 						if (userId == mtsSession->userId()) {
 							applyMyProfileChanged(mainSession, prof);
@@ -2264,6 +2291,8 @@ void connectToSession(
 	}));
 
 	mtsSession->users()->loadOrganizationMembers();
+	// The titles of the organization profile fields, for the profiles.
+	requestProfileFields(mainSession);
 }
 
 BareId uuidToBareId(const QString &uuid) {
@@ -2773,7 +2802,10 @@ void applyDialogData(
 	const auto userId = peerToUser(peerId);
 	const auto user = session->data().user(userId);
 
-	user->setName(src.name, {}, {}, {});
+	// The dialog has only the full name, the member profile is better.
+	if (user->name().isEmpty()) {
+		user->setName(src.name, {}, {}, user->editableUsername());
+	}
 	user->setIsContact(true);
 	if (!HasKnownUserpic(user)) {
 		applyUserpic(user, src.avatarFileId, __LINE__);
@@ -2967,6 +2999,139 @@ void applyChannelData(
 	}
 }
 
+namespace {
+
+QHash<PeerId, UserDetails> UserDetailsMap;
+rpl::event_stream<PeerId> UserDetailsChanges;
+std::vector<ProfileFieldInfo> ProfileFields;
+bool ProfileFieldsRequested = false;
+base::flat_set<PeerId> UserDetailsRequested;
+
+// Profiles come from many answers, most of them without the details:
+// a field is updated only by an answer that has it.
+void applyUserDetails(PeerId peerId, const Api::MemberProfile &src) {
+	auto &details = UserDetailsMap[peerId];
+	const auto was = details;
+	if (!src.email.isEmpty()) {
+		details.email = src.email;
+	}
+	if (src.detailsKnown) {
+		details.position = src.position;
+		details.department = src.department;
+		details.additional.clear();
+		for (const auto &[id, value] : src.additionalFields) {
+			details.additional.push_back({ id, value });
+		}
+		details.full = true;
+	} else {
+		if (!src.position.isEmpty()) {
+			details.position = src.position;
+		}
+		if (!src.department.isEmpty()) {
+			details.department = src.department;
+		}
+	}
+	if (details.email != was.email
+		|| details.position != was.position
+		|| details.department != was.department
+		|| details.additional != was.additional
+		|| details.full != was.full) {
+		UserDetailsChanges.fire_copy(peerId);
+	}
+}
+
+void requestProfileFields(not_null<Main::Session*> session) {
+	const auto mts = session->account().mtsLinkSession();
+	if (ProfileFieldsRequested || !mts || !mts->rpc()) {
+		return;
+	}
+	ProfileFieldsRequested = true;
+	const auto weak = base::make_weak(session);
+	mts->rpc()->call(
+		u"Organization.GetProfileFields"_q,
+		QJsonObject{ { u"organizationId"_q, mts->organizationId() } },
+		[=](const QJsonObject &result) {
+			auto list = std::vector<std::pair<int, ProfileFieldInfo>>();
+			const auto value = result.value(u"value"_q).toObject();
+			for (const auto &group : value) {
+				for (const auto &item : group.toArray()) {
+					const auto field = item.toObject();
+					const auto id = field.value(u"id"_q).toString();
+					const auto title = field.value(u"title"_q).toString();
+					if (!id.isEmpty() && !title.isEmpty()) {
+						list.push_back({
+							field.value(u"sort"_q).toInt(),
+							ProfileFieldInfo{ id, title },
+						});
+					}
+				}
+			}
+			ranges::stable_sort(list, ranges::less(), [](const auto &p) {
+				return p.first;
+			});
+			ProfileFields.clear();
+			for (const auto &[sort, field] : list) {
+				ProfileFields.push_back(field);
+			}
+			LOG(("MtsLink Profile: %1 organization profile fields"
+				).arg(ProfileFields.size()));
+			for (const auto &peerId : UserDetailsMap.keys()) {
+				UserDetailsChanges.fire_copy(peerId);
+			}
+		},
+		[=](const QString &error) {
+			ProfileFieldsRequested = false;
+			LOG(("MtsLink Profile: GetProfileFields failed: %1").arg(error));
+		});
+}
+
+} // namespace
+
+rpl::producer<UserDetails> userDetailsValue(not_null<UserData*> user) {
+	const auto peerId = user->id;
+	return rpl::single(
+		UserDetailsMap.value(peerId)
+	) | rpl::then(UserDetailsChanges.events(
+	) | rpl::filter(
+		rpl::mappers::_1 == peerId
+	) | rpl::map([=] {
+		return UserDetailsMap.value(peerId);
+	}));
+}
+
+const std::vector<ProfileFieldInfo> &profileFields() {
+	return ProfileFields;
+}
+
+rpl::producer<QString> profileFieldTitle(const QString &title) {
+	// The organization fields come with Russian titles.
+	const auto lower = title.trimmed().toLower();
+	if (lower == u"подразделение"_q) {
+		return tr::lng_mtslink_info_department();
+	} else if (lower == u"внутренний телефон"_q) {
+		return tr::lng_mtslink_info_extension();
+	} else if (lower == u"должность"_q) {
+		return tr::lng_mtslink_info_position();
+	}
+	return rpl::single(title);
+}
+
+void requestUserDetails(not_null<UserData*> user) {
+	const auto session = &user->session();
+	requestProfileFields(session);
+	const auto mts = session->account().mtsLinkSession();
+	const auto userId = UserBareIdToUuidMap.value(peerToUser(user->id).bare);
+	if (!mts
+		|| userId.isEmpty()
+		|| UserDetailsMap.value(user->id).full
+		|| UserDetailsRequested.contains(user->id)) {
+		return;
+	}
+	UserDetailsRequested.emplace(user->id);
+	LOG(("MtsLink Profile: loading the details of %1").arg(userId));
+	mts->users()->loadMember(userId, mts->organizationId());
+}
+
 void applyUserData(
 		not_null<Main::Session*> session,
 		const Api::MemberProfile &src,
@@ -2993,12 +3158,19 @@ void applyUserData(
 	// made all the userpics blink.
 	const auto wasUsername = user->username();
 	const auto wasPhone = user->phone();
-	const auto wasAbout = user->about();
+	applyUserDetails(user->id, src);
+	// The bio is not used: the details are shown in their own rows, an old
+	// "email / position" bio may be stored locally (for the self user).
+	if (!user->about().isEmpty()) {
+		user->setAbout(QString());
+	}
+	// Some answers have no display name, it is kept then: the name and the
+	// username jumped between the answers in an opened profile.
 	user->setName(
 		first.isEmpty() ? display : first,
 		last,
 		{},
-		display);
+		display.isEmpty() ? user->editableUsername() : display);
 	user->setLoadedStatus(PeerData::LoadedStatus::Normal);
 	user->removeFlags(UserDataFlag::Scam | UserDataFlag::Fake);
 	user->setIsContact(true);
@@ -3009,9 +3181,6 @@ void applyUserData(
 		applyUserpic(user, src.avatarFileId, __LINE__);
 	}
 
-	if (!src.displayName.isEmpty()) {
-		user->setUsername(src.displayName);
-	}
 
 	if (!src.phone.isEmpty()) {
 		auto phone = src.phone;
@@ -3021,19 +3190,6 @@ void applyUserData(
 		user->setPhone(phone);
 	}
 
-	QStringList aboutParts;
-	if (!src.email.isEmpty()) {
-		aboutParts << src.email;
-	}
-	if (!src.position.isEmpty()) {
-		aboutParts << src.position;
-	}
-	if (!src.department.isEmpty()) {
-		aboutParts << src.department;
-	}
-	if (!aboutParts.isEmpty()) {
-		user->setAbout(aboutParts.join(QChar('\n')));
-	}
 
 	auto onlineChanged = false;
 	if (src.presence != MemberPresence::Unknown) {
@@ -3061,9 +3217,6 @@ void applyUserData(
 	}
 	if (user->phone() != wasPhone) {
 		flags |= Data::PeerUpdate::Flag::PhoneNumber;
-	}
-	if (user->about() != wasAbout) {
-		flags |= Data::PeerUpdate::Flag::About;
 	}
 	if (flags) {
 		session->changes().peerUpdated(user, flags);
@@ -3210,6 +3363,16 @@ HistoryItem *addMessage(
 		}
 	}
 
+	// Diagnostics: the ids are hashes of the uuids, two messages with the
+	// same hash would show only the first one.
+	if (const auto known = msgIdToMtsLinkId(chatPeerId, msgId)
+		; !known.isEmpty() && known != src.id) {
+		LOG(("MtsLink NewMsg: ID COLLISION in %1, msgId=%2 for %3 and %4"
+			).arg(src.chatId
+			).arg(msgId.bare
+			).arg(known
+			).arg(src.id));
+	}
 	registerMessageId(chatPeerId, msgId, src.id);
 
 	const auto existing = session->data().message(chatPeerId, msgId);
@@ -3778,6 +3941,8 @@ void handleChatEvent(
 	const auto chatKnown = ChatToPeerMap.contains(chatId);
 	if (!chatKnown && type == "NewMessageV2Event") {
 		PendingChatEvents[chatId].append({ dst, param });
+		LOG(("MtsLink NewMsg: chat %1 is unknown, waiting for its info, "
+			"%2 pending").arg(chatId).arg(PendingChatEvents[chatId].size()));
 		if (!ChatInfoRequested.contains(chatId)) {
 			ChatInfoRequested.insert(chatId);
 			const auto mts = session->account().mtsLinkSession();
@@ -3785,6 +3950,24 @@ void handleChatEvent(
 				LOG(("MtsLink: unknown chatId %1, requesting info").arg(chatId));
 				mts->channels()->loadChatInfo(chatId);
 			}
+			// Chat.GetChatV3 has no failure handling: the request is
+			// repeated once, the lost messages are logged.
+			const auto weak = base::make_weak(session);
+			base::call_delayed(10000, [=] {
+				const auto strong = weak.get();
+				if (!strong || !PendingChatEvents.contains(chatId)) {
+					return;
+				}
+				LOG(("MtsLink NewMsg: chat %1 info is not loaded in 10s, "
+					"%2 messages pending, requesting again"
+					).arg(chatId
+					).arg(PendingChatEvents.value(chatId).size()));
+				ChatInfoRequested.remove(chatId);
+				if (const auto mts = strong->account().mtsLinkSession()) {
+					ChatInfoRequested.insert(chatId);
+					mts->channels()->loadChatInfo(chatId);
+				}
+			});
 		}
 		return;
 	}
@@ -3797,14 +3980,26 @@ void handleChatEvent(
 		if (m.value("isDeleted").toBool()) {
 			return;
 		}
+		// The event has the author profile, the message doesn't wait for
+		// Organization.GetMemberV2 then.
+		for (const auto &profile : value.value("memberProfiles").toArray()) {
+			const auto parsed = Api::ParseMemberProfile(profile.toObject());
+			if (!parsed.userId.isEmpty()) {
+				applyUserData(session, parsed);
+			}
+		}
 		const auto authorId = m.value("authorId").toString();
-		if (!authorId.isEmpty()) {
+		if (!authorId.isEmpty() && !AuthorWaitExpired.contains(authorId)) {
 			const auto authorBareId = uuidToBareId(authorId);
 			const auto authorPeerId = PeerId(::UserId(authorBareId));
 			const auto user = session->data().userLoaded(
 				peerToUser(authorPeerId));
 			if (!user || user->name().isEmpty()) {
 				PendingUserEvents[authorId].append({ dst, param });
+				LOG(("MtsLink NewMsg: author %1 is unknown, the message "
+					"waits for the profile, %2 pending"
+					).arg(authorId
+					).arg(PendingUserEvents[authorId].size()));
 				if (!UserProfileRequested.contains(authorId)) {
 					UserProfileRequested.insert(authorId);
 					const auto mts = session->account().mtsLinkSession();
@@ -3812,6 +4007,28 @@ void handleChatEvent(
 						mts->users()->loadMember(
 							authorId, mts->organizationId());
 					}
+					// The profile may never come (no failure handling,
+					// bots, guests): the messages are shown anyway.
+					const auto weak = base::make_weak(session);
+					base::call_delayed(5000, [=] {
+						const auto strong = weak.get();
+						if (!strong) {
+							return;
+						}
+						UserProfileRequested.remove(authorId);
+						const auto pending = PendingUserEvents.take(authorId);
+						if (pending.isEmpty()) {
+							return;
+						}
+						LOG(("MtsLink NewMsg: no profile of %1 in 5s, "
+							"showing %2 messages"
+							).arg(authorId).arg(pending.size()));
+						AuthorWaitExpired.insert(authorId);
+						for (const auto &ev : pending) {
+							handleChatEvent(strong, ev.dst, ev.param);
+						}
+						AuthorWaitExpired.remove(authorId);
+					});
 				}
 				return;
 			}

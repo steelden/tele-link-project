@@ -36,6 +36,10 @@ struct MemberProfile {
 	// "customStatus" {emoji, status, setting, expiresAt}, if it was sent.
 	QJsonObject customStatus;
 	bool customStatusKnown = false;
+	// The full organization profile was sent: position, department and
+	// the organization fields ({profileFieldId, value}) are known.
+	QList<QPair<QString, QString>> additionalFields;
+	bool detailsKnown = false;
 };
 
 struct FileData {
@@ -98,6 +102,8 @@ struct MessageData {
 };
 
 [[nodiscard]] MemberProfile ParseMemberProfile(const QJsonObject &obj);
+// From the "profile" object of an organization member.
+void ParseProfileDetails(const QJsonObject &profile, MemberProfile &result);
 
 class Messages final : public QObject {
 	Q_OBJECT

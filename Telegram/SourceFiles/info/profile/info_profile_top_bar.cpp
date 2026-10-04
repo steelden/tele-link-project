@@ -3059,10 +3059,10 @@ void TopBar::setupButtons(
 		updateTabSwapVisibility();
 		updateRightButtonsPosition();
 
-		if (wrap != Wrap::Side) {
-			if (source == Source::Stories) {
-				addTopBarEditButton(controller, wrap);
-			}
+		// The own profile opens the profile editing, as on mobile.
+		if ((wrap != Wrap::Side && source == Source::Stories)
+			|| _peer->isSelf()) {
+			addTopBarEditButton(controller, wrap);
 		}
 		updateButtonsColorOverride();
 		raiseTabSearchOverlay();

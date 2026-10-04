@@ -3198,6 +3198,17 @@ void SessionController::showPeerHistory(
 		PeerId peerId,
 		const SectionShow &params,
 		MsgId msgId) {
+	// The chat with self (a "Message" in the own profile and alike) is
+	// the MTS Link favorites chat, not the Telegram saved messages.
+	if (peerId == session().userPeerId()) {
+		if (const auto favorites = MtsLink::favoritesPeerId()) {
+			// As a chat from the chats list, not above the profile.
+			auto copy = params;
+			copy.way = SectionShow::Way::ClearStack;
+			showPeerHistory(favorites, copy, msgId);
+			return;
+		}
+	}
 	if (MtsLink::isThreadPeer(peerId)) {
 		const auto [parentPeerId, rootId] =
 			MtsLink::threadParentInfo(peerId);

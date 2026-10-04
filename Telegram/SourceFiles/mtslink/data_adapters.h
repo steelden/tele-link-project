@@ -142,6 +142,26 @@ void applyChannelData(
 	not_null<Main::Session*> session,
 	const Api::ChannelData &src);
 
+// The organization profile of a user, shown in the profile section.
+struct UserDetails {
+	QString email;
+	QString position;
+	QString department;
+	// Organization profile fields: {profileFieldId, value}.
+	std::vector<std::pair<QString, QString>> additional;
+	bool full = false; // Loaded from the full organization profile.
+};
+struct ProfileFieldInfo {
+	QString id;
+	QString title;
+};
+[[nodiscard]] rpl::producer<UserDetails> userDetailsValue(
+	not_null<UserData*> user);
+[[nodiscard]] const std::vector<ProfileFieldInfo> &profileFields();
+[[nodiscard]] rpl::producer<QString> profileFieldTitle(const QString &title);
+// Loads the full profile and the organization fields once.
+void requestUserDetails(not_null<UserData*> user);
+
 // profileChanged: from MemberProfileChanged, the userpic is replaced.
 void applyUserData(
 	not_null<Main::Session*> session,

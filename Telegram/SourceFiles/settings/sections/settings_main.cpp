@@ -221,18 +221,7 @@ Cover::Cover(
 		refreshNameGeometry(width());
 	}, _name->lifetime());
 
-	_qrButton.create(this, st::infoProfileLabeledButtonQr);
-	_qrButton->setAccessibleName(tr::lng_group_invite_context_qr(tr::now));
-	_qrButton->setClickedCallback([=, show = controller->uiShow()] {
-		Ui::DefaultShowFillPeerQrBoxCallback(show, _user);
-	});
-	Info::Profile::UsernamesValue(
-		_user
-	) | rpl::on_next([=](const auto &usernames) {
-		_qrButton->setVisible(!usernames.empty());
-		refreshNameGeometry(width());
-		refreshQrButtonGeometry(width());
-	}, _qrButton->lifetime());
+	// No QR code button: MTS Link has no t.me links of the usernames.
 }
 
 Cover::~Cover() = default;

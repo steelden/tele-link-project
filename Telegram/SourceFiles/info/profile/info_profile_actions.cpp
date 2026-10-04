@@ -1706,6 +1706,64 @@ Section DetailsFiller::makeInfo() {
 			};
 			phoneLabel->setContextMenuHook(hook);
 		}
+		// MTS Link organization profile: separate rows instead of the bio.
+		{
+			MtsLink::requestUserDetails(user);
+			// All the rows are shown at once when the full profile is
+			// loaded, partial profiles made the rows appear one by one.
+			const auto details = MtsLink::userDetailsValue(
+				user
+			) | rpl::filter([](const MtsLink::UserDetails &d) {
+				return d.full;
+			});
+			// Position and the organization fields are long, they wrap.
+			const auto addDetail = [&](
+					v::text::data &&label,
+					Fn<QString(const MtsLink::UserDetails&)> value,
+					bool email = false) {
+				const auto line = addInfoLine(
+					std::move(label),
+					rpl::duplicate(
+						details
+					) | rpl::map([=](const MtsLink::UserDetails &d) {
+						const auto text = value(d);
+						auto result = TextWithEntities{ text };
+						if (email && !text.isEmpty()) {
+							result.entities.push_back({
+								EntityType::Email,
+								0,
+								int(text.size()),
+							});
+						}
+						return result;
+					}) | rpl::distinct_until_changed());
+				line.text->setContextCopyText(
+					tr::lng_context_copy_text(tr::now));
+			};
+			addDetail(
+				tr::lng_mtslink_info_email(),
+				[](const MtsLink::UserDetails &d) { return d.email; },
+				true);
+			addDetail(
+				tr::lng_mtslink_info_position(),
+				[](const MtsLink::UserDetails &d) { return d.position; });
+			// The standard "department" is not used by the organization
+			// (it has values like "Dep"), the department is an
+			// organization field.
+			for (const auto &field : MtsLink::profileFields()) {
+				const auto id = field.id;
+				addDetail(
+					MtsLink::profileFieldTitle(field.title),
+					[=](const MtsLink::UserDetails &d) {
+						for (const auto &[fieldId, value] : d.additional) {
+							if (fieldId == id) {
+								return value;
+							}
+						}
+						return QString();
+					});
+			}
+		}
 		auto label = user->isBot()
 			? tr::lng_info_about_label()
 			: tr::lng_info_bio_label();
@@ -1746,20 +1804,7 @@ Section DetailsFiller::makeInfo() {
 				user->session().createInternalLinkFull(username)));
 		}, usernameLine.text->lifetime());
 
-		const auto qrButton = Ui::CreateChild<Ui::IconButton>(
-			usernameLine.text->parentWidget(),
-			st::infoProfileLabeledButtonQr);
-		qrButton->setAccessibleName(tr::lng_group_invite_context_qr(tr::now));
-		UsernamesValue(_peer) | rpl::on_next([=](const auto &u) {
-			qrButton->setVisible(!u.empty());
-		}, qrButton->lifetime());
-		const auto rightSkip = st::infoProfileLabeledButtonQrRightSkip;
-		fitLabelToButton(qrButton, usernameLine.text, rightSkip);
-		fitLabelToButton(qrButton, usernameLine.subtext, rightSkip);
-		qrButton->setClickedCallback([=, show = controller->uiShow()] {
-			Ui::DefaultShowFillPeerQrBoxCallback(show, user);
-			return false;
-		});
+		// No QR code: MTS Link has no t.me links of the usernames.
 
 		if (!user->isBot()) {
 			tracker.track(result->add(
@@ -1839,21 +1884,6 @@ Section DetailsFiller::makeInfo() {
 				link.text + addToLink));
 		}, linkLine.text->lifetime());
 		if (!topicRootId || !_peer->username().isEmpty()) {
-			const auto qr = Ui::CreateChild<Ui::IconButton>(
-				linkLine.text->parentWidget(),
-				st::infoProfileLabeledButtonQr);
-			qr->setAccessibleName(tr::lng_group_invite_context_qr(tr::now));
-			UsernamesValue(_peer) | rpl::on_next([=](const auto &u) {
-				qr->setVisible(!u.empty());
-			}, qr->lifetime());
-			const auto rightSkip = st::infoProfileLabeledButtonQrRightSkip;
-			fitLabelToButton(qr, linkLine.text, rightSkip);
-			fitLabelToButton(qr, linkLine.subtext, rightSkip);
-			const auto peer = _peer;
-			qr->setClickedCallback([=, show = controller->uiShow()] {
-				Ui::DefaultShowFillPeerQrBoxCallback(show, peer);
-				return false;
-			});
 		}
 
 		if (const auto channel = _topic ? nullptr : _peer->asChannel()) {

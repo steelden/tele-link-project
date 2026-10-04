@@ -252,6 +252,23 @@ MemberProfile Messages::parseProfile(const QJsonObject &obj) const {
 	return ParseMemberProfile(obj);
 }
 
+void ParseProfileDetails(const QJsonObject &profile, MemberProfile &result) {
+	result.position = profile.value("position").toString();
+	result.department = profile.value("department").toString();
+	result.additionalFields.clear();
+	for (const auto &field : profile.value("additionalFields").toArray()) {
+		const auto object = field.toObject();
+		const auto id = object.value("profileFieldId").toString();
+		if (!id.isEmpty()) {
+			result.additionalFields.push_back({
+				id,
+				object.value("value").toString(),
+			});
+		}
+	}
+	result.detailsKnown = true;
+}
+
 MemberProfile ParseMemberProfile(const QJsonObject &obj) {
 	const auto roleStr = obj.value("role").toString();
 	auto result = MemberProfile{
