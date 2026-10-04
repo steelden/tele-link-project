@@ -1493,6 +1493,12 @@ void HistoryItem::updateServiceText(PreparedServiceText &&text) {
 	_history->owner().updateDependentMessages(this);
 }
 
+void HistoryItem::setMtsLinkMedia(std::unique_ptr<Data::Media> media) {
+	_media = std::move(media);
+	_history->owner().requestItemViewRefresh(this);
+	_history->owner().requestItemResize(this);
+}
+
 void HistoryItem::setOngoingCallLink(ClickHandlerPtr link) {
 	AddComponents(HistoryServiceOngoingCall::Bit());
 	const auto call = Get<HistoryServiceOngoingCall>();

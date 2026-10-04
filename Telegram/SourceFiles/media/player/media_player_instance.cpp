@@ -1433,9 +1433,9 @@ void Instance::emitUpdate(AudioMsgId::Type type, CheckCallback check) {
 		if (data->isPlaying && state.state == State::StoppedAtEnd) {
 			if (repeat(data) == RepeatMode::One) {
 				play(data->current);
-			} else if (OptionDisableAutoplayNext.value()) {
-				finished = true;
-			} else if (!moveInPlaylist(data, 1, true)) {
+			} else {
+				// The message ids in MTS Link are not ordered, the next
+				// in the playlist is a random one: no autoplay of the next.
 				finished = true;
 			}
 		}

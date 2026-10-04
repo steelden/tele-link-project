@@ -1696,6 +1696,66 @@ StorageFileLocation DocumentData::videoPreloadLocation() const {
 		: StorageFileLocation();
 }
 
+// The MTS Link voice messages (opus-media-recorder) end with an empty
+// packet, the FFmpeg ogg demuxer fails on it and nothing is played.
+[[nodiscard]] QByteArray WithoutEmptyOggPackets(QByteArray data) {
+	static const auto table = [] {
+		auto result = std::array<uint32, 256>();
+		for (auto i = uint32(0); i != 256; ++i) {
+			auto r = i << 24;
+			for (auto j = 0; j != 8; ++j) {
+				r = (r & 0x80000000U) ? ((r << 1) ^ 0x04C11DB7U) : (r << 1);
+			}
+			result[i] = r;
+		}
+		return result;
+	}();
+	auto result = QByteArray();
+	result.reserve(data.size());
+	auto removed = 0;
+	auto pos = 0;
+	while (pos + 27 <= data.size()) {
+		if (!data.mid(pos, 4).startsWith("OggS")) {
+			return data;
+		}
+		const auto count = uchar(data[pos + 26]);
+		if (pos + 27 + count > data.size()) {
+			return data;
+		}
+		auto lacing = QByteArray();
+		auto body = 0;
+		auto packetStart = true; // No data in the current packet yet.
+		for (auto i = 0; i != count; ++i) {
+			const auto value = uchar(data[pos + 27 + i]);
+			body += value;
+			if (!value && packetStart) {
+				++removed; // An empty packet, it has no bytes to remove.
+				continue;
+			}
+			lacing.push_back(char(value));
+			packetStart = (value < 255);
+		}
+		if (pos + 27 + count + body > data.size()) {
+			return data;
+		}
+		auto page = data.mid(pos, 26);
+		page.push_back(char(lacing.size()));
+		page.append(lacing);
+		page.append(data.mid(pos + 27 + count, body));
+		page[22] = page[23] = page[24] = page[25] = 0;
+		auto crc = uint32(0);
+		for (const auto ch : page) {
+			crc = (crc << 8) ^ table[((crc >> 24) ^ uchar(ch)) & 0xFF];
+		}
+		for (auto i = 0; i != 4; ++i) {
+			page[22 + i] = char((crc >> (8 * i)) & 0xFF);
+		}
+		result.append(page);
+		pos += 27 + count + body;
+	}
+	return removed ? result : data;
+}
+
 auto DocumentData::createStreamingLoader(
 	Data::FileOrigin origin,
 	bool forceRemoteLoader) const
@@ -1707,8 +1767,25 @@ auto DocumentData::createStreamingLoader(
 		const auto media = activeMediaView();
 		const auto &location = this->location(true);
 		if (media && !media->bytes().isEmpty()) {
-			return Media::Streaming::MakeBytesLoader(media->bytes());
-		} else if (!location.isEmpty() && location.accessEnable()) {
+			const auto &bytes = media->bytes();
+			return Media::Streaming::MakeBytesLoader(
+				bytes.startsWith("OggS")
+					? WithoutEmptyOggPackets(bytes)
+					: bytes);
+		} else if (isVoiceMessage()
+			&& !location.isEmpty()
+			&& location.accessEnable()) {
+			auto file = QFile(location.name());
+			auto bytes = file.open(QIODevice::ReadOnly)
+				? file.readAll()
+				: QByteArray();
+			location.accessDisable();
+			if (bytes.startsWith("OggS")) {
+				return Media::Streaming::MakeBytesLoader(
+					WithoutEmptyOggPackets(std::move(bytes)));
+			}
+		}
+		if (!location.isEmpty() && location.accessEnable()) {
 			auto result = Media::Streaming::MakeFileLoader(location.name());
 			location.accessDisable();
 			return result;

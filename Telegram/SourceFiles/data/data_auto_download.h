@@ -40,8 +40,8 @@ inline constexpr auto kAutoPlayTypes = {
 	Type::AutoPlayGIF,
 };
 
+// No streaming without MTProto: the voice messages are loaded.
 inline constexpr auto kStreamedTypes = {
-	Type::VoiceMessage,
 	Type::Music,
 };
 

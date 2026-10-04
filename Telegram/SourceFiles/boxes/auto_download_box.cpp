@@ -228,6 +228,7 @@ void AutoDownloadBox::setupContent() {
 	const auto downloadValues = Ui::CreateChild<base::flat_map<Type, int64>>(
 		content);
 	add(downloadValues, Type::Photo, tr::lng_media_photo_title());
+	add(downloadValues, Type::VoiceMessage, tr::lng_media_type_audios());
 	add(downloadValues, Type::File, tr::lng_media_file_title());
 
 	const auto downloadLimit = AddSizeLimitSlider(

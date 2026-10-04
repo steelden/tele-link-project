@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "api/api_bot.h"
+#include "mtslink/data_adapters.h"
 
 #include "apiwrap.h"
 #include "api/api_cloud_password.h"
@@ -362,7 +363,7 @@ void ActivateBotButton(ClickHandlerContext context, BotButtonLookup lookup) {
 
 	case ButtonType::Url: {
 		auto url = QString::fromUtf8(button->data);
-		auto skipConfirmation = false;
+		auto skipConfirmation = MtsLink::isMtsLinkUrl(url);
 		if (const auto bot = item->getMessageBot()) {
 			if (bot->isVerified()) {
 				skipConfirmation = true;

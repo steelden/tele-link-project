@@ -2137,6 +2137,13 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 				p.fillRect(g.left(), g.top() + g.height() - st::historyCommentsButtonHeight - st::lineWidth, g.width(), st::lineWidth, stm->msgDateFg);
 				p.setOpacity(o);
 			}
+		} else if (_comments) {
+			// The media with its own info (an MTS Link call) has the line
+			// above the comments too.
+			const auto o = p.opacity();
+			p.setOpacity(0.3);
+			p.fillRect(g.left(), g.top() + g.height() - st::historyCommentsButtonHeight - st::lineWidth, g.width(), st::lineWidth, stm->msgDateFg);
+			p.setOpacity(o);
 		}
 		ensureSummarizeButton();
 		if (const auto size = rightActionSize(); size || _summarize) {

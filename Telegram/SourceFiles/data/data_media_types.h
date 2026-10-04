@@ -92,6 +92,15 @@ struct Call {
 
 class Media;
 
+// MTS Link call message: going on (joins by a click) or finished.
+struct MtsLinkCall {
+	QString title;
+	QString joinLink;
+	int duration = 0;
+	bool ongoing = false;
+	QString recordLink; // The record of a finished call, in its thread.
+};
+
 struct Invoice {
 	MsgId receiptMsgId = 0;
 	uint64 amount = 0;
@@ -498,6 +507,30 @@ private:
 	TimeId _livePeriod = 0;
 	QString _title;
 	QString _description;
+
+};
+
+class MediaMtsLinkCall final : public Media {
+public:
+	MediaMtsLinkCall(not_null<HistoryItem*> parent, const MtsLinkCall &call);
+
+	std::unique_ptr<Media> clone(not_null<HistoryItem*> parent) override;
+
+	ItemPreview toPreview(ToPreviewOptions options) const override;
+	TextWithEntities notificationText() const override;
+	QString pinnedTextSubstring() const override;
+	TextForMimeData clipboardText() const override;
+	bool allowsForward() const override;
+
+	bool updateInlineResultMedia(const MTPMessageMedia &media) override;
+	bool updateSentMedia(const MTPMessageMedia &media) override;
+	std::unique_ptr<HistoryView::Media> createView(
+		not_null<HistoryView::Element*> message,
+		not_null<HistoryItem*> realParent,
+		HistoryView::Element *replacing = nullptr) override;
+
+private:
+	MtsLinkCall _call;
 
 };
 

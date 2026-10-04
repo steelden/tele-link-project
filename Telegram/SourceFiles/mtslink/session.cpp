@@ -205,7 +205,7 @@ void Session::runInitSequence() {
 }
 
 void Session::subscribeToEvents() {
-	_initPendingCalls = 5;
+	_initPendingCalls = 4;
 	auto onDone = [this](const QJsonObject &) {
 		if (--_initPendingCalls <= 0) {
 			LOG(("MtsLink Session: fully initialized"));
@@ -219,7 +219,6 @@ void Session::subscribeToEvents() {
 
 	_rpc.call("Organization.Subscribe", orgParam, onDone);
 	_rpc.call("Counters.GetCounters", QJsonObject{}, onDone);
-	_rpc.call("Featurer.GetFeatures", QJsonObject{}, onDone);
 	_rpc.call("Chat.Subscribe", orgParam, onDone);
 	_rpc.call("Notification.Subscribe", QJsonObject{}, onDone);
 

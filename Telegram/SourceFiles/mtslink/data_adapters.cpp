@@ -47,6 +47,7 @@ based on Telegram Desktop.
 #include "core/application.h"
 #include "lang/lang_instance.h"
 #include "calls/calls_instance.h"
+#include "calls/calls_call.h"
 #include "window/notifications_manager.h"
 #include "base/unixtime.h"
 #include "base/random.h"
@@ -62,6 +63,7 @@ based on Telegram Desktop.
 #include "core/click_handler_types.h"
 #include "core/file_utilities.h"
 #include "window/window_session_controller.h"
+#include "window/window_controller.h"
 #include "mainwindow.h"
 
 #include <QtCore/QCryptographicHash>
@@ -580,7 +582,18 @@ MTPMessageMedia buildFileMedia(
 	QVector<MTPDocumentAttribute> attrs;
 	attrs.push_back(
 		MTP_documentAttributeFilename(MTP_string(file.name)));
-	if (isVideo) {
+	// Any ogg file is shown as a voice message, with the player.
+	if (file.voice || file.mime == u"audio/ogg"_q) {
+		// The waveform is counted from the sound when loaded, the one of
+		// MTS Link does not match the sound in the Telegram player.
+		using Flag = MTPDdocumentAttributeAudio::Flag;
+		attrs.push_back(MTP_documentAttributeAudio(
+			MTP_flags(Flag::f_voice),
+			MTP_int(file.duration),
+			MTPstring(),
+			MTPstring(),
+			MTPbytes()));
+	} else if (isVideo) {
 		using Flag = MTPDdocumentAttributeVideo::Flag;
 		attrs.push_back(MTP_documentAttributeVideo(
 			MTP_flags(Flag::f_supports_streaming),
@@ -1299,6 +1312,442 @@ PreparedServiceText buildCallServiceText(
 	return (type == ChatType::Dialog) || (type == ChatType::Favorites);
 }
 
+// The call message is a regular message (its thread is the chat inside the
+// call): the call text and a "Join" button while the call is going on.
+QHash<FullMsgId, Api::CallMetadata> CallMetaByItem;
+
+// The materials of a finished call (WebinarApp.GetMaterials): the summary
+// and the record are added to the call thread as local messages. They are
+// kept in the cache of the messages and are not requested again.
+struct CallMaterialsState {
+	FullMsgId callItem;
+	QString callUuid;
+	TimeId date = 0;
+	int attempt = 0;
+	bool summary = false;
+	bool record = false;
+	bool done = false; // Nothing more to request.
+	bool cacheLoading = false;
+	bool cacheLoaded = false;
+	bool requested = false;
+	bool polling = false; // Finished in this launch.
+	bool pollWhenLoaded = false;
+	QList<Api::MessageData> messages; // As kept in the cache.
+};
+QHash<QString, CallMaterialsState> CallMaterials; // By webinarEventId.
+QHash<FullMsgId, std::vector<MsgId>> CallMaterialItems;
+QHash<FullMsgId, int> CallServerChildren;
+
+// The record message: a card opening the record, not a text.
+const auto kCallRecordStatus = u"Record"_q;
+
+void updateCallReplies(not_null<HistoryItem*> item) {
+	const auto id = item->fullId();
+	const auto server = CallServerChildren.value(id);
+	const auto local = int(CallMaterialItems.value(id).size());
+	const auto total = server + local;
+	if (total <= 0) {
+		return;
+	}
+	const auto views = item->Get<HistoryMessageViews>();
+	const auto unread = views
+		? std::max(int(views->commentsMaxId.bare
+			- views->commentsInboxReadTillId.bare), 0)
+		: 0;
+	auto repliesData = HistoryMessageRepliesData();
+	repliesData.isNull = false;
+	repliesData.repliesCount = total;
+	repliesData.maxId = MsgId(total);
+	repliesData.readMaxId = MsgId(std::max(total - unread, 1));
+	item->setReplies(std::move(repliesData));
+	item->history()->owner().requestItemViewRefresh(item);
+}
+
+// Adds a material message (a new or a cached one) to the call thread.
+void showCallMaterial(
+		not_null<Main::Session*> session,
+		const QString &eventId,
+		Api::MessageData msg) {
+	const auto &state = CallMaterials[eventId];
+	const auto history = session->data().historyLoaded(state.callItem.peer);
+	const auto callItem = history
+		? session->data().message(state.callItem)
+		: nullptr;
+	if (!callItem || state.callUuid.isEmpty()) {
+		return;
+	}
+	// The call message may be reloaded with another local id.
+	msg.parentId = state.callUuid;
+	msg.chatId = peerIdToChatId(state.callItem.peer);
+	const auto item = addMessage(session, msg, true);
+	if (!item) {
+		return;
+	}
+	if (msg.callMeta && msg.callMeta->status == kCallRecordStatus) {
+		// A card as of a file: opens the record by a click.
+		item->setMtsLinkMedia(std::make_unique<Data::MediaMtsLinkCall>(
+			item,
+			Data::MtsLinkCall{
+				.title = tr::lng_mtslink_materials_record_text(tr::now),
+				.duration = msg.callMeta->duration,
+				.recordLink = msg.callMeta->joinLink,
+			}));
+		if (!item->originalText().empty()) {
+			item->setText(TextWithEntities());
+		}
+	}
+	auto &list = CallMaterialItems[state.callItem];
+	if (!ranges::contains(list, item->id)) {
+		list.push_back(item->id);
+	}
+	updateCallReplies(callItem);
+}
+
+void saveCallMaterials(
+		not_null<Main::Session*> session,
+		const QString &eventId) {
+	const auto &state = CallMaterials[eventId];
+	saveCallMaterialsToCache(session, eventId, state.done, state.messages);
+}
+
+// A new material: shown and kept in the cache.
+void addCallMaterial(
+		not_null<Main::Session*> session,
+		const QString &eventId,
+		const QString &suffix,
+		const QString &text,
+		std::optional<Api::FileData> file,
+		std::optional<Api::CallMetadata> meta) {
+	auto &state = CallMaterials[eventId];
+	const auto history = session->data().historyLoaded(state.callItem.peer);
+	const auto callItem = history
+		? session->data().message(state.callItem)
+		: nullptr;
+	if (!callItem) {
+		return;
+	}
+	auto msg = Api::MessageData();
+	msg.id = eventId + u"-"_q + suffix;
+	// From the initiator of the call, or from the user if there is none.
+	if (const auto user = callItem->from()->asUser()) {
+		msg.authorId = userBareIdToUuid(peerToUser(user->id).bare);
+	}
+	if (msg.authorId.isEmpty()) {
+		if (const auto mts = session->account().mtsLinkSession()) {
+			msg.authorId = mts->userId();
+		}
+	}
+	msg.text = text;
+	msg.createdAt = qint64(base::unixtime::now()) * 1000;
+	msg.type = MessageType::Text;
+	if (file) {
+		msg.files.push_back(*file);
+	}
+	msg.callMeta = meta;
+	state.messages.push_back(msg);
+	saveCallMaterials(session, eventId);
+	LOG(("MtsLink Call: material '%1' added to the thread of %2"
+		).arg(suffix, state.callUuid));
+	showCallMaterial(session, eventId, std::move(msg));
+}
+
+// The summary file name, size and type: a HEAD request with the session.
+void addCallSummary(
+		not_null<Main::Session*> session,
+		const QString &eventId,
+		const QString &text,
+		const QString &fileId) {
+	const auto weak = base::make_weak(session);
+	if (fileId.isEmpty()) {
+		addCallMaterial(session, eventId, u"summary"_q, text, {}, {});
+		return;
+	}
+	static const auto manager = new QNetworkAccessManager();
+	auto request = QNetworkRequest(
+		QUrl(fileDownloadBase() + fileId + u"/download"_q));
+	auto cookies = QStringList();
+	for (const auto &cookie : fileAuthCookies()) {
+		cookies.push_back(QString::fromLatin1(cookie.name())
+			+ '='
+			+ QString::fromLatin1(cookie.value()));
+	}
+	request.setRawHeader("Cookie", cookies.join(u"; "_q).toLatin1());
+	request.setAttribute(
+		QNetworkRequest::RedirectPolicyAttribute,
+		QNetworkRequest::NoLessSafeRedirectPolicy);
+	const auto reply = manager->head(request);
+	QObject::connect(reply, &QNetworkReply::finished, [=] {
+		reply->deleteLater();
+		const auto strong = weak.get();
+		if (!strong) {
+			return;
+		}
+		auto name = QString();
+		const auto disposition = QString::fromUtf8(
+			reply->rawHeader("Content-Disposition"));
+		static const auto utf8 = QRegularExpression(
+			u"filename\\*=UTF-8''([^;]+)"_q,
+			QRegularExpression::CaseInsensitiveOption);
+		static const auto plain = QRegularExpression(
+			u"filename=\"?([^\";]+)\"?"_q,
+			QRegularExpression::CaseInsensitiveOption);
+		if (const auto m = utf8.match(disposition); m.hasMatch()) {
+			name = QUrl::fromPercentEncoding(m.captured(1).toUtf8());
+		} else if (const auto m = plain.match(disposition); m.hasMatch()) {
+			name = m.captured(1);
+		}
+		const auto mime = QString::fromLatin1(
+			reply->rawHeader("Content-Type")).section(';', 0, 0).trimmed();
+		const auto size = reply->header(
+			QNetworkRequest::ContentLengthHeader).toLongLong();
+		LOG(("MtsLink Call: summary file status=%1 name='%2' mime=%3 size=%4"
+			).arg(reply->attribute(
+				QNetworkRequest::HttpStatusCodeAttribute).toInt()
+			).arg(name, mime
+			).arg(size));
+		if (name.isEmpty()) {
+			name = tr::lng_mtslink_materials_summary(tr::now);
+		}
+		addCallMaterial(strong, eventId, u"summary"_q, text, Api::FileData{
+			.id = fileId,
+			.name = name,
+			.size = size,
+			.mime = mime.isEmpty() ? u"application/octet-stream"_q : mime,
+		}, {});
+	});
+}
+
+void requestCallMaterials(
+		not_null<Main::Session*> session,
+		const QString &eventId);
+
+void scheduleCallMaterials(
+		not_null<Main::Session*> session,
+		const QString &eventId) {
+	// The summary and the record are ready some minutes after the call.
+	constexpr auto kDelays = std::array<crl::time, 6>{
+		30 * 1000,
+		2 * 60 * 1000,
+		5 * 60 * 1000,
+		10 * 60 * 1000,
+		20 * 60 * 1000,
+		40 * 60 * 1000,
+	};
+	auto &state = CallMaterials[eventId];
+	if (state.done || state.attempt >= int(kDelays.size())) {
+		return;
+	}
+	const auto weak = base::make_weak(session);
+	base::call_delayed(kDelays[state.attempt++], [=] {
+		if (const auto strong = weak.get()) {
+			requestCallMaterials(strong, eventId);
+		}
+	});
+}
+
+void requestCallMaterials(
+		not_null<Main::Session*> session,
+		const QString &eventId) {
+	const auto mts = session->account().mtsLinkSession();
+	if (!mts || !mts->rpc()) {
+		return;
+	}
+	const auto weak = base::make_weak(session);
+	mts->rpc()->call(
+		u"WebinarApp.GetMaterials"_q,
+		QJsonObject{ { u"callId"_q, eventId } },
+		[=](const QJsonObject &result) {
+			const auto strong = weak.get();
+			if (!strong
+				|| result.value(u"type"_q).toString() != u"Materials"_q) {
+				return;
+			}
+			const auto value = result.value(u"value"_q).toObject();
+			auto &state = CallMaterials[eventId];
+			const auto summary = value.value(u"summary"_q).toObject();
+			if (!state.summary
+				&& summary.value(u"type"_q).toString() == u"Material"_q) {
+				state.summary = true;
+				const auto data = summary.value(u"value"_q).toObject();
+				addCallSummary(
+					strong,
+					eventId,
+					data.value(u"text"_q).toString(),
+					data.value(u"fileId"_q).toString());
+			}
+			const auto record = value.value(u"record"_q).toObject();
+			if (!state.record
+				&& record.value(u"type"_q).toString() == u"Material"_q) {
+				const auto url = record.value(u"value"_q).toObject().value(
+					u"fileUrl"_q).toString();
+				if (!url.isEmpty()) {
+					state.record = true;
+					addCallMaterial(
+						strong,
+						eventId,
+						u"record"_q,
+						tr::lng_mtslink_materials_record_text(tr::now)
+							+ '\n'
+							+ url,
+						{},
+						Api::CallMetadata{
+							.status = kCallRecordStatus,
+							.joinLink = url,
+							.duration = int(value.value(
+								u"callDuration"_q).toDouble() / 1000),
+						});
+				}
+			}
+			LOG(("MtsLink Call: materials of %1 summary=%2 record=%3"
+				).arg(eventId
+				).arg(state.summary ? 1 : 0
+				).arg(state.record ? 1 : 0));
+			const auto old = state.date
+				&& (base::unixtime::now() - state.date > 3600);
+			if ((state.summary && state.record) || (old && !state.polling)) {
+				// An old call: what is not ready now will not be.
+				if (!state.done) {
+					state.done = true;
+					saveCallMaterials(strong, eventId);
+				}
+			} else if (state.polling) {
+				scheduleCallMaterials(strong, eventId);
+			}
+		});
+}
+
+void requestCallMaterialsIfNeeded(
+		not_null<Main::Session*> session,
+		const QString &eventId) {
+	auto &state = CallMaterials[eventId];
+	if (state.done || !state.cacheLoaded) {
+		return;
+	}
+	if (state.pollWhenLoaded) {
+		state.requested = true;
+		if (!state.polling) {
+			state.polling = true;
+			scheduleCallMaterials(session, eventId);
+		}
+	} else if (!state.requested) {
+		state.requested = true;
+		// Spread the requests of the calls in the loaded history.
+		static auto queued = 0;
+		const auto weak = base::make_weak(session);
+		base::call_delayed(crl::time(500) * (++queued), [=] {
+			--queued;
+			if (const auto strong = weak.get()) {
+				requestCallMaterials(strong, eventId);
+			}
+		});
+	}
+}
+
+// A finished call: the materials from the cache, then requested if they
+// are not all there. A call finished just now is polled until ready.
+void ensureCallMaterials(
+		not_null<Main::Session*> session,
+		not_null<HistoryItem*> item,
+		const Api::CallMetadata &meta,
+		bool justEnded) {
+	if (meta.status != u"Ended"_q || meta.webinarEventId.isEmpty()) {
+		return;
+	}
+	const auto eventId = meta.webinarEventId;
+	auto &state = CallMaterials[eventId];
+	const auto reloaded = (state.callItem != item->fullId());
+	state.callItem = item->fullId();
+	state.callUuid = msgIdToMtsLinkId(item->history()->peer->id, item->id);
+	state.date = item->date();
+	if (justEnded) {
+		state.pollWhenLoaded = true;
+	}
+	if (state.cacheLoaded) {
+		if (reloaded && !state.messages.isEmpty()) {
+			const auto weak = base::make_weak(session);
+			crl::on_main(session, [=] {
+				if (const auto strong = weak.get()) {
+					for (const auto &msg : CallMaterials[eventId].messages) {
+						showCallMaterial(strong, eventId, msg);
+					}
+				}
+			});
+		}
+		requestCallMaterialsIfNeeded(session, eventId);
+		return;
+	} else if (state.cacheLoading) {
+		return;
+	}
+	state.cacheLoading = true;
+	const auto weak = base::make_weak(session);
+	loadCallMaterialsFromCache(session, eventId, [=](
+			bool done,
+			QList<Api::MessageData> messages) {
+		const auto strong = weak.get();
+		if (!strong) {
+			return;
+		}
+		auto &state = CallMaterials[eventId];
+		state.cacheLoading = false;
+		state.cacheLoaded = true;
+		state.done = state.done || done;
+		for (auto &msg : messages) {
+			const auto record = msg.callMeta
+				&& (msg.callMeta->status == kCallRecordStatus);
+			const auto exists = ranges::any_of(state.messages, [&](
+					const Api::MessageData &m) {
+				return m.id == msg.id;
+			});
+			if (exists) {
+				continue;
+			}
+			(record ? state.record : state.summary) = true;
+			state.messages.push_back(msg);
+			showCallMaterial(strong, eventId, std::move(msg));
+		}
+		if (!messages.isEmpty() || done) {
+			LOG(("MtsLink Call: materials of %1 from the cache: %2, done=%3"
+				).arg(eventId
+				).arg(messages.size()
+				).arg(done ? 1 : 0));
+		}
+		requestCallMaterialsIfNeeded(strong, eventId);
+	});
+}
+
+void applyCallItem(
+		not_null<Main::Session*> session,
+		not_null<HistoryItem*> item,
+		const Api::CallMetadata &meta,
+		bool justEnded = false) {
+	const auto id = item->fullId();
+	CallMetaByItem.insert(id, meta);
+	// The title without the duration, the media shows it separately.
+	auto titleMeta = meta;
+	titleMeta.duration = 0;
+	const auto ongoing = (meta.status == u"Started"_q)
+		&& !meta.joinLink.isEmpty();
+	item->setMtsLinkMedia(std::make_unique<Data::MediaMtsLinkCall>(
+		item,
+		Data::MtsLinkCall{
+			.title = buildCallServiceText(
+				titleMeta,
+				item->out(),
+				isPersonalChat(id.peer)).text.text,
+			.joinLink = meta.joinLink,
+			.duration = (meta.status == u"Ended"_q) ? meta.duration : 0,
+			.ongoing = ongoing,
+		}));
+	if (!item->originalText().empty()) {
+		item->setText(TextWithEntities());
+	}
+	item->updateReplyMarkup(HistoryMessageMarkupData());
+	if (ongoing) {
+		setActiveCall(session, id.peer, meta);
+	}
+	ensureCallMaterials(session, item, meta, justEnded);
+}
+
 } // namespace
 
 void handleNotificationEvent(
@@ -1983,6 +2432,12 @@ void connectToSession(
 						const auto user = mainSession->data().user(
 							::UserId(uuidToBareId(userId)));
 						const auto inCall = value.value("inCall").toBool();
+						// Joined the call on another device (the MTS Link
+						// app or the browser): no more ringing here.
+						if (inCall && userId == mtsSession->userId()) {
+							LOG(("MtsLink Call: I am in a call elsewhere"));
+							Core::App().calls().mtsLinkAnsweredElsewhere();
+						}
 						const auto changed = inCall
 							? !InCallUsers.contains(user->id)
 							: InCallUsers.contains(user->id);
@@ -2507,6 +2962,10 @@ QString emojiName(const QString &emoji) {
 		}
 	}
 	return QString();
+}
+
+std::vector<MsgId> callMaterialMessages(PeerId peerId, MsgId rootId) {
+	return CallMaterialItems.value(FullMsgId(peerId, rootId));
 }
 
 bool isThreadPeer(PeerId peerId) {
@@ -3189,7 +3648,11 @@ void applyUserDetails(PeerId peerId, const Api::MemberProfile &src) {
 
 void requestProfileFields(not_null<Main::Session*> session) {
 	const auto mts = session->account().mtsLinkSession();
-	if (ProfileFieldsRequested || !mts || !mts->rpc()) {
+	// Requested again with the next profile shown, when connected.
+	if (ProfileFieldsRequested
+		|| !mts
+		|| !mts->rpc()
+		|| !mts->rpc()->isConnected()) {
 		return;
 	}
 	ProfileFieldsRequested = true;
@@ -3524,9 +3987,7 @@ HistoryItem *addMessage(
 		members.push_back(fromBareId);
 	}
 
-	auto flags = (src.type == MessageType::Call)
-		? MessageFlags(0)
-		: MessageFlags(MessageFlag::HasFromId);
+	auto flags = MessageFlags(MessageFlag::HasFromId);
 	const auto mts = session->account().mtsLinkSession();
 	const auto myUserId = (mts && !mts->userId().isEmpty())
 		? mts->userId()
@@ -3648,13 +4109,7 @@ HistoryItem *addMessage(
 		}
 		applyThreadChildrenCount(existing, chatPeerId, msgId, src);
 		if (src.type == MessageType::Call && src.callMeta) {
-			existing->updateServiceText(buildCallServiceText(
-				*src.callMeta,
-				existing->out(),
-				isPersonalChat(chatPeerId)));
-			if (src.callMeta->status == u"Ended"_q) {
-				existing->clearOngoingCallLink();
-			}
+			applyCallItem(session, existing, *src.callMeta);
 		}
 		if (!existing->mainView() && !threadOnly) {
 			if (batchItems) {
@@ -3667,28 +4122,23 @@ HistoryItem *addMessage(
 	}
 
 	if (src.type == MessageType::Call && src.callMeta) {
-		auto serviceText = buildCallServiceText(
-			*src.callMeta,
-			bool(fields.flags & MessageFlag::Outgoing),
-			isPersonalChat(chatPeerId));
 		const auto item = (threadOnly || batchItems)
 			? history->makeMessage(
 				std::move(fields),
-				std::move(serviceText))
-			: history->addNewExternalServiceMessage(
+				TextWithEntities(),
+				MTP_messageMediaEmpty())
+			: history->addNewExternalMessage(
 				std::move(fields),
-				std::move(serviceText));
+				TextWithEntities(),
+				MTP_messageMediaEmpty());
 		if (item && batchItems) {
 			batchItems->push_back(item);
 		}
-		if (item && src.callMeta->status == "Started"
-			&& !src.callMeta->joinLink.isEmpty()) {
-			const auto joinUrl = src.callMeta->joinLink;
-			item->setOngoingCallLink(
-				std::make_shared<LambdaClickHandler>([joinUrl] {
-					joinCallLink(joinUrl);
-				}));
-			setActiveCall(session, chatPeerId, *src.callMeta);
+		if (item) {
+			applyCallItem(session, item, *src.callMeta);
+			applyThreadChildrenCount(item, chatPeerId, msgId, src);
+			CallServerChildren.insert(item->fullId(), src.threadChildrenCount);
+			updateCallReplies(item);
 		}
 		if (item && threadOnly) {
 			session->changes().messageUpdated(
@@ -3825,9 +4275,7 @@ bool addOlderMessages(
 			members.push_back(fromBareId);
 		}
 
-		auto flags = (src.type == MessageType::Call)
-			? MessageFlags(0)
-			: MessageFlags(MessageFlag::HasFromId);
+		auto flags = MessageFlags(MessageFlag::HasFromId);
 		const auto mts = session->account().mtsLinkSession();
 		const auto myId = (mts && !mts->userId().isEmpty())
 			? mts->userId()
@@ -3884,21 +4332,16 @@ bool addOlderMessages(
 		registerMessageId(chatPeerId, msgId, src.id);
 
 		if (src.type == MessageType::Call && src.callMeta) {
-			auto serviceText = buildCallServiceText(
-				*src.callMeta,
-				bool(fields.flags & MessageFlag::Outgoing),
-				isPersonalChat(chatPeerId));
 			const auto callItem = history->makeMessage(
 				std::move(fields),
-				std::move(serviceText));
-			if (callItem && src.callMeta->status == "Started"
-				&& !src.callMeta->joinLink.isEmpty()) {
-				const auto joinUrl = src.callMeta->joinLink;
-				callItem->setOngoingCallLink(
-					std::make_shared<LambdaClickHandler>([joinUrl] {
-						joinCallLink(joinUrl);
-					}));
-			}
+				TextWithEntities(),
+				MTP_messageMediaEmpty());
+			applyCallItem(session, callItem, *src.callMeta);
+			applyThreadChildrenCount(callItem, chatPeerId, msgId, src);
+			CallServerChildren.insert(
+				callItem->fullId(),
+				src.threadChildrenCount);
+			updateCallReplies(callItem);
 			items.push_back(callItem);
 			continue;
 		}
@@ -4348,17 +4791,7 @@ void handleChatEvent(
 		const auto filesArr = m.value("files").toArray();
 		for (const auto &f : filesArr) {
 			const auto fo = f.toObject();
-			const auto meta = fo.value("meta").toObject()
-				.value("value").toObject();
-			msg.files.push_back(Api::FileData{
-				.id = fo.value("id").toString(),
-				.name = fo.value("name").toString(),
-				.url = fo.value("url").toString(),
-				.size = qint64(fo.value("size").toDouble()),
-				.mime = fo.value("mime").toString(),
-				.width = meta.value("width").toInt(),
-				.height = meta.value("height").toInt(),
-			});
+			msg.files.push_back(Api::ParseFileData(f.toObject()));
 		}
 		if (msg.type == MessageType::Call) {
 			const auto meta = m.value("metadata").toObject();
@@ -4714,6 +5147,11 @@ void handleChatEvent(
 			repliesData.repliesCount = childrenCount;
 			repliesData.maxId = MsgId(childrenCount);
 			item->setReplies(std::move(repliesData));
+			if (CallMetaByItem.contains(item->fullId())) {
+				// The local materials are in the thread as well.
+				CallServerChildren.insert(item->fullId(), childrenCount);
+				updateCallReplies(item);
+			}
 			session->data().requestItemViewRefresh(item);
 		}
 	} else if (type == "MessageReactionsUpdatedEvent") {
@@ -4885,18 +5323,11 @@ void handleChatEvent(
 				setActiveCall(session, chatPeerId, callMeta);
 			}
 			if (item) {
-				item->updateServiceText(buildCallServiceText(
+				applyCallItem(
+					session,
+					item,
 					callMeta,
-					item->out(),
-					isPersonalChat(chatPeerId)));
-				if (status == "Ended") {
-					item->clearOngoingCallLink();
-				} else if (status == "Started"
-					&& !joinLink.isEmpty()) {
-					item->setOngoingCallLink(
-						std::make_shared<LambdaClickHandler>(
-							[joinLink] { joinCallLink(joinLink); }));
-				}
+					(status == u"Ended"_q));
 				session->data().requestItemViewRefresh(item);
 			}
 		}
@@ -5113,17 +5544,7 @@ void handleChatEvent(
 			: MsgId(uuidToBareId(messageId) & 0x7FFFFFFFLL);
 		const auto item = session->data().message(chatPeerId, msgId);
 		if (item) {
-			item->updateServiceText(buildCallServiceText(
-				callMeta,
-				item->out(),
-				isPersonalChat(chatPeerId)));
-			if (status == "Ended") {
-				item->clearOngoingCallLink();
-			} else if (status == "Started" && !joinLink.isEmpty()) {
-				item->setOngoingCallLink(
-					std::make_shared<LambdaClickHandler>(
-						[joinLink] { joinCallLink(joinLink); }));
-			}
+			applyCallItem(session, item, callMeta);
 			session->data().requestItemViewRefresh(item);
 		}
 	}
@@ -5490,7 +5911,7 @@ QByteArray serializeMessages(
 	QDataStream s(&result, QIODevice::WriteOnly);
 	s.setVersion(QDataStream::Qt_5_1);
 
-	s << qint32(3); // format version
+	s << qint32(4); // format version
 	qint32 msgCount = 0;
 	for (const auto &m : messages) {
 		if (m.type == MessageType::Call
@@ -5514,7 +5935,8 @@ QByteArray serializeMessages(
 			<< qint32(m.files.size());
 		for (const auto &f : m.files) {
 			s << f.id << f.name << f.url << f.size << f.mime
-				<< qint32(f.width) << qint32(f.height);
+				<< qint32(f.width) << qint32(f.height)
+				<< f.voice << qint32(f.duration) << f.waveform;
 		}
 		s << qint32(m.mentions.size());
 		for (const auto &mn : m.mentions) {
@@ -5565,8 +5987,9 @@ std::optional<CachedMessages> deserializeMessages(const QByteArray &data) {
 
 	qint32 version = 0;
 	s >> version;
-	// version 2 adds callMeta, version 3 adds callMeta statusReason
-	if (version < 1 || version > 3) {
+	// version 2 adds callMeta, version 3 adds callMeta statusReason,
+	// version 4 adds the voice fields of the files
+	if (version < 1 || version > 4) {
 		return std::nullopt;
 	}
 
@@ -5599,6 +6022,11 @@ std::optional<CachedMessages> deserializeMessages(const QByteArray &data) {
 			s >> f.id >> f.name >> f.url >> f.size >> f.mime >> w >> h;
 			f.width = w;
 			f.height = h;
+			if (version >= 4) {
+				qint32 duration = 0;
+				s >> f.voice >> duration >> f.waveform;
+				f.duration = duration;
+			}
 			m.files.push_back(std::move(f));
 		}
 		s >> mentionsCount;
@@ -5814,6 +6242,68 @@ std::optional<std::vector<CachedFilter>> deserializeFilters(
 }
 
 } // anonymous namespace
+
+namespace {
+
+constexpr auto kMtsLinkMaterialsCacheTag = uint64(0xBC05'0000'0000'0000ULL);
+
+[[nodiscard]] Storage::Cache::Key callMaterialsCacheKey(
+		const QString &eventId) {
+	const auto hash = QCryptographicHash::hash(
+		eventId.toUtf8(),
+		QCryptographicHash::Md5);
+	uint64 low = 0;
+	memcpy(&low, hash.constData(), sizeof(low));
+	return { kMtsLinkMaterialsCacheTag, low };
+}
+
+} // namespace
+
+void saveCallMaterialsToCache(
+		not_null<Main::Session*> session,
+		const QString &eventId,
+		bool done,
+		const QList<Api::MessageData> &messages) {
+	// The "done" flag and the messages as of a chat.
+	auto data = QByteArray();
+	{
+		QDataStream s(&data, QIODevice::WriteOnly);
+		s.setVersion(QDataStream::Qt_5_1);
+		s << qint32(1) << done << serializeMessages(messages, {});
+	}
+	session->data().cache().put(
+		callMaterialsCacheKey(eventId),
+		std::move(data));
+}
+
+void loadCallMaterialsFromCache(
+		not_null<Main::Session*> session,
+		const QString &eventId,
+		Fn<void(bool done, QList<Api::MessageData> messages)> done) {
+	const auto weak = base::make_weak(session);
+	session->data().cache().get(callMaterialsCacheKey(eventId), [=](
+			QByteArray &&data) {
+		crl::on_main(weak, [=, data = std::move(data)] {
+			auto finished = false;
+			auto messages = QList<Api::MessageData>();
+			if (!data.isEmpty()) {
+				QDataStream s(data);
+				s.setVersion(QDataStream::Qt_5_1);
+				auto version = qint32();
+				auto serialized = QByteArray();
+				s >> version >> finished >> serialized;
+				if (s.status() == QDataStream::Ok && version == 1) {
+					if (const auto cached = deserializeMessages(serialized)) {
+						messages = cached->messages;
+					}
+				} else {
+					finished = false;
+				}
+			}
+			done(finished, std::move(messages));
+		});
+	});
+}
 
 void saveMessagesToCache(
 		not_null<Main::Session*> session,
@@ -6267,10 +6757,37 @@ MtsLinkMessageContent convertMentionsForSending(
 		splitSet.insert(h.offset);
 		splitSet.insert(h.offset + h.length);
 	}
+	// The quoted lines start with "> " in the blocks as well, the other
+	// clients show the blocks.
+	QSet<int> quotedLineStarts;
+	for (const auto &bq : blockquoteRanges) {
+		// From -1 lastIndexOf searches from the end.
+		auto start = (bq.offset > 0)
+			? (text.lastIndexOf('\n', bq.offset - 1) + 1)
+			: 0;
+		const auto end = bq.offset + bq.length;
+		while (start <= end && start < text.size()) {
+			quotedLineStarts.insert(start);
+			splitSet.insert(start);
+			const auto next = text.indexOf('\n', start);
+			if (next < 0) {
+				break;
+			}
+			start = next + 1;
+		}
+	}
+	QJsonArray blocks;
+	const auto quotePrefix = [&](int from) {
+		if (quotedLineStarts.contains(from)) {
+			blocks.append(QJsonObject{
+				{u"type"_q, u"TextElement"_q},
+				{u"value"_q, QJsonObject{ { u"text"_q, u"> "_q } }},
+			});
+		}
+	};
 	auto splits = splitSet.values();
 	std::sort(splits.begin(), splits.end());
 
-	QJsonArray blocks;
 	for (int si = 0; si + 1 < splits.size(); ++si) {
 		const auto from = splits[si];
 		const auto to = splits[si + 1];
@@ -6286,6 +6803,7 @@ MtsLinkMessageContent convertMentionsForSending(
 
 		if (inHit) {
 			if (from != inHit->offset) continue;
+			quotePrefix(from);
 			if (inHit->type == HitType::Mention) {
 				blocks.append(QJsonObject{
 					{u"type"_q, u"MentionElement"_q},
@@ -6324,7 +6842,9 @@ MtsLinkMessageContent convertMentionsForSending(
 		if (segText.isEmpty()) continue;
 
 		QJsonObject value;
-		value[u"text"_q] = segText;
+		value[u"text"_q] = (quotedLineStarts.contains(from)
+			? u"> "_q
+			: QString()) + segText;
 		if (!style.isEmpty()) {
 			value[u"style"_q] = style;
 		}
@@ -6513,12 +7033,19 @@ bool tryNavigateDirectUrl(
 	const auto url = original.host().isEmpty()
 		? QUrl::fromUserInput(original.toString())
 		: original;
+	// A call record: in the call window, signed in.
+	if (url.host().endsWith(u"mts-link.ru"_q, Qt::CaseInsensitive)
+		&& url.path().contains(u"/record-new/"_q)) {
+		LOG(("MtsLink Navigate: record link %1").arg(url.toString()));
+		openCallLink(url.toString());
+		return true;
+	}
 	if (!url.host().endsWith(u"mts-link.ru"_q, Qt::CaseInsensitive)
 		|| !url.path().startsWith(u"/j/"_q)) {
 		return false;
 	}
 	LOG(("MtsLink Navigate: conference link %1").arg(url.toString()));
-	openCallLink(url.toString());
+	joinCallLink(url.toString());
 	return true;
 }
 

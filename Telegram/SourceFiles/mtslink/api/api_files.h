@@ -50,6 +50,17 @@ public:
 		ProgressHandler progress = nullptr);
 
 	// Chat cover / avatar, the server downscales it to 1024px.
+	// A voice message: the waveform (amplitudes 0-255) and the duration
+	// in seconds are shown by the other clients.
+	void uploadVoice(
+		const QString &filename,
+		const QByteArray &content,
+		const QString &mime,
+		const QVector<int> &waveform,
+		int duration,
+		DoneHandler done,
+		FailHandler fail,
+		ProgressHandler progress = nullptr);
 	void uploadAvatar(
 		const QString &filename,
 		const QByteArray &content,

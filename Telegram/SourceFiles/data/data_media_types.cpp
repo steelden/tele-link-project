@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_media_generic.h"
 #include "history/view/media/history_view_media_grouped.h"
 #include "history/view/media/history_view_call.h"
+#include "history/view/media/history_view_mtslink_call.h"
 #include "history/view/media/history_view_web_page.h"
 #include "history/view/media/history_view_poll.h"
 #include "history/view/media/history_view_theme_document.h"
@@ -1812,6 +1813,71 @@ std::unique_ptr<HistoryView::Media> MediaLocation::createView(
 			_point,
 			_title,
 			_description);
+}
+
+MediaMtsLinkCall::MediaMtsLinkCall(
+	not_null<HistoryItem*> parent,
+	const MtsLinkCall &call)
+: Media(parent)
+, _call(call) {
+}
+
+std::unique_ptr<Media> MediaMtsLinkCall::clone(
+		not_null<HistoryItem*> parent) {
+	return std::make_unique<MediaMtsLinkCall>(parent, _call);
+}
+
+ItemPreview MediaMtsLinkCall::toPreview(ToPreviewOptions options) const {
+	if (!_call.recordLink.isEmpty()) {
+		return { .text = notificationText() };
+	}
+	const auto out = parent()->out();
+	const auto icon = out
+		? &st::dialogsMiniCallOutgoingIcon
+		: &st::dialogsMiniCallIncomingIcon;
+	return {
+		.text = Ui::Text::Colorized(
+			Ui::Text::IconEmoji(icon).append(notificationText())),
+	};
+}
+
+TextWithEntities MediaMtsLinkCall::notificationText() const {
+	if (_call.duration > 0) {
+		return { .text = tr::lng_call_type_and_duration(
+			tr::now,
+			lt_type,
+			_call.title,
+			lt_duration,
+			Ui::FormatDurationWords(_call.duration)) };
+	}
+	return { .text = _call.title };
+}
+
+QString MediaMtsLinkCall::pinnedTextSubstring() const {
+	return _call.title;
+}
+
+TextForMimeData MediaMtsLinkCall::clipboardText() const {
+	return { .rich = notificationText() };
+}
+
+bool MediaMtsLinkCall::allowsForward() const {
+	return false;
+}
+
+bool MediaMtsLinkCall::updateInlineResultMedia(const MTPMessageMedia &media) {
+	return false;
+}
+
+bool MediaMtsLinkCall::updateSentMedia(const MTPMessageMedia &media) {
+	return false;
+}
+
+std::unique_ptr<HistoryView::Media> MediaMtsLinkCall::createView(
+		not_null<HistoryView::Element*> message,
+		not_null<HistoryItem*> realParent,
+		HistoryView::Element *replacing) {
+	return std::make_unique<HistoryView::MtsLinkCall>(message, &_call);
 }
 
 MediaCall::MediaCall(not_null<HistoryItem*> parent, const Call &call)

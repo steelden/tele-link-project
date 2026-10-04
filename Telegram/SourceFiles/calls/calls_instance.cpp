@@ -502,6 +502,13 @@ void Instance::showMtsLinkJoinCall(not_null<PeerData*> peer) {
 	}
 }
 
+void Instance::mtsLinkAnsweredElsewhere() {
+	if (_currentCall && _currentCall->isIncomingWaiting()) {
+		LOG(("MtsLink Call: incoming call answered on another device"));
+		_currentCall->hangup();
+	}
+}
+
 void Instance::mtsLinkCallEnded(not_null<PeerData*> peer) {
 	if (_currentCall
 		&& _currentCall->displayPeer() == peer

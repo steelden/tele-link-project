@@ -204,6 +204,8 @@ public:
 	void updateServiceText(PreparedServiceText &&text);
 	void updateStoryMentionText();
 	void setOngoingCallLink(ClickHandlerPtr link);
+	// MTS Link: a local media (the call message) set and replaced.
+	void setMtsLinkMedia(std::unique_ptr<Data::Media> media);
 	void clearOngoingCallLink();
 
 	[[nodiscard]] UserData *viaBot() const;

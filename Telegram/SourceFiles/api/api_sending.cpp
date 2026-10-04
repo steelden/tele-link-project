@@ -1342,6 +1342,37 @@ void SendConfirmedFile(
 			return;
 		}
 
+		// A recorded voice message: its duration and waveform.
+		auto voice = false;
+		auto voiceDuration = 0;
+		auto voiceWaveform = QVector<int>(); // 0-255, as MTS Link has.
+		if (file->document.type() == mtpc_document) {
+			const auto &fields = file->document.c_document();
+			for (const auto &attribute : fields.vattributes().v) {
+				attribute.match([&](const MTPDdocumentAttributeAudio &data) {
+					if (!data.is_voice()) {
+						return;
+					}
+					voice = true;
+					voiceDuration = int(data.vduration().v);
+					if (const auto bytes = data.vwaveform()) {
+						for (const auto value
+							: documentWaveformDecode(bytes->v)) {
+							voiceWaveform.push_back(int(value) * 255 / 31);
+						}
+					}
+				}, [](const auto &) {});
+			}
+		}
+		const auto filename = voice
+			? (u"voice_%1.ogg"_q).arg(QDateTime::currentMSecsSinceEpoch())
+			: file->filename;
+		if (voice) {
+			LOG(("MtsLink Files: voice message duration=%1 samples=%2"
+				).arg(voiceDuration
+				).arg(voiceWaveform.size()));
+		}
+
 		const auto caption = file->caption.text.trimmed();
 		const auto replyMsgId = [&] {
 			if (!file->to.replyTo.messageId) {
@@ -1364,9 +1395,12 @@ void SendConfirmedFile(
 			msg.createdAt = QDateTime::currentMSecsSinceEpoch();
 			auto fileData = MtsLink::Api::FileData{
 				.id = tempId,
-				.name = file->filename,
+				.name = filename,
 				.size = fileSize,
 				.mime = file->filemime,
+				.voice = voice,
+				.duration = voiceDuration,
+				.waveform = voiceWaveform,
 			};
 			if (file->type == SendMediaType::Photo && !file->forceFile) {
 				const auto img = QImage::fromData(fileContent);
@@ -1426,10 +1460,31 @@ void SendConfirmedFile(
 			MtsLink::uuidToBareId(tempId) & 0x7FFFFFFFLL);
 		MtsLink::setPendingTempMessage(peerId, tempMsgId);
 
-		mts->files()->uploadFile(
-			file->filename,
-			fileContent,
-			file->filemime,
+		const auto upload = [=](
+				MtsLink::Api::Files::DoneHandler done,
+				MtsLink::Api::Files::FailHandler fail,
+				MtsLink::Api::Files::ProgressHandler progress) {
+			if (voice) {
+				mts->files()->uploadVoice(
+					filename,
+					fileContent,
+					file->filemime,
+					voiceWaveform,
+					voiceDuration,
+					std::move(done),
+					std::move(fail),
+					std::move(progress));
+			} else {
+				mts->files()->uploadFile(
+					filename,
+					fileContent,
+					file->filemime,
+					std::move(done),
+					std::move(fail),
+					std::move(progress));
+			}
+		};
+		upload(
 			[=](const MtsLink::Api::UploadResult &result) {
 				mts->sending()->sendMessage(
 					chatId,

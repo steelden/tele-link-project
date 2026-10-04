@@ -6504,7 +6504,7 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_saved_music_added" = "Аудиофайл добавлен в профиль.";
 "lng_saved_music_removed" = "Аудиофайл удалён из профиля.";
 "lng_delete_photo_sure" = "Удалить это фото?";
-"lng_delete_for_everyone_hint#one" = "Сообщения будут удалены для всех в этом чате.";
+"lng_delete_for_everyone_hint#one" = "Сообщение будет удалено для всех в этом чате.";
 "lng_delete_for_everyone_hint#few" = "Сообщения будут удалены для всех в этом чате.";
 "lng_delete_for_everyone_hint#many" = "Сообщения будут удалены для всех в этом чате.";
 "lng_delete_for_everyone_hint#other" = "Сообщения будут удалены для всех в этом чате.";
@@ -7070,6 +7070,18 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_call_in_browser" = "В браузере";
 "lng_mtslink_call_in_app" = "В TeleLink";
 "lng_mtslink_call_open_browser" = "Открыть в браузере";
+"lng_mtslink_call_chat" = "Чат звонка ({number})";
+"lng_mtslink_call_ongoing" = "Идёт звонок, нажмите, чтобы присоединиться";
+"lng_mtslink_call_materials" = "Материалы";
+"lng_mtslink_materials_summary" = "Резюме";
+"lng_mtslink_materials_notes" = "Заметки";
+"lng_mtslink_materials_record" = "Запись";
+"lng_mtslink_materials_download" = "Скачать файл";
+"lng_mtslink_materials_open_record" = "Открыть запись";
+"lng_mtslink_materials_not_ready" = "Пока недоступно.";
+"lng_mtslink_materials_failed" = "Не удалось загрузить материалы звонка.";
+"lng_mtslink_materials_record_text" = "Запись встречи";
+"lng_mtslink_materials_record_open" = "Нажмите, чтобы посмотреть";
 "lng_mtslink_info_email" = "Эл. почта";
 "lng_mtslink_info_position" = "Должность";
 "lng_mtslink_info_department" = "Подразделение";

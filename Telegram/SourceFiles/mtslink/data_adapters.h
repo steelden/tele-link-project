@@ -164,6 +164,22 @@ struct ProfileFieldInfo {
 // Loads the full profile and the organization fields once.
 void requestUserDetails(not_null<UserData*> user);
 
+// The materials of a finished call (summary, record) in the cache.
+void saveCallMaterialsToCache(
+	not_null<Main::Session*> session,
+	const QString &eventId,
+	bool done,
+	const QList<Api::MessageData> &messages);
+void loadCallMaterialsFromCache(
+	not_null<Main::Session*> session,
+	const QString &eventId,
+	Fn<void(bool done, QList<Api::MessageData> messages)> done);
+
+// The local messages of the call materials in the call thread.
+[[nodiscard]] std::vector<MsgId> callMaterialMessages(
+	PeerId peerId,
+	MsgId rootId);
+
 // The default notification settings (private chats / groups / channels)
 // are not on the MTS Link server, they are kept locally.
 void saveDefaultNotify(

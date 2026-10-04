@@ -43,6 +43,35 @@ void Files::uploadFile(
 		std::move(progress));
 }
 
+void Files::uploadVoice(
+		const QString &filename,
+		const QByteArray &content,
+		const QString &mime,
+		const QVector<int> &waveform,
+		int duration,
+		DoneHandler done,
+		FailHandler fail,
+		ProgressHandler progress) {
+	auto samples = QJsonArray();
+	for (const auto value : waveform) {
+		samples.push_back(value);
+	}
+	requestUpload(
+		"Mediacontent.CreatePrivateVoiceFile",
+		QJsonObject{
+			{ "filename", filename },
+			{ "waveform", samples },
+			{ "samples", int(waveform.size()) },
+			{ "duration", duration },
+		},
+		filename,
+		content,
+		mime,
+		std::move(done),
+		std::move(fail),
+		std::move(progress));
+}
+
 void Files::uploadAvatar(
 		const QString &filename,
 		const QByteArray &content,

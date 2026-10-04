@@ -97,6 +97,8 @@ public:
 		not_null<UserData*> author,
 		const QString &joinLink);
 	void mtsLinkCallEnded(not_null<PeerData*> peer);
+	// The incoming call is answered on another device.
+	void mtsLinkAnsweredElsewhere();
 	// The "start call" window, for an ongoing call it joins.
 	void showMtsLinkJoinCall(not_null<PeerData*> peer);
 	void startedConferenceReady(

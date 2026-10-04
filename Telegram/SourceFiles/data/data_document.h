@@ -419,6 +419,8 @@ private:
 	HistoryItem *item);
 
 VoiceWaveform documentWaveformDecode(const QByteArray &encoded5bit);
+// The MTS Link voice messages end with an empty ogg packet, FFmpeg fails.
+[[nodiscard]] QByteArray WithoutEmptyOggPackets(QByteArray data);
 QByteArray documentWaveformEncode5bit(const VoiceWaveform &waveform);
 
 QString FileNameForSave(

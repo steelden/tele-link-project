@@ -360,7 +360,13 @@ bool Should(
 			source,
 			AutoPlayTypeFromDocument(document),
 			document->size);
-	} else if (document->isVoiceMessage() || document->isSong()) {
+	} else if (document->isVoiceMessage()) {
+		// No streaming without MTProto: the voice messages are loaded.
+		return data.shouldDownload(
+			source,
+			Type::VoiceMessage,
+			document->size);
+	} else if (document->isSong()) {
 		return false;
 	}
 	return data.shouldDownload(source, Type::File, document->size);
@@ -386,7 +392,13 @@ bool Should(
 				AutoPlayTypeFromDocument(document),
 				document->size);
 		}
-		if (document->isVoiceMessage() || document->isSong()) {
+		if (document->isVoiceMessage()) {
+			return ForceAllowed(
+				data,
+				SourceFromPeer(peer),
+				Type::VoiceMessage,
+				document->size);
+		} else if (document->isSong()) {
 			return false;
 		}
 		return ForceAllowed(

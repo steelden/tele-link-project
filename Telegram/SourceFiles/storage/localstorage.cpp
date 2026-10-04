@@ -861,7 +861,9 @@ public:
 	CountWaveformTask(not_null<Data::DocumentMedia*> media)
 	: _doc(media->owner())
 	, _loc(_doc->location(true))
-	, _data(media->bytes())
+	, _data(media->bytes().startsWith("OggS")
+		? WithoutEmptyOggPackets(media->bytes())
+		: media->bytes())
 	, _wavemax(0) {
 		if (_data.isEmpty() && !_loc.accessEnable()) {
 			_doc = nullptr;
@@ -870,6 +872,15 @@ public:
 	void process() override {
 		if (!_doc) return;
 
+		if (_data.isEmpty() && !_loc.isEmpty()) {
+			auto file = QFile(_loc.name());
+			if (file.open(QIODevice::ReadOnly)) {
+				auto bytes = file.readAll();
+				if (bytes.startsWith("OggS")) {
+					_data = WithoutEmptyOggPackets(std::move(bytes));
+				}
+			}
+		}
 		_waveform = audioCountWaveform(_loc, _data);
 		_wavemax = _waveform.empty()
 			? char(0)

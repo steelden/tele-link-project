@@ -126,7 +126,12 @@ void Sending::readMessage(
 	_rpc->call(
 		"Chat.MarkMessagesAsRead",
 		param,
-		[](const QJsonObject &) {});
+		[=](const QJsonObject &result) {
+			if (result.value(u"type"_q).toString() == u"RpcError"_q) {
+				LOG(("MtsLink Read: MarkMessagesAsRead failed chat=%1 id='%2'"
+					).arg(chatId, messageId));
+			}
+		});
 }
 
 void Sending::setChatNotifications(

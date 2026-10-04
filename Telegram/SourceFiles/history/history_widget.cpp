@@ -1319,18 +1319,7 @@ void HistoryWidget::initVoiceRecordBar() {
 		}
 		return false;
 	});
-	_voiceRecordBar->setTTLFilter([=] {
-		if (_editMsgId) {
-			return false;
-		} else if (const auto peer = _history ? _history->peer.get() : nullptr) {
-			if (const auto user = peer->asUser()) {
-				if (!user->isSelf() && !user->isBot()) {
-					return true;
-				}
-			}
-		}
-		return false;
-	});
+	// No self-destructing voice messages in MTS Link.
 
 	const auto applyLocalDraft = [=] {
 		if (_history && _history->localDraft(MsgId(), PeerId())) {

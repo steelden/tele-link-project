@@ -6,6 +6,8 @@ based on Telegram Desktop.
 #include "mtslink/data_adapters.h"
 #include "mtslink/rpc.h"
 
+#include <QtCore/QJsonDocument>
+
 namespace MtsLink::Api {
 
 Messages::Messages(Rpc *rpc, QObject *parent)
@@ -236,7 +238,16 @@ MessageData Messages::parseMessage(const QJsonObject &obj) const {
 }
 
 FileData Messages::parseFile(const QJsonObject &obj) const {
+	return ParseFileData(obj);
+}
+
+FileData ParseFileData(const QJsonObject &obj) {
 	const auto meta = obj.value("meta").toObject().value("value").toObject();
+	const auto voiceMeta = obj.value("voiceMeta").toObject();
+	auto waveform = QVector<int>();
+	for (const auto &value : voiceMeta.value("waveform").toArray()) {
+		waveform.push_back(value.toInt());
+	}
 	return {
 		.id = obj.value("id").toString(),
 		.name = obj.value("name").toString(),
@@ -245,6 +256,9 @@ FileData Messages::parseFile(const QJsonObject &obj) const {
 		.mime = obj.value("mime").toString(),
 		.width = meta.value("width").toInt(),
 		.height = meta.value("height").toInt(),
+		.voice = !voiceMeta.isEmpty(),
+		.duration = voiceMeta.value("duration").toInt(),
+		.waveform = std::move(waveform),
 	};
 }
 

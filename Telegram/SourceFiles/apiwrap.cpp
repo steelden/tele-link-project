@@ -4710,6 +4710,24 @@ void ApiWrap::sendMessage(
 	const auto &textWithTags = message.textWithTags;
 
 	if (MtsLink::hasChatId(peer->id)) {
+		// A reply with a selected part: a usual reply, the part is sent
+		// as a quote ("> text") before the message text.
+		auto quoted = textWithTags;
+		const auto &quote = message.action.replyTo.quote;
+		if (message.action.replyTo.messageId
+			&& !quote.text.trimmed().isEmpty()
+			&& !textWithTags.text.trimmed().isEmpty()) {
+			const auto part = quote.text.trimmed();
+			const auto shift = int(part.size()) + 1;
+			quoted.text = part + '\n' + textWithTags.text;
+			for (auto &tag : quoted.tags) {
+				tag.offset += shift;
+			}
+			quoted.tags.insert(
+				quoted.tags.begin(),
+				TextWithTags::Tag{ 0, int(part.size()), u">"_q });
+		}
+		const auto &textWithTags = quoted;
 		const auto mts = _session->account().mtsLinkSession();
 		if (!mts) {
 			return;

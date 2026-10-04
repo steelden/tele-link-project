@@ -118,11 +118,33 @@ private:
 		} catch (e) {}
 		return text;
 	};
+	// Diagnostics: the failed requests, all of them on a record page.
+	var isRecordPage = (location.pathname.indexOf('/record-new/') >= 0);
+	var reportHttp = function(method, url, status) {
+		if (status >= 400 || status === 0
+			|| (isRecordPage && /\/api\//.test(String(url || '')))) {
+			post({ type: 'http', method: method, url: String(url || '').slice(0, 200), status: status });
+		}
+	};
+	if (isRecordPage) {
+		[3000, 8000].forEach(function(delay) {
+			setTimeout(function() {
+				post({
+					type: 'record-page',
+					url: location.href,
+					text: ((document.body && document.body.innerText) || '').slice(0, 400),
+				});
+			}, delay);
+		});
+	}
 	try {
 		var fetchWithoutLocale = window.fetch;
 		window.fetch = function(input, init) {
 			var url = (typeof input === 'string') ? input : (input && input.url);
 			var result = fetchWithoutLocale.apply(this, arguments);
+			var method = (init && init.method) || (input && input.method) || 'GET';
+			result.then(function(r) { reportHttp(method, url, r.status); },
+				function() { reportHttp(method, url, 0); });
 			if (!isProfileUrl(url)) {
 				return result;
 			}
@@ -141,6 +163,10 @@ private:
 		};
 		var xhrOpen = XMLHttpRequest.prototype.open;
 		XMLHttpRequest.prototype.open = function(method, url) {
+			var request = this;
+			request.addEventListener('loadend', function() {
+				reportHttp(method, url, request.status);
+			});
 			if (isProfileUrl(url)) {
 				var xhr = this;
 				xhr.addEventListener('readystatechange', function() {
@@ -234,6 +260,8 @@ private:
 	setTimeout(function() { clearInterval(urlTimer); }, 120000);
 	var logged = false;
 	var promptLogged = false;
+	var clickedAt = 0;
+	var guestHandled = false;
 	var findButton = function(text) {
 		var nodes = document.querySelectorAll('button, a, [role="button"]');
 		for (var i = 0; i < nodes.length; ++i) {
@@ -296,17 +324,26 @@ private:
 				&& lower.indexOf('прилож') < 0
 				&& lower.indexOf('app') < 0) {
 				// A plain element.click() goes to the guest join, the button
-				// is clicked like a mouse does.
+				// is clicked like a mouse does. Clicked while the page is
+				// still signing in it goes to the guest join as well: then
+				// the personal link is opened again and clicked later.
 				if (!promptLogged) {
 					promptLogged = true;
+					var retry = false;
+					try {
+						retry = (sessionStorage.getItem('telelinkRetry') === '1');
+						sessionStorage.setItem('telelinkLink', location.href);
+					} catch (e) {}
 					post({
 						type: 'browser-prompt',
 						text: text,
 						url: location.href,
-						tag: nodes[i].tagName,
-						html: (nodes[i].outerHTML || '').slice(0, 300),
+						retry: retry,
 					});
-					setTimeout(function() { clickLikeMouse(text); }, 0);
+					setTimeout(function() {
+						clickedAt = Date.now();
+						clickLikeMouse(text);
+					}, retry ? 1500 : 300);
 				}
 				return;
 			}
@@ -314,6 +351,27 @@ private:
 		if (!logged && texts.length) {
 			logged = true;
 			post({ type: 'buttons', texts: texts.slice(0, 30) });
+		}
+		// The guest join ("Join" with the user agreement, not "Join as
+		// <name>") after the click: the page was not signed in yet.
+		if (clickedAt && !guestHandled && /\/session\//.test(location.href)) {
+			var all = texts.join(' ').toLowerCase();
+			var guest = (all.indexOf('agreement') >= 0
+				|| all.indexOf('договор') >= 0);
+			if (guest) {
+				guestHandled = true;
+				var link = '';
+				var retried = false;
+				try {
+					link = sessionStorage.getItem('telelinkLink') || '';
+					retried = (sessionStorage.getItem('telelinkRetry') === '1');
+				} catch (e) {}
+				post({ type: 'guest-join', retried: retried, link: link });
+				if (!retried && link) {
+					try { sessionStorage.setItem('telelinkRetry', '1'); } catch (e) {}
+					location.replace(link);
+				}
+			}
 		}
 	};
 	var start = function() {

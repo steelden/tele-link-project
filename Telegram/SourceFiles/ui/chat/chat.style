@@ -363,6 +363,11 @@ historyCallTop: 9px;
 historyCallStatusTop: 29px;
 historyCallStatusSkip: 4px;
 historyCallArrowPosition: point(-1px, 1px);
+mtsLinkCallWidth: 300px;
+mtsLinkCallHeight: 64px;
+mtsLinkCallJoinSize: 44px;
+mtsLinkCallJoinIcon: icon {{ "calls/call_answer", callIconFg }};
+mtsLinkCallEndedIcon: icon {{ "calls/call_ended", windowSubTextFg }};
 
 HistoryFileLayout {
 	padding: margins;

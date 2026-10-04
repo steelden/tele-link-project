@@ -50,6 +50,10 @@ struct FileData {
 	QString mime;
 	int width = 0;
 	int height = 0;
+	// A voice message ("voiceMeta"): duration in seconds, amplitudes 0-255.
+	bool voice = false;
+	int duration = 0;
+	QVector<int> waveform;
 };
 
 struct MentionInfo {
@@ -101,6 +105,7 @@ struct MessageData {
 	std::optional<CallMetadata> callMeta;
 };
 
+[[nodiscard]] FileData ParseFileData(const QJsonObject &obj);
 [[nodiscard]] MemberProfile ParseMemberProfile(const QJsonObject &obj);
 // From the "profile" object of an organization member.
 void ParseProfileDetails(const QJsonObject &profile, MemberProfile &result);

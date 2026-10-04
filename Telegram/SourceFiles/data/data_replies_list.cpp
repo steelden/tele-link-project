@@ -617,6 +617,14 @@ void RepliesList::loadAround(MsgId id) {
 					}
 				}
 				_loadingHistorical = false;
+				// The call materials are local, not in the server answer.
+				for (const auto &local : MtsLink::callMaterialMessages(
+						peerId,
+						_rootId)) {
+					if (!ranges::contains(_list, local)) {
+						_list.push_back(local);
+					}
+				}
 				auto &owner = _history->owner();
 				for (const auto &msgId : _list) {
 					if (const auto item = owner.message(peerId, msgId)) {
@@ -1376,8 +1384,24 @@ void RepliesList::sendReadTillRequest() {
 			const auto chatId = MtsLink::peerIdToChatId(
 				_history->peer->id);
 			const auto tillId = computeInboxReadTillFull();
-			const auto mtsId = MtsLink::msgIdToMtsLinkId(
+			auto mtsId = MtsLink::msgIdToMtsLinkId(
 				_history->peer->id, tillId);
+			// The call materials are local: the newest server message
+			// of the thread is read instead, the list is newest first.
+			const auto local = MtsLink::callMaterialMessages(
+				_history->peer->id,
+				_rootId);
+			if (ranges::contains(local, tillId)) {
+				mtsId = QString();
+				for (const auto &msgId : _list) {
+					if (!ranges::contains(local, msgId)) {
+						mtsId = MtsLink::msgIdToMtsLinkId(
+							_history->peer->id,
+							msgId);
+						break;
+					}
+				}
+			}
 			if (!chatId.isEmpty() && !mtsId.isEmpty()) {
 				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);

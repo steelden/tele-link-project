@@ -216,26 +216,13 @@ void DeleteMessagesBox::prepare() {
 					setDimensions(st::boxWidth, _fullHeight + h);
 				}, lifetime());
 				appendDetails(std::move(revoke->description));
-			} else if (peer->isChannel()) {
-				if (peer->isMegagroup()) {
-					appendDetails({
-						tr::lng_delete_for_everyone_hint(
-							tr::now,
-							lt_count,
-							count)
-					});
-				}
-			} else if (peer->isChat()) {
+			} else if (!peer->isSelf()) {
+				// MTS Link deletes the messages from the server for all.
 				appendDetails({
-					tr::lng_delete_for_me_chat_hint(tr::now, lt_count, count)
-				});
-			} else if (!peer->isSelf()
-				&& (!peer->isUser() || !peer->asUser()->isInaccessible())) {
-				if (const auto user = peer->asUser(); user && user->isBot()) {
-					_revokeForBot = true;
-				}
-				appendDetails({
-					tr::lng_delete_for_me_hint(tr::now, lt_count, count)
+					tr::lng_delete_for_everyone_hint(
+						tr::now,
+						lt_count,
+						count)
 				});
 			}
 		}
@@ -344,6 +331,10 @@ PeerData *DeleteMessagesBox::checkFromSinglePeer() const {
 
 auto DeleteMessagesBox::revokeText(not_null<PeerData*> peer) const
 -> std::optional<RevokeConfig> {
+	// MTS Link deletes the messages for everyone, there is no choice.
+	if (peer) {
+		return std::nullopt;
+	}
 	auto result = RevokeConfig();
 	if (peer == _wipeHistoryPeer) {
 		if (!peer->canRevokeFullHistory()) {
