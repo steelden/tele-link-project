@@ -81,6 +81,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "spellcheck/platform/platform_spellcheck.h"
 #endif // !TDESKTOP_DISABLE_SPELLCHECK
 
+#include "mtslink/call_window.h"
+
 #include <ksandbox.h>
 
 namespace Settings {
@@ -94,6 +96,38 @@ using namespace Builder;
 	return result;
 }
 #endif // Q_OS_MAC && !OS_MAC_STORE
+
+// MTS Link video conferences: the built-in calls are not used, the
+// "Speakers and Camera" section is gone, the setting is here.
+void BuildMtsLinkConferencesSection(SectionBuilder &builder) {
+	builder.addSkip();
+	builder.addSubsectionTitle({
+		.id = u"advanced/mtslink"_q,
+		.title = tr::lng_mtslink_settings_conferences(),
+		.keywords = { u"browser"_q, u"conference"_q },
+	});
+	builder.add([](const WidgetContext &ctx) {
+		const auto button = ctx.container->add(
+			object_ptr<Ui::SettingsButton>(
+				ctx.container,
+				tr::lng_mtslink_settings_embedded_browser(),
+				st::settingsButtonNoIcon));
+		button->toggleOn(
+			rpl::single(MtsLink::callsInEmbeddedBrowser())
+		)->toggledValue(
+		) | rpl::on_next([](bool embedded) {
+			MtsLink::setCallsInEmbeddedBrowser(embedded);
+		}, button->lifetime());
+		return SectionBuilder::WidgetToAdd{};
+	}, [] {
+		return SearchEntry{
+			.id = u"advanced/mtslink/browser"_q,
+			.title = tr::lng_mtslink_settings_embedded_browser(tr::now),
+			.keywords = { u"browser"_q, u"conference"_q },
+		};
+	});
+	builder.addSkip();
+}
 
 void BuildDataStorageSection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
@@ -1085,7 +1119,8 @@ void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
 	auto install = (Ui::SettingsButton*)nullptr;
 	auto check = (Ui::SettingsButton*)nullptr;
 	builder.scope([&] {
-		install = (cAlphaVersion() || KSandbox::isInside())
+		// TeleLink releases are on GitHub, there are no beta versions.
+		install = true
 			? nullptr
 			: builder.addButton({
 				.id = u"advanced/install_beta"_q,
@@ -1342,6 +1377,7 @@ const auto kMeta = BuildHelper({
 	if (!autoUpdate) {
 		BuildUpdateSection(builder, true);
 	}
+	BuildMtsLinkConferencesSection(builder);
 	BuildDataStorageSection(builder);
 	BuildAutoDownloadSection(builder);
 	BuildWindowTitleSection(builder);
@@ -1355,7 +1391,7 @@ const auto kMeta = BuildHelper({
 	if (autoUpdate) {
 		BuildUpdateSection(builder, false);
 	}
-	BuildExportSection(builder);
+	// No "Export Telegram data": a Telegram account export.
 });
 
 const SectionBuildMethod kAdvancedSection = kMeta.build;

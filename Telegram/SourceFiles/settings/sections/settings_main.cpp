@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_main.h"
+#include "mtslink/my_profile.h"
 
 #include "settings/settings_common_session.h"
 
@@ -197,18 +198,9 @@ Cover::Cover(
 			Ui::UserpicButton::ChosenImage chosen) {
 		auto &image = chosen.image;
 		_userpic->showCustom(base::duplicate(image));
-		const auto isMarkup = (chosen.markup.documentId != 0);
-		_user->session().api().peerPhoto().upload(
-			_user,
-			{
-				.image = std::move(image),
-				.markupDocumentId = chosen.markup.documentId,
-				.markupColors = chosen.markup.colors,
-				.video = std::move(chosen.video),
-			});
-		if (!isMarkup) {
-			_userpic->showUploadProgress();
-		}
+		// The avatar is set with the MTS Link profile update.
+		UpdatePhotoLocally(_user, image);
+		MtsLink::setMyAvatar(&_user->session(), std::move(image));
 	});
 
 	_badge.setPremiumClickCallback([=] {
@@ -264,29 +256,10 @@ void Cover::initViewers() {
 	Info::Profile::UsernameValue(
 		_user
 	) | rpl::on_next([=](const TextWithEntities &value) {
-		_username->setMarkedText(tr::link(value.text.isEmpty()
-			? tr::lng_settings_username_add(tr::now)
-			: value.text));
+		// The MTS Link display name, it has no t.me link.
+		_username->setText(value.text);
 		refreshUsernameGeometry(width());
 	}, lifetime());
-
-	_username->overrideLinkClickHandler([=] {
-		if (_controller->showFrozenError()) {
-			return;
-		}
-		const auto username = _user->username();
-		if (username.isEmpty()) {
-			_controller->show(Box(UsernamesBox, _user));
-		} else {
-			QGuiApplication::clipboard()->setText(
-				_user->session().createInternalLinkFull(username));
-			_controller->showToast({
-				.text = { tr::lng_username_copied(tr::now) },
-				.iconLottie = u"toast/voip_invite"_q,
-				.iconLottieSize = st::toastLottieIconSize,
-			});
-		}
-	});
 }
 
 void Cover::refreshNameGeometry(int newWidth) {
@@ -384,37 +357,12 @@ void BuildSectionButtons(SectionBuilder &builder) {
 		.keywords = { u"themes"_q, u"appearance"_q, u"stickers"_q },
 	});
 
-	{ // Folders
-		const auto preload = [=] {
-			session->data().chatsFilters().requestSuggested();
-		};
-		const auto hasFilters = session->data().chatsFilters().has()
-			|| session->settings().dialogsFiltersEnabled();
-
-		auto shownProducer = hasFilters
-			? rpl::single(true) | rpl::type_erased
-			: (rpl::single(rpl::empty) | rpl::then(
-				session->appConfig().refreshed()
-			) | rpl::map([=] {
-			const auto enabled = session->appConfig().get<bool>(
-				u"dialog_filters_enabled"_q,
-				false);
-			if (enabled) {
-				preload();
-			}
-			return enabled;
-		}));
-
-		if (hasFilters) {
-			preload();
-		}
-
+	{ // Folders, they are local in TeleLink.
 		builder.addButton({
 			.title = tr::lng_settings_section_filters(),
 			.icon = { &st::menuIconShowInFolder },
 			.onClick = [=] { showOther(FoldersId()); },
 			.keywords = { u"filters"_q, u"tabs"_q },
-			.shown = std::move(shownProducer),
 		});
 	}
 
@@ -425,12 +373,7 @@ void BuildSectionButtons(SectionBuilder &builder) {
 		.keywords = { u"performance"_q, u"proxy"_q, u"experimental"_q },
 	});
 
-	builder.addSectionButton({
-		.title = tr::lng_settings_section_devices(),
-		.targetSection = CallsId(),
-		.icon = { &st::menuIconUnmute },
-		.keywords = { u"sessions"_q, u"calls"_q },
-	});
+	// No "Speakers and Camera": the built-in calls are not used.
 
 	builder.addButton({
 		.id = u"main/power"_q,
@@ -566,31 +509,15 @@ void BuildHelpSection(SectionBuilder &builder) {
 	builder.addDivider();
 	builder.addSkip();
 
-	const auto controller = builder.controller();
+	// The MTS Link help instead of the Telegram FAQ / features / support.
 	builder.addButton({
 		.id = u"main/faq"_q,
-		.title = tr::lng_settings_faq(),
+		.title = tr::lng_mtslink_settings_help(),
 		.icon = { &st::menuIconFaq },
-		.onClick = [=] { OpenFaq(controller); },
-		.keywords = { u"help"_q, u"support"_q, u"questions"_q },
-	});
-
-	builder.addButton({
-		.id = u"main/features"_q,
-		.title = tr::lng_settings_features(),
-		.icon = { &st::menuIconEmojiObjects },
 		.onClick = [] {
-			UrlClickHandler::Open(tr::lng_telegram_features_url(tr::now));
+			UrlClickHandler::Open(u"https://help.mts-link.ru"_q);
 		},
-		.keywords = { u"tips"_q, u"tutorial"_q },
-	});
-
-	builder.addButton({
-		.id = u"main/ask-question"_q,
-		.title = tr::lng_settings_ask_question(),
-		.icon = { &st::menuIconDiscussion },
-		.onClick = [=] { OpenAskQuestionConfirm(controller); },
-		.keywords = { u"contact"_q, u"feedback"_q },
+		.keywords = { u"help"_q, u"support"_q, u"questions"_q },
 	});
 
 	builder.addSkip();
@@ -645,13 +572,7 @@ rpl::producer<QString> Main::title() {
 }
 
 void Main::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
-	const auto &list = Core::App().domain().accounts();
-	if (list.size() < Core::App().domain().maxAccounts()) {
-		addAction(tr::lng_menu_add_account(tr::now), [=] {
-			Core::App().setActivePrimaryWindow(&controller()->window());
-			Core::App().domain().addActivated(MTP::Environment{});
-		}, &st::menuIconAddAccount);
-	}
+	// One MTS Link account, no "Add account".
 	if (!controller()->session().supportMode()) {
 		addAction(
 			tr::lng_settings_information(tr::now),
@@ -727,13 +648,7 @@ void Main::setupContent() {
 
 	Ui::ResizeFitChild(this, content);
 
-	session->api().cloudPassword().reload();
-	session->api().reloadContactSignupSilent();
-	session->api().sensitiveContent().reload();
-	session->api().globalPrivacy().reload();
-	session->api().premium().reload();
-	session->data().cloudThemes().refresh();
-	session->faqSuggestions().request();
+	// No Telegram cloud password / privacy / premium / themes to reload.
 }
 
 void Main::showFinished() {

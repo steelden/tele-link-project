@@ -1179,10 +1179,6 @@ void BuildNotifyTypeSection(SectionBuilder &builder) {
 			controller,
 			Data::DefaultNotify::Broadcast,
 			showOther);
-		const auto reactions = AddReactionsButton(
-			ctx.container,
-			controller,
-			showOther);
 		if (ctx.highlights) {
 			ctx.highlights->push_back({
 				u"notifications/private"_q,
@@ -1195,10 +1191,6 @@ void BuildNotifyTypeSection(SectionBuilder &builder) {
 			ctx.highlights->push_back({
 				u"notifications/channels"_q,
 				{ channels.get(), { .rippleShape = true } },
-			});
-			ctx.highlights->push_back({
-				u"notifications/reactions"_q,
-				{ reactions.get(), { .rippleShape = true } },
 			});
 		}
 		return SectionBuilder::WidgetToAdd{};
@@ -1226,14 +1218,6 @@ void BuildNotifyTypeSection(SectionBuilder &builder) {
 			.icon = { &st::menuIconChannel },
 		};
 	});
-	builder.add(nullptr, [] {
-		return SearchEntry{
-			.id = u"notifications/reactions"_q,
-			.title = tr::lng_notification_reactions(tr::now),
-			.keywords = { u"reactions"_q },
-			.icon = { &st::menuIconGroupReactions },
-		};
-	});
 }
 
 void BuildEventNotificationsSection(SectionBuilder &builder) {
@@ -1246,29 +1230,8 @@ void BuildEventNotificationsSection(SectionBuilder &builder) {
 		.keywords = { u"events"_q, u"joined"_q, u"pinned"_q },
 	});
 
-	const auto session = builder.session();
 	const auto &settings = Core::App().settings();
-
-	auto joinSilent = rpl::single(
-		session->api().contactSignupSilentCurrent().value_or(false)
-	) | rpl::then(session->api().contactSignupSilent());
-
-	const auto joined = builder.addButton({
-		.id = u"notifications/events/joined"_q,
-		.title = tr::lng_settings_events_joined(),
-		.icon = { &st::menuIconInvite },
-		.toggled = std::move(joinSilent) | rpl::map([](bool s) { return !s; }),
-		.keywords = { u"joined"_q, u"contacts"_q, u"signup"_q },
-	});
-	if (joined) {
-		joined->toggledChanges(
-		) | rpl::filter([=](bool enabled) {
-			const auto silent = session->api().contactSignupSilentCurrent();
-			return (enabled == silent.value_or(false));
-		}) | rpl::on_next([=](bool enabled) {
-			session->api().saveContactSignupSilent(!enabled);
-		}, joined->lifetime());
-	}
+	// No "Contact joined Telegram": a Telegram account setting.
 
 	const auto pinned = builder.addButton({
 		.id = u"notifications/events/pinned"_q,
@@ -1601,7 +1564,7 @@ void BuildNotificationsSectionContent(SectionBuilder &builder) {
 	BuildNotifyViewSection(builder);
 	BuildNotifyTypeSection(builder);
 	BuildEventNotificationsSection(builder);
-	BuildCallNotificationsSection(builder);
+	// No "Accept calls on this device": a Telegram session setting.
 	BuildBadgeCounterSection(builder);
 	BuildSystemIntegrationAndAdvancedSection(builder);
 }

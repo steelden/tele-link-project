@@ -107,10 +107,10 @@ object_ptr<Ui::RpWidget> CreateIntroSettings(
 
 	AddButtonWithIcon(
 		result,
-		tr::lng_settings_faq(),
+		tr::lng_mtslink_settings_help(),
 		st::settingsButtonNoIcon
 	)->addClickHandler([] {
-		OpenFaq(nullptr);
+		UrlClickHandler::Open(u"https://help.mts-link.ru"_q);
 	});
 
 	return result;

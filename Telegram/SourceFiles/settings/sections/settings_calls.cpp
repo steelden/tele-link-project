@@ -376,7 +376,6 @@ void BuildCameraSection(SectionBuilder &builder) {
 
 void BuildOtherSection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
-	const auto session = builder.session();
 
 	builder.addSkip();
 	builder.addDivider();
@@ -387,28 +386,7 @@ void BuildOtherSection(SectionBuilder &builder) {
 		.keywords = { u"calls"_q, u"accept"_q, u"system"_q },
 	});
 
-	const auto api = &session->api();
-	const auto authorizations = &api->authorizations();
-	authorizations->reload();
-
-	const auto acceptCalls = builder.addButton({
-		.id = u"calls/accept"_q,
-		.title = tr::lng_settings_call_accept_calls(),
-		.st = &st::settingsButtonNoIcon,
-		.toggled = authorizations->callsDisabledHereValue()
-			| rpl::map(!rpl::mappers::_1),
-		.keywords = { u"accept"_q, u"receive"_q, u"incoming"_q },
-		.highlight = { .rippleShape = true },
-	});
-
-	if (acceptCalls) {
-		acceptCalls->toggledChanges(
-		) | rpl::filter([=](bool value) {
-			return (value == authorizations->callsDisabledHere());
-		}) | rpl::on_next([=](bool value) {
-			authorizations->toggleCallsDisabledHere(!value);
-		}, acceptCalls->lifetime());
-	}
+	// No "Accept calls on this device": a Telegram session setting.
 
 	builder.addButton({
 		.id = u"calls/system-prefs"_q,
@@ -429,41 +407,9 @@ void BuildOtherSection(SectionBuilder &builder) {
 	builder.addSkip();
 }
 
-void BuildMtsLinkConferencesSection(SectionBuilder &builder) {
-	builder.addSkip();
-	builder.addSubsectionTitle({
-		.id = u"calls/mtslink"_q,
-		.title = tr::lng_mtslink_settings_conferences(),
-		.keywords = { u"browser"_q, u"conference"_q },
-	});
-	builder.add([](const WidgetContext &ctx) {
-		const auto button = ctx.container->add(
-			object_ptr<Ui::SettingsButton>(
-				ctx.container,
-				tr::lng_mtslink_settings_embedded_browser(),
-				st::settingsButtonNoIcon));
-		button->toggleOn(
-			rpl::single(MtsLink::callsInEmbeddedBrowser())
-		)->toggledValue(
-		) | rpl::on_next([](bool embedded) {
-			MtsLink::setCallsInEmbeddedBrowser(embedded);
-		}, button->lifetime());
-		return SectionBuilder::WidgetToAdd{};
-	}, [] {
-		return SearchEntry{
-			.id = u"calls/mtslink/browser"_q,
-			.title = tr::lng_mtslink_settings_embedded_browser(tr::now),
-			.keywords = { u"browser"_q, u"conference"_q },
-		};
-	});
-	builder.addSkip();
-	builder.addDivider();
-}
-
 void BuildCallsSectionContent(
 		SectionBuilder &builder,
 		rpl::variable<bool> *testingMicrophone = nullptr) {
-	BuildMtsLinkConferencesSection(builder);
 	BuildOutputSection(builder);
 	BuildInputSection(builder, testingMicrophone);
 	BuildCallDevicesSection(builder);

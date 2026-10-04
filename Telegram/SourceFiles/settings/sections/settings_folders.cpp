@@ -1286,7 +1286,7 @@ void Folders::setupContent() {
 
 		BuildTopContent(builder, std::move(showFinishedDup));
 		BuildFoldersListSection(builder, state.get());
-		BuildTagsSection(builder, state.get());
+		// No folder tags: a Telegram Premium feature.
 		BuildViewSection(builder);
 
 		std::move(showFinished) | rpl::on_next([=] {

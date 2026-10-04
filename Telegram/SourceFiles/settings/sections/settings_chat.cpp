@@ -1132,22 +1132,7 @@ void BuildArchiveSection(SectionBuilder &builder) {
 		.keywords = { u"shortcuts"_q, u"keyboard"_q, u"hotkeys"_q },
 	});
 
-	if (controller) {
-		PreloadArchiveSettings(session);
-	}
-
-	builder.addButton({
-		.id = u"chat/archive-settings"_q,
-		.title = tr::lng_context_archive_settings(),
-		.icon = { &st::menuIconArchive },
-		.onClick = [=] {
-			if (controller) {
-				controller->show(
-					Box<Ui::GenericBox>(ArchiveSettingsBox, controller));
-			}
-		},
-		.keywords = { u"archive"_q, u"settings"_q, u"folder"_q },
-	});
+	// No archive settings: Telegram account privacy settings.
 }
 
 void BuildSupportSection(SectionBuilder &builder) {
@@ -1298,7 +1283,7 @@ void BuildSupportSection(SectionBuilder &builder) {
 void BuildChatSectionContent(SectionBuilder &builder) {
 	BuildThemeOptionsSection(builder);
 	BuildThemeSettingsSection(builder);
-	BuildCloudThemesSection(builder);
+	// No cloud themes: they are Telegram account themes.
 	BuildChatBackgroundSection(builder);
 	BuildChatListQuickActionSection(builder);
 	BuildStickersEmojiSection(builder);
@@ -1343,14 +1328,7 @@ rpl::producer<QString> Chat::title() {
 }
 
 void Chat::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
-	const auto window = &controller()->window();
-	const auto createTheme = addAction(
-		tr::lng_settings_bg_theme_create(tr::now),
-		[=] { window->show(Box(Window::Theme::CreateBox, window)); },
-		&st::menuIconChangeColors);
-	createTheme->setProperty(
-		"highlight-control-id",
-		u"chat/themes-create"_q);
+	// No "Create new theme": the themes are created in the Telegram cloud.
 }
 
 void Chat::setupContent() {
@@ -1542,37 +1520,7 @@ void SetupStickersEmoji(
 		} });
 	}
 
-	const auto stickersButton = AddButtonWithIcon(
-		container,
-		tr::lng_stickers_you_have(),
-		st::settingsButton,
-		{ &st::menuIconStickers });
-	stickersButton->addClickHandler([=] {
-		controller->show(Box<StickersBox>(
-			controller->uiShow(),
-			StickersBox::Section::Installed));
-	});
-	if (highlights) {
-		highlights->push_back({ u"chat/my-stickers"_q, {
-			stickersButton.get(),
-			{ .rippleShape = true },
-		} });
-	}
-
-	const auto emojiSetsButton = AddButtonWithIcon(
-		container,
-		tr::lng_emoji_manage_sets(),
-		st::settingsButton,
-		{ &st::menuIconEmoji });
-	emojiSetsButton->addClickHandler([=] {
-		controller->show(Box<Ui::Emoji::ManageSetsBox>(session));
-	});
-	if (highlights) {
-		highlights->push_back({ u"chat/emoji-sets"_q, {
-			emojiSetsButton.get(),
-			{ .rippleShape = true },
-		} });
-	}
+	// No sticker sets and emoji styles: they are downloaded from Telegram.
 
 	Ui::AddSkip(container, st::settingsCheckboxesSkip);
 }
@@ -2735,11 +2683,7 @@ void SetupThemeSettings(
 		} });
 	}
 
-	AddPeerColorButton(
-		container,
-		controller->uiShow(),
-		controller->session().user(),
-		st::settingsColorButton);
+	// No name color: a Telegram account setting.
 
 	const auto settings = &Core::App().settings();
 	if (settings->systemDarkMode().has_value()) {

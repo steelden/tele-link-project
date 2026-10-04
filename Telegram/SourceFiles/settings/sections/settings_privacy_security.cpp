@@ -1158,20 +1158,55 @@ void BuildConfirmationExtensions(SectionBuilder &builder) {
 	builder.addDividerText(tr::lng_settings_edit_extensions_about());
 }
 
-void BuildPrivacySecuritySectionContent(SectionBuilder &builder) {
-	auto updateOnTick = rpl::single(
-	) | rpl::then(base::timer_each(kUpdateTimeout));
-	const auto trigger = [&] {
-		return rpl::duplicate(updateOnTick);
-	};
+// TeleLink: the cloud password, privacy rules, sessions, blocked users,
+// websites, auto-delete, archive, top peers and self-destruction are the
+// Telegram account settings (MTProto), only the local ones are left.
+void BuildMtsLinkSecuritySection(SectionBuilder &builder) {
+	const auto showOther = builder.showOther();
+	const auto session = builder.session();
 
-	BuildSecuritySection(builder, trigger());
-	BuildPrivacySection(builder);
-	BuildArchiveAndMuteSection(builder);
-	BuildBotsAndWebsitesSection(builder);
+	builder.addSkip(st::settingsPrivacySkip);
+	builder.addSubsectionTitle({
+		.id = u"security/section"_q,
+		.title = tr::lng_settings_security(),
+		.keywords = { u"security"_q, u"passcode"_q },
+	});
+
+	auto passcodeHas = rpl::single(rpl::empty) | rpl::then(
+		session->domain().local().localPasscodeChanged()
+	) | rpl::map([=] {
+		return session->domain().local().hasLocalPasscode();
+	});
+	auto passcodeLabel = rpl::combine(
+		tr::lng_settings_cloud_password_on(),
+		tr::lng_settings_cloud_password_off(),
+		rpl::duplicate(passcodeHas)
+	) | rpl::map([](const QString &on, const QString &off, bool has) {
+		return has ? on : off;
+	});
+
+	builder.addButton({
+		.id = u"security/passcode"_q,
+		.title = tr::lng_settings_passcode_title(),
+		.icon = { &st::menuIconLock },
+		.label = std::move(passcodeLabel),
+		.onClick = [=, passcodeHas = std::move(passcodeHas)]() mutable {
+			if (rpl::variable<bool>(std::move(passcodeHas)).current()) {
+				showOther(LocalPasscodeCheckId());
+			} else {
+				showOther(LocalPasscodeCreateId());
+			}
+		},
+		.keywords = { u"passcode"_q, u"lock"_q, u"pin"_q },
+	});
+
+	builder.addSkip();
+	builder.addDivider();
+}
+
+void BuildPrivacySecuritySectionContent(SectionBuilder &builder) {
+	BuildMtsLinkSecuritySection(builder);
 	BuildConfirmationExtensions(builder);
-	BuildTopPeersSection(builder);
-	BuildSelfDestructionSection(builder, trigger());
 }
 
 class PrivacySecurity : public Section<PrivacySecurity> {

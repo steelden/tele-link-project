@@ -3301,7 +3301,7 @@ void restoreDefaultNotify(not_null<Main::Session*> session) {
 			continue;
 		}
 		using Flag = MTPDpeerNotifySettings::Flag;
-		auto flags = Flag::f_mute_until;
+		auto flags = Flag::f_mute_until | Flag();
 		const auto silent = object.value(u"silent"_q);
 		if (silent.isBool()) {
 			flags |= Flag::f_silent;
