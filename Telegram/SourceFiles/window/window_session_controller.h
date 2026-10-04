@@ -217,6 +217,8 @@ struct SectionShow {
 	bool dropSameFromStack = false;
 	bool allowDuplicateInStack = false;
 	bool slideFromBottom = false;
+	// MTS Link: a thread message in its chat, not in the opened thread.
+	bool mtsLinkOpenChat = false;
 	Origin origin;
 
 };

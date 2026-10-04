@@ -7018,6 +7018,7 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_status_in_call" = "в звонке";
 "lng_mtslink_thread_subscribe" = "Подписаться на тред";
 "lng_mtslink_thread_unsubscribe" = "Отписаться от треда";
+"lng_mtslink_thread_show_in_chat" = "Показать сообщение в чате";
 "lng_mtslink_thread_mute" = "Отключить уведомления треда";
 "lng_mtslink_thread_unmute" = "Включить уведомления треда";
 "lng_mtslink_role_admin_granted" = "Вас назначили администратором в «{chat}»";

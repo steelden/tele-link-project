@@ -1481,6 +1481,7 @@ void MainWidget::showHistory(
 	}
 	if ((IsServerMsgId(showAtMsgId) || Data::IsScheduledMsgId(showAtMsgId))
 		&& _mainSection
+		&& !params.mtsLinkOpenChat
 		&& _mainSection->showMessage(peerId, params, showAtMsgId)) {
 		session().data().hideShownSpoilers();
 		if (params.activation != anim::activation::background) {

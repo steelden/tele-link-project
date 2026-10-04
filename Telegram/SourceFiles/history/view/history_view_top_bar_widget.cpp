@@ -844,6 +844,20 @@ void TopBarWidget::infoClicked() {
 	const auto key = _activeChat.key;
 	if (!key) {
 		return;
+	} else if (_activeChat.section == Section::Replies
+		&& key.peer()
+		&& MtsLink::hasChatId(key.peer()->id)) {
+		// MTS Link thread: the title leads to the thread message in its
+		// chat, the chat becomes the active one.
+		const auto peerId = key.peer()->id;
+		if (const auto rootId = MtsLink::currentOpenThreadRoot(peerId)) {
+			auto params = Window::SectionShow(
+				Window::SectionShow::Way::ClearStack);
+			params.mtsLinkOpenChat = true;
+			_controller->showPeerHistory(peerId, params, rootId);
+			return;
+		}
+		_controller->showPeerInfo(key.peer());
 	} else if (const auto topic = key.topic()) {
 		_controller->showSection(std::make_shared<Info::Memento>(topic));
 	} else if (const auto sublist = key.sublist()) {

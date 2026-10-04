@@ -1964,6 +1964,13 @@ void Filler::fillContextMenuActions() {
 		const auto [parentPeerId, rootId] = MtsLink::threadParentInfo(
 			_peer->id);
 		if (parentPeerId && rootId) {
+			const auto controller = _controller;
+			_addAction(tr::lng_mtslink_thread_show_in_chat(tr::now), [=] {
+				auto params = Window::SectionShow(
+					Window::SectionShow::Way::ClearStack);
+				params.mtsLinkOpenChat = true;
+				controller->showPeerHistory(parentPeerId, params, rootId);
+			}, &st::menuIconShowInChat);
 			MtsLink::fillThreadSubscriptionActions(
 				&_peer->session(),
 				parentPeerId,
@@ -2057,6 +2064,14 @@ void Filler::fillRepliesActions() {
 		const auto peerId = _peer->id;
 		const auto rootId = MtsLink::currentOpenThreadRoot(peerId);
 		if (rootId) {
+			// The thread message in its chat, the chat is the active one.
+			const auto controller = _controller;
+			_addAction(tr::lng_mtslink_thread_show_in_chat(tr::now), [=] {
+				auto params = Window::SectionShow(
+					Window::SectionShow::Way::ClearStack);
+				params.mtsLinkOpenChat = true;
+				controller->showPeerHistory(peerId, params, rootId);
+			}, &st::menuIconShowInChat);
 			MtsLink::fillThreadSubscriptionActions(
 				&_peer->session(),
 				peerId,
