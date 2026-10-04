@@ -1119,8 +1119,8 @@ void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
 	auto install = (Ui::SettingsButton*)nullptr;
 	auto check = (Ui::SettingsButton*)nullptr;
 	builder.scope([&] {
-		// TeleLink releases are on GitHub, there are no beta versions.
-		install = true
+		// The beta versions are GitHub pre-releases of TeleLink.
+		install = (cAlphaVersion() || KSandbox::isInside())
 			? nullptr
 			: builder.addButton({
 				.id = u"advanced/install_beta"_q,

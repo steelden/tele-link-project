@@ -985,8 +985,14 @@ HttpChecker::HttpChecker(bool testing) : Checker(testing) {
 }
 
 void HttpChecker::start() {
-	auto url = QUrl(u"https://api.github.com/repos/steelden/tele-link-project/releases/latest"_q);
-	DEBUG_LOG(("Update Info: checking GitHub releases"));
+	// "latest" is the newest stable release, the beta versions are GitHub
+	// pre-releases: with "Install beta versions" the list is checked.
+	const auto beta = cInstallBetaVersion();
+	auto url = QUrl(beta
+		? u"https://api.github.com/repos/steelden/tele-link-project/releases?per_page=20"_q
+		: u"https://api.github.com/repos/steelden/tele-link-project/releases/latest"_q);
+	LOG(("Update Info: checking GitHub releases, beta: %1"
+		).arg(beta ? 1 : 0));
 	auto request = QNetworkRequest(url);
 	request.setRawHeader("Accept", "application/vnd.github+json");
 	_manager = std::make_unique<QNetworkAccessManager>();
@@ -1023,32 +1029,54 @@ bool HttpChecker::handleResponse(const QByteArray &response) {
 			).arg(error.errorString()));
 		return false;
 	}
-	if (!document.isObject()) {
-		LOG(("Update Error: GitHub response is not an object."));
+	const auto parseVersion = [](const QString &tagName) {
+		const auto versionStr = tagName.startsWith('v')
+			? tagName.mid(1)
+			: tagName;
+		const auto parts = versionStr.split('.');
+		if (parts.size() != 3) {
+			return 0;
+		}
+		return parts[0].toInt() * 1000000
+			+ parts[1].toInt() * 1000
+			+ parts[2].toInt();
+	};
+	// A single release ("latest") or the list of the releases (betas too),
+	// the newest version is taken from the list.
+	auto root = QJsonObject();
+	auto remoteVersion = 0;
+	if (document.isObject()) {
+		root = document.object();
+		remoteVersion = parseVersion(root.value("tag_name").toString());
+	} else if (document.isArray()) {
+		for (const auto &value : document.array()) {
+			const auto release = value.toObject();
+			if (release.value("draft").toBool()) {
+				continue;
+			}
+			const auto version = parseVersion(
+				release.value("tag_name").toString());
+			if (version > remoteVersion) {
+				remoteVersion = version;
+				root = release;
+			}
+		}
+	} else {
+		LOG(("Update Error: bad GitHub response."));
 		return false;
 	}
-	const auto root = document.object();
 	const auto tagName = root.value("tag_name").toString();
-	if (tagName.isEmpty()) {
-		LOG(("Update Error: no tag_name in GitHub release."));
+	if (tagName.isEmpty() || !remoteVersion) {
+		LOG(("Update Error: no valid release version in GitHub response."));
 		return false;
 	}
 
-	const auto versionStr = tagName.startsWith('v')
-		? tagName.mid(1)
-		: tagName;
-	const auto parts = versionStr.split('.');
-	if (parts.size() != 3) {
-		LOG(("Update Error: bad version format: %1").arg(tagName));
-		return false;
-	}
-	const auto major = parts[0].toInt();
-	const auto minor = parts[1].toInt();
-	const auto patch = parts[2].toInt();
-	const auto remoteVersion = major * 1000000 + minor * 1000 + patch;
-
-	LOG(("Update Info: GitHub latest release %1 (version %2), "
-		"current %3").arg(tagName).arg(remoteVersion).arg(AppVersion));
+	LOG(("Update Info: GitHub newest release %1 (version %2%3), "
+		"current %4"
+		).arg(tagName
+		).arg(remoteVersion
+		).arg(root.value("prerelease").toBool() ? u", beta"_q : QString()
+		).arg(AppVersion));
 
 	if (remoteVersion <= AppVersion) {
 		done(nullptr);
