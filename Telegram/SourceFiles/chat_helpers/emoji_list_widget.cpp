@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "chat_helpers/emoji_list_widget.h"
+#include "mtslink/data_adapters.h"
 
 #include "window/window_media_preview.h"
 #include "api/api_peer_photo.h"
@@ -493,6 +494,7 @@ EmojiListWidget::EmojiListWidget(
 , _show(std::move(descriptor.show))
 , _features(descriptor.features)
 , _onlyUnicodeEmoji(descriptor.mode == Mode::PeerTitle)
+, _mtsLinkReactions(descriptor.mtsLinkReactions)
 , _mode(_onlyUnicodeEmoji ? Mode::Full : descriptor.mode)
 , _mediaPreviewParent(descriptor.mediaPreviewParent)
 , _mediaPreviewMargins(descriptor.mediaPreviewMargins)
@@ -554,7 +556,9 @@ EmojiListWidget::EmojiListWidget(
 
 	for (auto i = 1; i != _staticCount; ++i) {
 		const auto section = static_cast<Section>(i);
-		_counts[i] = Ui::Emoji::GetSectionCount(section);
+		_counts[i] = _mtsLinkReactions
+			? int(sectionEmoji(i).size())
+			: Ui::Emoji::GetSectionCount(section);
 	}
 
 	_picker->chosen(
@@ -824,7 +828,30 @@ void EmojiListWidget::ensureMediaPreview() {
 }
 
 std::vector<EmojiPtr> EmojiListWidget::collectPlainSearchResults() {
-	return SearchEmoji(_searchQuery, _searchEmoji);
+	auto result = SearchEmoji(_searchQuery, _searchEmoji);
+	if (_mtsLinkReactions) {
+		result.erase(ranges::remove_if(result, [&](EmojiPtr emoji) {
+			return !emojiAllowed(emoji);
+		}), end(result));
+	}
+	return result;
+}
+
+QVector<EmojiPtr> EmojiListWidget::sectionEmoji(int section) const {
+	auto result = Ui::Emoji::GetSection(static_cast<Section>(section));
+	if (_mtsLinkReactions) {
+		// MTS Link reactions: only the emoji of its catalogue.
+		result.erase(std::remove_if(result.begin(), result.end(), [&](
+				EmojiPtr emoji) {
+			return !emojiAllowed(emoji);
+		}), result.end());
+	}
+	return result;
+}
+
+bool EmojiListWidget::emojiAllowed(EmojiPtr emoji) const {
+	return !_mtsLinkReactions
+		|| (emoji && !MtsLink::emojiToId(emoji->text()).isEmpty());
 }
 
 void EmojiListWidget::appendPremiumSearchResults() {
@@ -1892,12 +1919,16 @@ void EmojiListWidget::ensureLoaded(int section) {
 	} else if (section >= _staticCount || !_emoji[section].empty()) {
 		return;
 	}
-	_emoji[section] = Ui::Emoji::GetSection(static_cast<Section>(section));
+	_emoji[section] = sectionEmoji(section);
 	_counts[section] = _emoji[section].size();
 
 	const auto &settings = Core::App().settings();
 	for (auto &emoji : _emoji[section]) {
-		emoji = settings.lookupEmojiVariant(emoji);
+		if (const auto variant = settings.lookupEmojiVariant(emoji)
+			; emojiAllowed(variant)) {
+			// A skin tone variant only if MTS Link has it as a reaction.
+			emoji = variant;
+		}
 	}
 }
 
@@ -1915,6 +1946,11 @@ void EmojiListWidget::fillRecent() {
 		const auto document = std::get_if<RecentEmojiDocument>(&one.id.data);
 		if (document && ((document->test != test) || _onlyUnicodeEmoji)) {
 			continue;
+		} else if (_mtsLinkReactions) {
+			const auto emoji = std::get_if<EmojiPtr>(&one.id.data);
+			if (document || !emoji || !emojiAllowed(*emoji)) {
+				continue;
+			}
 		}
 		_recent.push_back({
 			.custom = resolveCustomRecent(one.id),

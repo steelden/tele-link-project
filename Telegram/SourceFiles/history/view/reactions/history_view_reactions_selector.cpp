@@ -1186,6 +1186,7 @@ void Selector::createList() {
 				: this,
 			.mediaPreviewMargins = marginsForShadow(),
 			.mediaPreviewPanelStyle = (_mediaPreviewParent == nullptr),
+			.mtsLinkReactions = _reactions.allEmoji,
 		}));
 	if (!_reactions.stickers.empty()) {
 		auto descriptors = ranges::views::all(

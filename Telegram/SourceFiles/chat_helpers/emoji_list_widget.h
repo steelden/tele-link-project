@@ -106,6 +106,7 @@ struct EmojiListDescriptor {
 	QWidget *mediaPreviewParent = nullptr;
 	QMargins mediaPreviewMargins;
 	bool mediaPreviewPanelStyle = true;
+	bool mtsLinkReactions = false; // Only the MTS Link reaction emoji.
 };
 
 class EmojiListWidget final
@@ -498,6 +499,9 @@ private:
 	const std::shared_ptr<Show> _show;
 	const ComposeFeatures _features;
 	const bool _onlyUnicodeEmoji;
+	const bool _mtsLinkReactions = false;
+	[[nodiscard]] QVector<EmojiPtr> sectionEmoji(int section) const;
+	[[nodiscard]] bool emojiAllowed(EmojiPtr emoji) const;
 	Mode _mode = Mode::Full;
 	QWidget *_mediaPreviewParent = nullptr;
 	QMargins _mediaPreviewMargins;
