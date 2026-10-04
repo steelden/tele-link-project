@@ -32,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document.h"
 #include "data/data_forum_topic.h"
 #include "data/data_peer.h"
+#include "mtslink/data_adapters.h"
 #include "data/data_photo.h"
 #include "data/data_file_origin.h"
 #include "data/data_user.h"
@@ -188,6 +189,14 @@ InnerWidget::InnerWidget(
 	}, lifetime());
 }
 
+// MTS Link favorites: the profile of the user, the media of the chat.
+[[nodiscard]] not_null<PeerData*> MtsLinkProfilePeer(
+		not_null<PeerData*> peer) {
+	return (peer->id == MtsLink::favoritesPeerId())
+		? not_null<PeerData*>(peer->session().user())
+		: peer;
+}
+
 rpl::producer<> InnerWidget::backRequest() const {
 	return _backClicks.events();
 }
@@ -236,7 +245,7 @@ object_ptr<Ui::RpWidget> InnerWidget::setupContent(
 		BuildProfileDetailsSections(
 			stack,
 			_controller,
-			_peer,
+			MtsLinkProfilePeer(_peer),
 			_topic,
 			_sublist,
 			origin);
@@ -571,7 +580,11 @@ base::weak_qptr<Ui::RpWidget> InnerWidget::createPinnedToTop(
 			.controller = _controller->parentController(),
 			.key = _controller->key(),
 			.wrap = _controller->wrapValue(),
-			.peer = _sublist ? _sublist->sublistPeer().get() : nullptr,
+			.peer = (_sublist
+				? _sublist->sublistPeer().get()
+				: (MtsLinkProfilePeer(_peer) != _peer)
+				? MtsLinkProfilePeer(_peer).get()
+				: nullptr),
 			.backToggles = _backToggles.value(),
 			.showFinished = _showFinished.events(),
 			.customStatus = (_savedMessages
