@@ -6287,6 +6287,19 @@ void OverlayWidget::validatePhotoCurrentImage() {
 			}
 		}
 	}
+	if (_staticContent.isNull() && !_message && _peer) {
+		// MTS Link: a userpic photo may have no file at all (or be still
+		// loading), the letters userpic is shown instead of an empty box.
+		_photoMedia->wanted(Data::PhotoSize::Small, fileOrigin());
+		const auto size = std::max(std::min(_width, _height), 512)
+			* style::DevicePixelRatio();
+		auto view = Ui::PeerUserpicView();
+		auto image = PeerData::GenerateUserpicImage(_peer, view, size, 0);
+		if (!image.isNull()) {
+			setStaticContent(std::move(image));
+			_blurred = true; // Replaced by the real image when loaded.
+		}
+	}
 	if (_staticContent.isNull()) {
 		_photoMedia->wanted(Data::PhotoSize::Small, fileOrigin());
 	}

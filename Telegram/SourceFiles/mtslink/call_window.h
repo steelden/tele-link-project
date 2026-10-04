@@ -6,6 +6,8 @@ MTS Link video conferences in an embedded browser window.
 */
 #pragma once
 
+#include <QtCore/QJsonObject>
+
 namespace MtsLink {
 
 // Opens the conference link in a TeleLink window with an embedded browser,
@@ -31,6 +33,10 @@ void joinCallLink(
 	const QString &title = QString(),
 	CallBrowser browser = CallBrowser::Default,
 	bool video = true);
+
+// TeleLink local settings, tdata/mtslink_settings.json.
+[[nodiscard]] QJsonObject readLocalSettings();
+void writeLocalSettings(const QJsonObject &settings);
 
 // Opening the conferences in the embedded browser or the system one.
 [[nodiscard]] bool callsInEmbeddedBrowser();

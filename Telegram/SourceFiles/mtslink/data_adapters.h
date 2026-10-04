@@ -33,6 +33,8 @@ class HistoryItem;
 
 namespace Data {
 class RepliesList;
+class PeerNotifySettings;
+enum class DefaultNotify : uint8_t;
 } // namespace Data
 
 namespace MtsLink {
@@ -161,6 +163,21 @@ struct ProfileFieldInfo {
 [[nodiscard]] rpl::producer<QString> profileFieldTitle(const QString &title);
 // Loads the full profile and the organization fields once.
 void requestUserDetails(not_null<UserData*> user);
+
+// The default notification settings (private chats / groups / channels)
+// are not on the MTS Link server, they are kept locally.
+void saveDefaultNotify(
+	Data::DefaultNotify type,
+	const Data::PeerNotifySettings &value);
+void restoreDefaultNotify(not_null<Main::Session*> session);
+
+// The catalogue emoji by their names (ru and en), best matches first.
+[[nodiscard]] std::vector<QString> searchEmojiByName(
+	const QString &query,
+	bool exact);
+[[nodiscard]] QString emojiName(const QString &emoji);
+// The full size photo of the current userpic, for the media viewer.
+void ensureUserpicFor(not_null<PeerData*> peer, const QString &fileId);
 
 // profileChanged: from MemberProfileChanged, the userpic is replaced.
 void applyUserData(

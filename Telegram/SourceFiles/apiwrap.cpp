@@ -2071,10 +2071,7 @@ void ApiWrap::sendNotifySettingsUpdates() {
 	}
 	const auto &settings = session().data().notifySettings();
 	for (const auto type : base::take(_updateNotifyDefaults)) {
-		request(MTPaccount_UpdateNotifySettings(
-			Data::DefaultNotifyToMTP(type),
-			settings.defaultSettings(type).serialize()
-		)).afterDelay(kSmallDelayMs).send();
+		MtsLink::saveDefaultNotify(type, settings.defaultSettings(type));
 	}
 	session().mtp().sendAnything();
 }

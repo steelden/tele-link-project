@@ -474,6 +474,17 @@ void joinCallLink(
 		});
 }
 
+QJsonObject readLocalSettings() {
+	return ReadSettings();
+}
+
+void writeLocalSettings(const QJsonObject &settings) {
+	auto file = QFile(SettingsPath());
+	if (file.open(QIODevice::WriteOnly)) {
+		file.write(QJsonDocument(settings).toJson());
+	}
+}
+
 bool callsInEmbeddedBrowser() {
 	return ReadSettings().value(u"callsInEmbeddedBrowser"_q).toBool(true);
 }

@@ -293,7 +293,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_flood_error" = "Too many tries. Please try again later.";
 "lng_edit_error" = "You can't edit this message.";
 "lng_error_phone_flood" = "Sorry, you have deleted and re-created your account too many times recently. Please wait for a few days before signing up again.";
-"lng_error_start_minimized_passcoded" = "You have set a local passcode, so Telegram Desktop can't be launched minimized; it will ask you to enter your passcode before it can start working.";
+"lng_error_start_minimized_passcoded" = "You have set a local passcode, so TeleLink can't be launched minimized; it will ask you to enter your passcode before it can start working.";
 "lng_error_public_groups_denied" = "Unfortunately, you are banned from participating in public groups.\n{more_info}";
 "lng_error_cant_add_member" = "Sorry, you can't add the bot to this group. Ask a group admin to do it.";
 "lng_error_cant_add_bot" = "Sorry, this bot can't be added to groups.";
@@ -479,7 +479,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_forum_all_messages" = "All Messages";
 "lng_forum_create_new_topic" = "Create New Thread";
 "lng_dlg_search_for_messages" = "Search for messages";
-"lng_update_telegram" = "Update Telegram";
+"lng_update_telegram" = "Update TeleLink";
 "lng_dlg_search_in" = "Search messages in";
 "lng_dlg_search_from" = "From: {user}";
 "lng_chat_menu" = "Chat menu";
@@ -680,7 +680,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_title_total_count" = "Total unread count";
 "lng_settings_native_frame" = "Use system window frame";
 "lng_settings_qt_frame" = "Use Qt window frame";
-"lng_settings_auto_start" = "Launch Telegram when system starts";
+"lng_settings_auto_start" = "Launch TeleLink when system starts";
 "lng_settings_start_min" = "Launch minimized";
 "lng_settings_auto_start_disabled_uwp" = "Starting with the system was disabled in Windows Settings.\n\nPlease enable Telegram Desktop in the Startup Apps Settings.";
 "lng_settings_restore_windows" = "Restore last opened windows";
@@ -692,7 +692,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_restore_windows_disabled_toast" = "Windows will not be restored. You can enable this in Settings > Advanced.";
 "lng_restore_windows_unavailable" = "This chat is no longer available.";
 "lng_settings_open_system_settings" = "Open Settings";
-"lng_settings_add_sendto" = "Place Telegram in \"Send to\" menu";
+"lng_settings_add_sendto" = "Place TeleLink in \"Send to\" menu";
 "lng_settings_mac_warn_before_quit" = "Show warning before quitting with {text}";
 "lng_settings_mac_round_icon" = "Round application icon";
 
@@ -834,13 +834,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_passcode_disable" = "Disable passcode";
 "lng_settings_passcode_disable_sure" = "Are you sure you want to disable passcode?";
 "lng_settings_use_winhello" = "Unlock with Windows Hello";
-"lng_settings_use_winhello_about" = "You need to enter your passcode once before unlocking Telegram with Windows Hello.";
+"lng_settings_use_winhello_about" = "You need to enter your passcode once before unlocking TeleLink with Windows Hello.";
 "lng_settings_use_touchid" = "Unlock with Touch ID";
-"lng_settings_use_touchid_about" = "You need to enter your passcode once before unlocking Telegram with Touch ID.";
+"lng_settings_use_touchid_about" = "You need to enter your passcode once before unlocking TeleLink with Touch ID.";
 "lng_settings_use_applewatch" = "Unlock with Apple Watch";
-"lng_settings_use_applewatch_about" = "You need to enter your passcode once before unlocking Telegram with Apple Watch.";
+"lng_settings_use_applewatch_about" = "You need to enter your passcode once before unlocking TeleLink with Apple Watch.";
 "lng_settings_use_systempwd" = "Unlock with System Password";
-"lng_settings_use_systempwd_about" = "You need to enter your passcode once before unlocking Telegram with System Password.";
+"lng_settings_use_systempwd_about" = "You need to enter your passcode once before unlocking TeleLink with System Password.";
 "lng_settings_password_disable" = "Disable cloud password";
 "lng_settings_password_abort" = "Abort two-step verification setup";
 "lng_settings_about_bio" = "Any details such as age, occupation or city.\nExample: 23 y.o. designer from San Francisco";
@@ -1148,7 +1148,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_download_path_failed" = "File download could not be started.\n\nThis might be because your selected download location is invalid. Try changing it in Settings > Advanced > Download Path.";
 "lng_download_finish_failed" = "File download could not be completed.\n\nWould you like to try again?";
 
-"lng_settings_section_privacy" = "Privacy and Security";
+"lng_settings_section_privacy" = "Security";
 
 "lng_local_storage_title" = "Local storage";
 "lng_local_storage_empty" = "No cached files";
@@ -1181,14 +1181,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_local_storage_clear" = "Clear all";
 "lng_local_storage_clear_selected" = "Clear selected";
 "lng_local_storage_clearing" = "Clearing...";
-"lng_local_storage_device_telegram" = "Telegram cache";
+"lng_local_storage_device_telegram" = "TeleLink cache";
 "lng_local_storage_device_other" = "Other data";
 "lng_local_storage_device_free" = "Free";
 "lng_local_storage_device_total" = "Total";
-"lng_local_storage_device_usage" = "Telegram uses {percent} of your device storage.";
+"lng_local_storage_device_usage" = "TeleLink uses {percent} of your device storage.";
 "lng_local_storage_clearing_about" = "Please keep this window open while the cache is being cleared.";
 "lng_local_storage_cleared" = "{size} freed on your device!";
-"lng_local_storage_about" = "All media will stay in the Telegram cloud and can be re-downloaded if you need them again.";
+"lng_local_storage_about" = "All media will stay on the MTS Link server and can be re-downloaded if you need them again.";
 "lng_local_storage_manage_title" = "Manage limits";
 "lng_local_storage_max_size_about" = "If your cache size exceeds this limit, the oldest unused media will be removed from the device.";
 
@@ -1207,8 +1207,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_passcode_confirm_new" = "Re-enter new passcode";
 "lng_passcode_about" = "When a local passcode is set, a lock icon appears at the top of your chat list. Click it to lock Telegram Desktop.\n\nNote: if you forget your local passcode, you'll need to log out of Telegram Desktop and log in again.";
 "lng_passcode_about1" = "When a local passcode is set, a lock icon appears at the top of your chat list.";
-"lng_passcode_about2" = "Click it to lock Telegram Desktop.";
-"lng_passcode_about3" = "Note: if you forget your passcode, you'll need to log out of Telegram Desktop and log in again.";
+"lng_passcode_about2" = "Click it to lock TeleLink.";
+"lng_passcode_about3" = "Note: if you forget your passcode, you'll need to log out of TeleLink and log in again.";
 "lng_passcode_differ" = "Passcodes are different";
 "lng_passcode_wrong" = "Wrong passcode";
 "lng_passcode_is_same" = "Passcode was not changed";
@@ -6490,6 +6490,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_call_window_chat" = "Call: {chat}";
 "lng_mtslink_settings_conferences" = "Video conferences";
 "lng_mtslink_settings_embedded_browser" = "Open in the built-in browser";
+"lng_mtslink_settings_help" = "MTS Link Help";
 "lng_mtslink_call_in_browser" = "In browser";
 "lng_mtslink_call_in_app" = "In TeleLink";
 "lng_mtslink_call_open_browser" = "Open in browser";
@@ -6797,7 +6798,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_confcall_e2e_badge_small" = "E2E Encrypted";
 "lng_confcall_e2e_about" = "These four emoji represent the call's encryption key. They must match for all participants and change when someone joins or leaves.";
 
-"lng_no_mic_permission" = "Telegram needs microphone access so that you can make calls and record voice messages.";
+"lng_no_mic_permission" = "TeleLink needs microphone access so that you can make calls and record voice messages.";
 "lng_player_message_today" = "today at {time}";
 "lng_player_message_yesterday" = "yesterday at {time}";
 "lng_player_message_date" = "{date} at {time}";

@@ -631,6 +631,28 @@ QImage Photo::prepareImageCacheWithLarge(QSize outer, Image *large) const {
 	const auto resize = large
 		? ::Media::Streaming::DecideFrameResize(outer, large->size())
 		: ::Media::Streaming::ExpandDecision();
+	if (large && !resize.expanding) {
+		// A small image: no blurred copy of it around (it looked like a
+		// gray square), the space around is transparent.
+		const auto ratio = style::DevicePixelRatio();
+		auto result = QImage(
+			outer * ratio,
+			QImage::Format_ARGB32_Premultiplied);
+		result.setDevicePixelRatio(ratio);
+		result.fill(Qt::transparent);
+		auto image = large->original().scaled(
+			resize.result * ratio,
+			Qt::IgnoreAspectRatio,
+			Qt::SmoothTransformation);
+		image.setDevicePixelRatio(ratio);
+		auto p = QPainter(&result);
+		p.drawImage(
+			(outer.width() - resize.result.width()) / 2,
+			(outer.height() - resize.result.height()) / 2,
+			image);
+		p.end();
+		return result;
+	}
 	return PrepareWithBlurredBackground(outer, resize, large, blurred);
 }
 

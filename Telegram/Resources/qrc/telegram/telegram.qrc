@@ -87,6 +87,7 @@
   </qresource>
   <qresource prefix="/mtslink">
     <file alias="emoji_ids.txt">../../mtslink_emoji_ids.txt</file>
+    <file alias="emoji_names.txt">../../mtslink_emoji_names.txt</file>
   </qresource>
   <qresource prefix="/langs">
     <file alias="ru.strings">../../langs/ru.strings</file>

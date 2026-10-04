@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "chat_helpers/stickers_list_footer.h"
+#include "mtslink/data_adapters.h"
 
 #include "chat_helpers/emoji_keywords.h"
 #include "chat_helpers/stickers_emoji_pack.h"
@@ -194,6 +195,15 @@ rpl::producer<std::vector<GifSection>> GifSectionsValue(
 				pushPlain(entry.emoji);
 				if (result.size() >= kEmojiSearchLimit) {
 					return result;
+				}
+			}
+			// MTS Link: no Telegram keywords, the names of the emoji.
+			for (const auto &text : MtsLink::searchEmojiByName(entry, exact)) {
+				if (const auto emoji = Ui::Emoji::Find(text)) {
+					pushPlain(emoji);
+					if (result.size() >= kEmojiSearchLimit) {
+						return result;
+					}
 				}
 			}
 		}

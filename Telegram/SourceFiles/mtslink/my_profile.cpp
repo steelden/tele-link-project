@@ -4,6 +4,8 @@ a desktop application based on Telegram Desktop.
 */
 #include "mtslink/my_profile.h"
 
+#include "data/data_user.h"
+
 #include "mtslink/session.h"
 #include "mtslink/rpc.h"
 #include "mtslink/data_adapters.h"
@@ -226,6 +228,11 @@ void loadMyProfile(not_null<Main::Session*> session) {
 					}
 					LOG(("MtsLink Profile: loaded, avatar=%1"
 						).arg(avatarFileId));
+					if (weak) {
+						// The own userpic may be restored from the local
+						// storage, the viewer needs its full size photo.
+						ensureUserpicFor(weak->user(), avatarFileId);
+					}
 				});
 		});
 	mts->rpc()->call(

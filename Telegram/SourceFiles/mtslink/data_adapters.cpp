@@ -45,6 +45,7 @@ based on Telegram Desktop.
 #include "data/notify/data_notify_settings.h"
 #include "data/notify/data_peer_notify_settings.h"
 #include "core/application.h"
+#include "lang/lang_instance.h"
 #include "calls/calls_instance.h"
 #include "window/notifications_manager.h"
 #include "base/unixtime.h"
@@ -260,6 +261,53 @@ void ensureEmojiMapsInitialized() {
 	}
 }
 PeerId FavoritesPeerIdValue = PeerId(0);
+
+// The names of the catalogue emoji (Unicode CLDR annotations, ru and en):
+// the emoji keywords of Telegram come by MTProto, there are none here.
+struct EmojiNames {
+	QString emoji;
+	QStringList keywords; // The name first, normalized.
+	QString name; // The name in the current language.
+};
+
+[[nodiscard]] QString NormalizeEmojiName(QString text) {
+	return text.trimmed().toLower().replace(QChar(0x0451), QChar(0x0435));
+}
+
+[[nodiscard]] const std::vector<EmojiNames> &EmojiNamesList() {
+	static auto result = [] {
+		auto list = std::vector<EmojiNames>();
+		auto file = QFile(u":/mtslink/emoji_names.txt"_q);
+		if (!file.open(QIODevice::ReadOnly)) {
+			return list;
+		}
+		const auto ru = Lang::GetInstance().id().startsWith(u"ru"_q);
+		for (const auto &line : QString::fromUtf8(
+				file.readAll()).split(QChar(10))) {
+			const auto parts = line.split(QChar(9));
+			if (parts.size() < 3 || parts[0].isEmpty()) {
+				continue;
+			}
+			auto entry = EmojiNames{ .emoji = parts[0] };
+			const auto names = std::array{
+				parts[ru ? 1 : 2].split(QChar('|'), Qt::SkipEmptyParts),
+				parts[ru ? 2 : 1].split(QChar('|'), Qt::SkipEmptyParts),
+			};
+			entry.name = names[0].isEmpty()
+				? (names[1].isEmpty() ? QString() : names[1].front())
+				: names[0].front();
+			for (const auto &list : names) {
+				for (const auto &word : list) {
+					entry.keywords.push_back(NormalizeEmojiName(word));
+				}
+			}
+			list.push_back(std::move(entry));
+		}
+		LOG(("MtsLink Emoji: %1 emoji names").arg(list.size()));
+		return list;
+	}();
+	return result;
+}
 
 struct PendingChatEvent {
 	QString dst;
@@ -635,13 +683,31 @@ void ensureUserpicPhoto(
 		crl::time(0));
 }
 
+// The server gives an avatarFileId to users without an avatar too, the
+// file is just not on the CDN (404): such users have no userpic.
+QSet<QString> MissingAvatarFiles;
+
+void ClearUserpic(not_null<PeerData*> peer) {
+	peer->setUserpic(PhotoId(), ImageLocation(), false);
+	peer->session().changes().peerUpdated(
+		peer,
+		Data::PeerUpdate::Flag::Photo);
+}
+QHash<PeerId, QString> UserpicFileIds;
+
 void applyUserpic(
 		not_null<PeerData*> peer,
 		const QString &fileId,
 		int line) {
 	if (fileId.isEmpty()) {
 		return;
+	} else if (MissingAvatarFiles.contains(fileId)) {
+		if (peer->userpicPhotoId() || peer->userpicPhotoUnknown()) {
+			ClearUserpic(peer);
+		}
+		return;
 	}
+	UserpicFileIds.insert(peer->id, fileId);
 	const auto photoId = PhotoId(uuidToBareId(fileId));
 	ensureUserpicPhoto(peer, photoId, fileId);
 	if (peer->userpicPhotoId() == photoId) {
@@ -661,6 +727,25 @@ void applyUserpic(
 [[nodiscard]] bool HasKnownUserpic(not_null<PeerData*> peer) {
 	return !peer->userpicPhotoUnknown() && peer->userpicPhotoId();
 }
+
+} // namespace
+
+// A userpic restored from the local storage (the self user) or set before:
+// the full size photo for the media viewer is created for it as well.
+void ensureUserpicFor(not_null<PeerData*> peer, const QString &fileId) {
+	if (fileId.isEmpty()) {
+		return;
+	}
+	const auto photoId = PhotoId(uuidToBareId(fileId));
+	if (peer->userpicPhotoId() == photoId) {
+		UserpicFileIds.insert(peer->id, fileId);
+		ensureUserpicPhoto(peer, photoId, fileId);
+	} else if (!HasKnownUserpic(peer)) {
+		applyUserpic(peer, fileId, __LINE__);
+	}
+}
+
+namespace {
 
 ChatId extractChatIdFromDst(const QString &dst) {
 	const auto chatPrefix = QStringLiteral("chat-");
@@ -2293,6 +2378,8 @@ void connectToSession(
 	mtsSession->users()->loadOrganizationMembers();
 	// The titles of the organization profile fields, for the profiles.
 	requestProfileFields(mainSession);
+	// The default notification settings are kept locally.
+	restoreDefaultNotify(mainSession);
 }
 
 BareId uuidToBareId(const QString &uuid) {
@@ -2350,6 +2437,66 @@ ChatType chatTypeForPeer(PeerId peerId) {
 
 PeerId favoritesPeerId() {
 	return FavoritesPeerIdValue;
+}
+
+std::vector<QString> searchEmojiByName(const QString &query, bool exact) {
+	const auto normalized = NormalizeEmojiName(query);
+	if (normalized.isEmpty()) {
+		return {};
+	}
+	// 0: the name, 1: a keyword, 2: a word of a keyword (prefix matches).
+	auto scored = std::vector<std::pair<int, int>>();
+	const auto &list = EmojiNamesList();
+	for (auto i = 0, count = int(list.size()); i != count; ++i) {
+		auto best = -1;
+		const auto &keywords = list[i].keywords;
+		for (auto k = 0, kc = int(keywords.size()); k != kc; ++k) {
+			const auto &keyword = keywords[k];
+			if (exact) {
+				if (keyword == normalized) {
+					best = 0;
+					break;
+				}
+				continue;
+			}
+			auto score = -1;
+			if (keyword.startsWith(normalized)) {
+				score = (k == 0) ? 0 : 1;
+			} else {
+				for (const auto &word : keyword.split(QChar(' '))) {
+					if (word.startsWith(normalized)) {
+						score = 2;
+						break;
+					}
+				}
+			}
+			if (score >= 0 && (best < 0 || score < best)) {
+				best = score;
+			}
+		}
+		if (best >= 0) {
+			scored.push_back({ best, i });
+		}
+	}
+	ranges::stable_sort(scored, ranges::less(), [](const auto &p) {
+		return p.first;
+	});
+	auto result = std::vector<QString>();
+	result.reserve(scored.size());
+	for (const auto &[score, index] : scored) {
+		result.push_back(list[index].emoji);
+	}
+	return result;
+}
+
+QString emojiName(const QString &emoji) {
+	const auto key = QString(emoji).remove(QChar(0xFE0F));
+	for (const auto &entry : EmojiNamesList()) {
+		if (entry.emoji == key) {
+			return entry.name;
+		}
+	}
+	return QString();
 }
 
 bool isThreadPeer(PeerId peerId) {
@@ -3116,7 +3263,101 @@ rpl::producer<QString> profileFieldTitle(const QString &title) {
 	return rpl::single(title);
 }
 
+namespace {
+
+[[nodiscard]] QString DefaultNotifyKey(Data::DefaultNotify type) {
+	switch (type) {
+	case Data::DefaultNotify::User: return u"notifyUsers"_q;
+	case Data::DefaultNotify::Group: return u"notifyGroups"_q;
+	case Data::DefaultNotify::Broadcast: return u"notifyChannels"_q;
+	}
+	return QString();
+}
+
+} // namespace
+
+void saveDefaultNotify(
+		Data::DefaultNotify type,
+		const Data::PeerNotifySettings &value) {
+	auto settings = readLocalSettings();
+	auto object = QJsonObject();
+	object.insert(u"muteUntil"_q, qint64(value.muteUntil().value_or(0)));
+	if (const auto silent = value.silentPosts()) {
+		object.insert(u"silent"_q, *silent);
+	}
+	settings.insert(DefaultNotifyKey(type), object);
+	writeLocalSettings(settings);
+	LOG(("MtsLink Notify: default %1 saved, mute until %2"
+		).arg(DefaultNotifyKey(type)
+		).arg(value.muteUntil().value_or(0)));
+}
+
+void restoreDefaultNotify(not_null<Main::Session*> session) {
+	const auto settings = readLocalSettings();
+	using Type = Data::DefaultNotify;
+	for (const auto type : { Type::User, Type::Group, Type::Broadcast }) {
+		const auto object = settings.value(DefaultNotifyKey(type)).toObject();
+		if (object.isEmpty()) {
+			continue;
+		}
+		using Flag = MTPDpeerNotifySettings::Flag;
+		auto flags = Flag::f_mute_until;
+		const auto silent = object.value(u"silent"_q);
+		if (silent.isBool()) {
+			flags |= Flag::f_silent;
+		}
+		session->data().notifySettings().apply(
+			type,
+			MTP_peerNotifySettings(
+				MTP_flags(flags),
+				MTPBool(),
+				MTP_bool(silent.toBool()),
+				MTP_int(object.value(u"muteUntil"_q).toInteger()),
+				MTPNotificationSound(),
+				MTPNotificationSound(),
+				MTPNotificationSound(),
+				MTPBool(),
+				MTPBool(),
+				MTPNotificationSound(),
+				MTPNotificationSound(),
+				MTPNotificationSound()));
+	}
+}
+
 void requestUserDetails(not_null<UserData*> user) {
+	// The profile shows the userpic large and opens it by a click: the
+	// avatar file is checked to exist, else the user has no userpic.
+	if (const auto fileId = UserpicFileIds.value(user->id)
+		; !fileId.isEmpty()
+		&& user->userpicPhotoId() == PhotoId(uuidToBareId(fileId))) {
+		static auto checked = QSet<QString>();
+		if (!checked.contains(fileId)) {
+			checked.insert(fileId);
+			static const auto manager = new QNetworkAccessManager();
+			const auto url = avatarCdnBase() + fileId + u"_s.jpg"_q;
+			const auto reply = manager->head(QNetworkRequest(QUrl(url)));
+			const auto weak = base::make_weak(&user->session());
+			const auto peerId = user->id;
+			QObject::connect(reply, &QNetworkReply::finished, [=] {
+				reply->deleteLater();
+				const auto status = reply->attribute(
+					QNetworkRequest::HttpStatusCodeAttribute).toInt();
+				if (status != 404) {
+					return;
+				}
+				LOG(("MtsLink Userpic: no avatar file %1, no userpic"
+					).arg(fileId));
+				MissingAvatarFiles.insert(fileId);
+				if (const auto strong = weak.get()) {
+					if (const auto peer = strong->data().peerLoaded(peerId)) {
+						if (UserpicFileIds.value(peerId) == fileId) {
+							ClearUserpic(peer);
+						}
+					}
+				}
+			});
+		}
+	}
 	const auto session = &user->session();
 	requestProfileFields(session);
 	const auto mts = session->account().mtsLinkSession();
@@ -3179,6 +3420,8 @@ void applyUserData(
 	// sets a missing userpic, a change comes with MemberProfileChanged.
 	if (profileChanged || !HasKnownUserpic(user)) {
 		applyUserpic(user, src.avatarFileId, __LINE__);
+	} else {
+		ensureUserpicFor(user, src.avatarFileId);
 	}
 
 
