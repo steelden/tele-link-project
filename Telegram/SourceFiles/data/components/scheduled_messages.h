@@ -57,6 +57,9 @@ public:
 
 	void clear();
 
+	// MTS Link: the list is requested again after a scheduler event.
+	void mtsLinkRefresh(not_null<History*> history);
+
 private:
 	using OwnedItem = std::unique_ptr<HistoryItem, HistoryItem::Destroyer>;
 	struct List {
@@ -66,12 +69,16 @@ private:
 	struct Request {
 		mtpRequestId requestId = 0;
 		crl::time lastReceived = 0;
+		bool again = false;
 	};
 
 	void request(not_null<History*> history);
 	void parse(
 		not_null<History*> history,
 		const MTPmessages_Messages &list);
+	void parseMessages(
+		not_null<History*> history,
+		const QVector<MTPMessage> &messages);
 	HistoryItem *append(
 		not_null<History*> history,
 		List &list,

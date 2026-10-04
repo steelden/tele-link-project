@@ -446,6 +446,14 @@ void EditMessageWithUploadedMedia(
 void RescheduleMessage(
 		not_null<HistoryItem*> item,
 		SendOptions options) {
+	if (MtsLink::hasChatId(item->history()->peer->id)) {
+		const auto session = &item->history()->session();
+		MtsLink::rescheduleMessage(
+			session,
+			session->scheduledMessages().lookupId(item),
+			options.scheduled);
+		return;
+	}
 	if (item->richPage()) {
 		const auto session = &item->history()->session();
 		const auto itemId = item->fullId();
@@ -553,6 +561,19 @@ mtpRequestId EditTextMessage(
 				const auto content = MtsLink::convertMentionsForSending(
 					textWithTags,
 					&item->history()->session());
+				if (item->isScheduled()) {
+					// No editing in MessageScheduler: created again.
+					const auto session = &item->history()->session();
+					MtsLink::rescheduleMessage(
+						session,
+						session->scheduledMessages().lookupId(item),
+						item->date(),
+						content.text);
+					if (done) {
+						done(0);
+					}
+					return 0;
+				}
 				mts->sending()->editMessage(
 					chatId,
 					mtsId,

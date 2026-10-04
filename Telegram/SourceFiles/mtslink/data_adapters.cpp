@@ -9,6 +9,8 @@ based on Telegram Desktop.
 #include "mtslink/call_window.h"
 
 #include "main/main_session.h"
+#include "data/components/scheduled_messages.h"
+#include "api/api_text_entities.h"
 #include "main/main_account.h"
 #include "storage/storage_account.h"
 #include "data/data_session.h"
@@ -711,6 +713,24 @@ QHash<PeerId, QString> UserpicFileIds;
 void applyUserpic(
 		not_null<PeerData*> peer,
 		const QString &fileId,
+		int line);
+
+// A thread in the chats list shows the userpic of its root message author.
+void applyUserpicToThreads(
+		not_null<PeerData*> user,
+		const QString &fileId) {
+	for (auto i = ThreadAuthorMap.cbegin(); i != ThreadAuthorMap.cend(); ++i) {
+		if (i.value() != user->id) {
+			continue;
+		} else if (const auto thread = user->owner().peerLoaded(i.key())) {
+			applyUserpic(thread, fileId, __LINE__);
+		}
+	}
+}
+
+void applyUserpic(
+		not_null<PeerData*> peer,
+		const QString &fileId,
 		int line) {
 	if (fileId.isEmpty()) {
 		return;
@@ -718,7 +738,13 @@ void applyUserpic(
 		if (peer->userpicPhotoId() || peer->userpicPhotoUnknown()) {
 			ClearUserpic(peer);
 		}
+		if (peer->isUser()) {
+			applyUserpicToThreads(peer, fileId);
+		}
 		return;
+	}
+	if (peer->isUser()) {
+		applyUserpicToThreads(peer, fileId);
 	}
 	UserpicFileIds.insert(peer->id, fileId);
 	const auto photoId = PhotoId(uuidToBareId(fileId));
@@ -1845,7 +1871,63 @@ void applyThreadsList(
 			uuidToBareId(thread.id) & 0x7FFFFFFFLL);
 
 		const auto msgText = thread.message.value("text").toString();
-		if (!msgText.isEmpty()) {
+		// No "type" in the thread message, a call has the call metadata.
+		if (thread.message.value("metadata").toObject().value(
+				"type").toString() == u"CallMetadata"_q) {
+			// The thread of a call: the call media in the preview.
+			const auto v = thread.message.value("metadata").toObject().value(
+				"value").toObject();
+			const auto meta = Api::CallMetadata{
+				.status = v.value("status").toString(),
+				.joinLink = v.value("joinLink").toString(),
+				.webinarEventId = v.value("webinarEventId").toString(),
+				.duration = int(v.value("duration").toDouble() / 1000),
+				.statusReason = v.value("statusReasonV2").toString(
+					v.value("statusReason").toString()),
+			};
+			const auto authorUuid
+				= thread.message.value("authorId").toString();
+			const auto mts = session->account().mtsLinkSession();
+			const auto out = mts
+				&& !authorUuid.isEmpty()
+				&& (authorUuid == mts->userId());
+			auto titleMeta = meta;
+			titleMeta.duration = 0;
+			const auto call = Data::MtsLinkCall{
+				.title = buildCallServiceText(
+					titleMeta,
+					out,
+					isPersonalChat(chatIdToPeerId(thread.chatId))).text.text,
+				.duration = (meta.status == u"Ended"_q) ? meta.duration : 0,
+			};
+			auto item = session->data().message(channel->id, rootId);
+			if (!item) {
+				auto flags = MessageFlags();
+				auto fromId = PeerId();
+				if (!authorUuid.isEmpty()) {
+					fromId = PeerId(::UserId(uuidToBareId(authorUuid)));
+					flags |= MessageFlag::HasFromId;
+				}
+				if (out) {
+					flags |= MessageFlag::Outgoing;
+				}
+				item = history->addNewLocalMessage(
+					HistoryItemCommonFields{
+						.id = rootId,
+						.flags = flags,
+						.from = fromId,
+						.date = date,
+					},
+					TextWithEntities(),
+					MTP_messageMediaEmpty());
+			}
+			if (item) {
+				item->setMtsLinkMedia(std::make_unique<Data::MediaMtsLinkCall>(
+					item,
+					call));
+				item->invalidateChatListEntry();
+			}
+		} else if (!msgText.isEmpty()) {
 			const auto authorUuid =
 				thread.message.value("authorId").toString();
 			PeerId fromId;
@@ -1911,7 +1993,12 @@ void applyThreadsList(
 			thread.message.value("authorId").toString();
 		if (!authorUuidForMap.isEmpty()) {
 			const auto authorBare = uuidToBareId(authorUuidForMap);
-			ThreadAuthorMap.insert(peerId, PeerId(::UserId(authorBare)));
+			const auto authorPeerId = PeerId(::UserId(authorBare));
+			ThreadAuthorMap.insert(peerId, authorPeerId);
+			const auto authorFileId = UserpicFileIds.value(authorPeerId);
+			if (!authorFileId.isEmpty()) {
+				applyUserpic(channel, authorFileId, __LINE__);
+			}
 		}
 
 		// Keep exactly the server order: the list comes newest first, so
@@ -2363,6 +2450,8 @@ void connectToSession(
 				const QJsonObject &param) {
 			if (name == "ChatEvent") {
 				handleChatEvent(mainSession, dst, param);
+			} else if (name == "MessageSchedulerEvent") {
+				handleSchedulerEvent(mainSession, param);
 			} else if (name == "TypingEvent") {
 				handleTypingEvent(mainSession, mtsSession, param);
 			} else if (name == "OrganizationEvent") {
@@ -2476,6 +2565,12 @@ void connectToSession(
 						? history->lastMessage()
 						: nullptr) {
 					last->invalidateChatListEntry();
+				}
+				if (history) {
+					// The letters of the author in the thread userpic.
+					mainSession->changes().peerUpdated(
+						history->peer,
+						Data::PeerUpdate::Flag::Photo);
 				}
 			}
 			const auto pending = PendingUserEvents.take(profile.userId);
@@ -8188,6 +8283,259 @@ rpl::producer<Ui::GroupCallBarContent> activeCallBarContent(PeerId peerId) {
 			.shown = hasCall,
 		};
 	});
+}
+
+namespace {
+
+struct ScheduledInfo {
+	QString id;
+	QString chatId;
+	QString markdown;
+	QStringList fileIds;
+};
+QHash<MsgId, ScheduledInfo> ScheduledById; // By the remote id.
+
+[[nodiscard]] MsgId ScheduledRemoteId(const QString &uuid) {
+	return MsgId(int64(uuidToBareId(uuid) & 0x3FFFFFFFULL) + 1);
+}
+
+[[nodiscard]] MTPMessage ScheduledToMTP(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		MsgId remoteId,
+		const QJsonObject &obj) {
+	const auto date = TimeId(
+		qint64(obj.value(u"scheduledAt"_q).toDouble()) / 1000);
+	const auto text = parseMentionedText(
+		obj.value(u"text"_q).toString(),
+		obj.value(u"markdown"_q).toString(),
+		{},
+		session);
+	auto media = MTPMessageMedia(MTP_messageMediaEmpty());
+	const auto files = obj.value(u"files"_q).toArray();
+	if (!files.isEmpty()) {
+		media = buildFileMedia(
+			session,
+			Api::ParseFileData(files.first().toObject()),
+			date);
+	}
+	using Flag = MTPDmessage::Flag;
+	const auto flags = Flag::f_entities
+		| Flag::f_from_id
+		| Flag::f_out
+		| Flag::f_from_scheduled
+		| (files.isEmpty() ? Flag(0) : Flag::f_media);
+	return MTP_message(
+		MTP_flags(flags),
+		MTP_int(remoteId.bare),
+		peerToMTP(session->userPeerId()),
+		MTPint(), // from_boosts_applied
+		MTPstring(), // from_rank
+		peerToMTP(peerId),
+		MTPPeer(), // saved_peer_id
+		MTPMessageFwdHeader(),
+		MTPlong(), // via_bot_id
+		MTPlong(), // via_business_bot_id
+		MTPPeer(), // guestchat_via_from
+		MTPMessageReplyHeader(),
+		MTP_int(date),
+		MTP_string(text.text),
+		media,
+		MTPReplyMarkup(),
+		::Api::EntitiesToMTP(session, text.entities),
+		MTPint(), // views
+		MTPint(), // forwards
+		MTPMessageReplies(),
+		MTPint(), // edit_date
+		MTPstring(), // post_author
+		MTPlong(), // grouped_id
+		MTPMessageReactions(),
+		MTPVector<MTPRestrictionReason>(),
+		MTPint(), // ttl_period
+		MTPint(), // quick_reply_shortcut_id
+		MTPlong(), // effect
+		MTPFactCheck(),
+		MTPint(), // report_delivery_until_date
+		MTPlong(), // paid_message_stars
+		MTPSuggestedPost(),
+		MTPint(), // schedule_repeat_period
+		MTPstring(), // summary_from_language
+		MTPRichMessage());
+}
+
+} // namespace
+
+void requestScheduledMessages(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		Fn<void(QVector<MTPMessage>)> done) {
+	const auto mts = session->account().mtsLinkSession();
+	const auto chatId = peerIdToChatId(peerId);
+	if (!mts || !mts->rpc() || chatId.isEmpty()) {
+		done({});
+		return;
+	}
+	const auto weak = base::make_weak(session);
+	mts->rpc()->call(
+		u"MessageScheduler.GetMessagesScheduledByFilter"_q,
+		QJsonObject{
+			{ u"type"_q, u"GetMessagesScheduledFilter"_q },
+			{ u"value"_q, QJsonObject{
+				{ u"chatId"_q, chatId },
+				{ u"limit"_q, 100 },
+			} },
+		},
+		[=](const QJsonObject &result) {
+			const auto strong = weak.get();
+			if (!strong) {
+				return;
+			}
+			auto list = QVector<MTPMessage>();
+			const auto messages = result.value(u"value"_q).toObject().value(
+				u"messages"_q).toArray();
+			for (const auto &value : messages) {
+				const auto obj = value.toObject();
+				const auto id = obj.value(u"id"_q).toString();
+				if (id.isEmpty()
+					|| obj.value(u"status"_q).toString(u"Scheduled"_q)
+						!= u"Scheduled"_q) {
+					continue;
+				}
+				const auto remoteId = ScheduledRemoteId(id);
+				auto fileIds = QStringList();
+				for (const auto &file : obj.value(u"files"_q).toArray()) {
+					fileIds.push_back(
+						file.toObject().value(u"id"_q).toString());
+				}
+				ScheduledById.insert(remoteId, ScheduledInfo{
+					.id = id,
+					.chatId = chatId,
+					.markdown = obj.value(u"markdown"_q).toString(
+						obj.value(u"text"_q).toString()),
+					.fileIds = fileIds,
+				});
+				list.push_back(ScheduledToMTP(strong, peerId, remoteId, obj));
+			}
+			LOG(("MtsLink Scheduled: %1 messages in %2"
+				).arg(list.size()
+				).arg(chatId));
+			done(std::move(list));
+		});
+}
+
+void createScheduledMessage(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		const QString &markdown,
+		const QStringList &fileIds,
+		TimeId date) {
+	const auto mts = session->account().mtsLinkSession();
+	const auto chatId = peerIdToChatId(peerId);
+	if (!mts || !mts->rpc() || chatId.isEmpty()) {
+		return;
+	}
+	auto files = QJsonArray();
+	for (const auto &id : fileIds) {
+		files.push_back(id);
+	}
+	LOG(("MtsLink Scheduled: create in %1 at %2 files=%3"
+		).arg(chatId
+		).arg(date
+		).arg(fileIds.size()));
+	mts->rpc()->call(
+		u"MessageScheduler.CreateMessageScheduled"_q,
+		QJsonObject{
+			{ u"chatId"_q, chatId },
+			{ u"text"_q, markdown },
+			{ u"isMarkdown"_q, true },
+			{ u"fileIds"_q, files },
+			{ u"scheduledAt"_q, double(qint64(date) * 1000) },
+		},
+		[](const QJsonObject &) {});
+}
+
+void deleteScheduledMessages(
+		not_null<Main::Session*> session,
+		const QVector<MsgId> &remoteIds) {
+	const auto mts = session->account().mtsLinkSession();
+	if (!mts || !mts->rpc()) {
+		return;
+	}
+	for (const auto remoteId : remoteIds) {
+		const auto info = ScheduledById.value(remoteId);
+		if (info.id.isEmpty()) {
+			continue;
+		}
+		mts->rpc()->call(
+			u"MessageScheduler.DeleteMessageScheduled"_q,
+			QJsonObject{ { u"id"_q, info.id } },
+			[](const QJsonObject &) {});
+	}
+}
+
+void sendScheduledMessagesNow(
+		not_null<Main::Session*> session,
+		const QVector<MsgId> &remoteIds) {
+	const auto mts = session->account().mtsLinkSession();
+	if (!mts || !mts->rpc()) {
+		return;
+	}
+	for (const auto remoteId : remoteIds) {
+		const auto info = ScheduledById.value(remoteId);
+		if (info.id.isEmpty()) {
+			continue;
+		}
+		mts->rpc()->call(
+			u"MessageScheduler.SendMessageScheduledNow"_q,
+			QJsonObject{ { u"id"_q, info.id } },
+			[](const QJsonObject &) {});
+	}
+}
+
+void rescheduleMessage(
+		not_null<Main::Session*> session,
+		MsgId remoteId,
+		TimeId date,
+		std::optional<QString> markdown) {
+	const auto mts = session->account().mtsLinkSession();
+	const auto info = ScheduledById.value(remoteId);
+	if (!mts || !mts->rpc() || info.id.isEmpty()) {
+		return;
+	}
+	const auto peerId = chatIdToPeerId(info.chatId);
+	const auto text = markdown.value_or(info.markdown);
+	const auto weak = base::make_weak(session);
+	mts->rpc()->call(
+		u"MessageScheduler.DeleteMessageScheduled"_q,
+		QJsonObject{ { u"id"_q, info.id } },
+		[=](const QJsonObject &) {
+			if (const auto strong = weak.get()) {
+				createScheduledMessage(
+					strong,
+					peerId,
+					text,
+					info.fileIds,
+					date);
+			}
+		});
+}
+
+void handleSchedulerEvent(
+		not_null<Main::Session*> session,
+		const QJsonObject &param) {
+	const auto type = param.value(u"type"_q).toString();
+	const auto value = param.value(u"value"_q).toObject();
+	const auto chatId = value.value(u"chatId"_q).toString(
+		value.value(u"messageScheduled"_q).toObject().value(
+			u"chatId"_q).toString());
+	LOG(("MtsLink Scheduled: %1 in %2").arg(type, chatId));
+	if (chatId.isEmpty()) {
+		return;
+	}
+	const auto peerId = chatIdToPeerId(chatId);
+	if (const auto history = session->data().historyLoaded(peerId)) {
+		session->scheduledMessages().mtsLinkRefresh(history);
+	}
 }
 
 } // namespace MtsLink

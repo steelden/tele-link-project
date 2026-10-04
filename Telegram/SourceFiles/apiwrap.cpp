@@ -4754,6 +4754,15 @@ void ApiWrap::sendMessage(
 		if (content.text.isEmpty()) {
 			return;
 		}
+		if (const auto scheduled = message.action.options.scheduled) {
+			MtsLink::createScheduledMessage(
+				_session,
+				peer->id,
+				content.text,
+				QStringList(),
+				scheduled);
+			return;
+		}
 		auto replyMtsId = QString();
 		if (message.action.replyTo.messageId) {
 			replyMtsId = MtsLink::msgIdToMtsLinkId(

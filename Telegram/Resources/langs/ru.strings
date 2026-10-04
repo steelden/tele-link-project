@@ -1967,8 +1967,8 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_profile_changed_photo_link" = "Настройки";
 "lng_profile_action_short_message" = "Чат";
 "lng_profile_action_short_channel" = "Канал";
-"lng_profile_action_short_mute" = "Звук";
-"lng_profile_action_short_unmute" = "Звук";
+"lng_profile_action_short_mute" = "Выкл. звук";
+"lng_profile_action_short_unmute" = "Вкл. звук";
 "lng_profile_action_short_call" = "Звонок";
 "lng_profile_action_short_discuss" = "Обсуждение";
 "lng_profile_action_short_gift" = "Подарок";

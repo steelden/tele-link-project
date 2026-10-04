@@ -220,6 +220,8 @@ void Session::subscribeToEvents() {
 	_rpc.call("Organization.Subscribe", orgParam, onDone);
 	_rpc.call("Counters.GetCounters", QJsonObject{}, onDone);
 	_rpc.call("Chat.Subscribe", orgParam, onDone);
+	// The events of the scheduled messages of the user.
+	_rpc.call("MessageScheduler.Subscribe", QJsonObject{}, nullptr);
 	_rpc.call("Notification.Subscribe", QJsonObject{}, onDone);
 
 	_rpc.call(

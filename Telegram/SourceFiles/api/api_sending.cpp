@@ -1374,6 +1374,39 @@ void SendConfirmedFile(
 		}
 
 		const auto caption = file->caption.text.trimmed();
+		if (const auto scheduled = file->to.options.scheduled) {
+			// Uploaded now, the message is sent by the scheduler.
+			const auto done = [=](const MtsLink::Api::UploadResult &result) {
+				MtsLink::createScheduledMessage(
+					session,
+					file->to.peer,
+					caption,
+					QStringList{ result.id },
+					scheduled);
+			};
+			const auto fail = [=](const QString &error) {
+				LOG(("MtsLink Files: upload failed for '%1': %2")
+					.arg(file->filename, error));
+			};
+			if (voice) {
+				mts->files()->uploadVoice(
+					filename,
+					fileContent,
+					file->filemime,
+					voiceWaveform,
+					voiceDuration,
+					done,
+					fail);
+			} else {
+				mts->files()->uploadFile(
+					filename,
+					fileContent,
+					file->filemime,
+					done,
+					fail);
+			}
+			return;
+		}
 		const auto replyMsgId = [&] {
 			if (!file->to.replyTo.messageId) {
 				return QString();

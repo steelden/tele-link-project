@@ -297,6 +297,10 @@ TimeId DefaultScheduleTime() {
 }
 
 bool CanScheduleUntilOnline(not_null<PeerData*> peer) {
+	// No "send when online" in MTS Link.
+	if (peer) {
+		return false;
+	}
 	if (const auto user = peer->asUser()) {
 		return !user->isSelf()
 			&& !user->isBot()
@@ -426,11 +430,7 @@ void ScheduleBox(
 			style);
 	}
 
-	box->addTopButton(object_ptr<NotifyToggleButton>(
-		box,
-		box,
-		*style.topButtonStyle,
-		silent));
+	// No silent sending in MTS Link.
 }
 
 } // namespace HistoryView

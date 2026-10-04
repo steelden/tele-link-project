@@ -744,12 +744,7 @@ FillMenuResult FillSendMenu(
 		? *iconsOverride
 		: st::defaultComposeIcons;
 
-	if (sending && type != Type::Reminder) {
-		menu->addAction(
-			tr::lng_send_silent_message(tr::now),
-			[=] { action({ Api::SendOptions{ .silent = true } }, details); },
-			&icons.menuMute);
-	}
+	// No silent sending in MTS Link.
 	if (sending && type != Type::SilentOnly) {
 		menu->addAction(
 			((type == Type::Reminder)

@@ -1050,6 +1050,14 @@ void Histories::deleteMessages(const MessageIdsList &ids, bool revoke) {
 		history->owner().histories().deleteMessages(history, ids, revoke);
 	}
 	for (const auto &[peer, ids] : scheduledIdsByPeer) {
+		if (MtsLink::hasChatId(peer->id)) {
+			auto remoteIds = QVector<MsgId>();
+			for (const auto &id : ids) {
+				remoteIds.push_back(MsgId(id.v));
+			}
+			MtsLink::deleteScheduledMessages(&peer->session(), remoteIds);
+			continue;
+		}
 		peer->session().api().request(MTPmessages_DeleteScheduledMessages(
 			peer->input(),
 			MTP_vector<MTPint>(ids)

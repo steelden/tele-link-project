@@ -376,13 +376,22 @@ void PeerData::updateNameDelayed(
 }
 
 not_null<Ui::EmptyUserpic*> PeerData::ensureEmptyUserpic() const {
-	if (!_userpicEmpty) {
-		const auto user = asUser();
+	// MTS Link: a thread shows the letters of its root message author.
+	const auto author = MtsLink::isThreadPeer(id)
+		? owner().peerLoaded(MtsLink::threadAuthorPeerId(id))
+		: nullptr;
+	const auto source = (author && !author->name().isEmpty())
+		? author
+		: this;
+	const auto user = source->asUser();
+	const auto name = (user && user->isInaccessible())
+		? Ui::EmptyUserpic::InaccessibleName()
+		: source->name();
+	if (!_userpicEmpty || _userpicEmptyName != name) {
+		_userpicEmptyName = name;
 		_userpicEmpty = std::make_unique<Ui::EmptyUserpic>(
-			Ui::EmptyUserpic::UserpicColor(colorIndex()),
-			((user && user->isInaccessible())
-				? Ui::EmptyUserpic::InaccessibleName()
-				: name()));
+			Ui::EmptyUserpic::UserpicColor(source->colorIndex()),
+			name);
 	}
 	return _userpicEmpty.get();
 }

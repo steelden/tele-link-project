@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_components.h"
 #include "history/history_item_helpers.h"
 #include "apiwrap.h"
+#include "mtslink/data_adapters.h"
 
 namespace Data {
 namespace {
@@ -136,7 +137,9 @@ ScheduledMessages::~ScheduledMessages() {
 void ScheduledMessages::clear() {
 	_lifetime.destroy();
 	for (const auto &request : base::take(_requests)) {
-		_session->api().request(request.second.requestId).cancel();
+		if (request.second.requestId > 0) {
+			_session->api().request(request.second.requestId).cancel();
+		}
 	}
 	base::take(_data);
 }
@@ -485,8 +488,39 @@ Data::MessagesSlice ScheduledMessages::list(
 	return result;
 }
 
+void ScheduledMessages::mtsLinkRefresh(not_null<History*> history) {
+	auto &request = _requests[history];
+	request.lastReceived = 0;
+	if (request.requestId) {
+		request.again = true;
+	} else {
+		this->request(history);
+	}
+}
+
 void ScheduledMessages::request(not_null<History*> history) {
 	const auto peer = history->peer;
+	if (MtsLink::hasChatId(peer->id)) {
+		auto &request = _requests[history];
+		if (request.requestId || TooEarlyForRequest(request.lastReceived)) {
+			return;
+		}
+		request.requestId = -1; // Not an MTProto request.
+		const auto session = _session;
+		MtsLink::requestScheduledMessages(_session, peer->id, [=](
+				QVector<MTPMessage> messages) {
+			if (!session->data().historyLoaded(history->peer->id)) {
+				return;
+			}
+			parseMessages(history, messages);
+			auto &request = _requests[history];
+			if (base::take(request.again)) {
+				request.lastReceived = 0;
+				this->request(history);
+			}
+		});
+		return;
+	}
 	if (peer->isBroadcast() && !Data::CanSendAnything(peer)) {
 		return;
 	}
@@ -505,6 +539,36 @@ void ScheduledMessages::request(not_null<History*> history) {
 	}).fail([=] {
 		_requests.remove(history);
 	}).send();
+}
+
+void ScheduledMessages::parseMessages(
+		not_null<History*> history,
+		const QVector<MTPMessage> &messages) {
+	auto &request = _requests[history];
+	request.lastReceived = crl::now();
+	request.requestId = 0;
+	if (!_clearTimer.isActive()) {
+		_clearTimer.callOnce(kRequestTimeLimit * 2);
+	}
+	if (messages.isEmpty()) {
+		clearNotSending(history);
+		return;
+	}
+	auto received = base::flat_set<not_null<HistoryItem*>>();
+	auto clear = base::flat_set<not_null<HistoryItem*>>();
+	auto &list = _data.emplace(history, List()).first->second;
+	for (const auto &message : messages) {
+		if (const auto item = append(history, list, message)) {
+			received.emplace(item);
+		}
+	}
+	for (const auto &owned : list.items) {
+		const auto item = owned.get();
+		if (!item->isSending() && !received.contains(item)) {
+			clear.emplace(item);
+		}
+	}
+	updated(history, received, clear);
 }
 
 void ScheduledMessages::parse(

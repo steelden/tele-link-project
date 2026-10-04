@@ -4116,6 +4116,17 @@ base::weak_qptr<Ui::BoxContent> ShowSendNowMessagesBox(
 					MTP_int(session->scheduledMessages().lookupId(item)));
 			}
 		}
+		if (MtsLink::hasChatId(history->peer->id)) {
+			auto remoteIds = QVector<MsgId>();
+			for (const auto &id : ids) {
+				remoteIds.push_back(MsgId(id.v));
+			}
+			MtsLink::sendScheduledMessagesNow(session, remoteIds);
+			if (callback) {
+				callback();
+			}
+			return;
+		}
 		session->api().request(MTPmessages_SendScheduledMessages(
 			history->peer->input(),
 			MTP_vector<MTPint>(ids)

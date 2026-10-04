@@ -175,6 +175,34 @@ void loadCallMaterialsFromCache(
 	const QString &eventId,
 	Fn<void(bool done, QList<Api::MessageData> messages)> done);
 
+// Scheduled messages (MessageScheduler): the remote ids of
+// Data::ScheduledMessages are made from the scheduled message uuids.
+void requestScheduledMessages(
+	not_null<Main::Session*> session,
+	PeerId peerId,
+	Fn<void(QVector<MTPMessage>)> done);
+void createScheduledMessage(
+	not_null<Main::Session*> session,
+	PeerId peerId,
+	const QString &markdown,
+	const QStringList &fileIds,
+	TimeId date);
+void deleteScheduledMessages(
+	not_null<Main::Session*> session,
+	const QVector<MsgId> &remoteIds);
+void sendScheduledMessagesNow(
+	not_null<Main::Session*> session,
+	const QVector<MsgId> &remoteIds);
+// No editing in MessageScheduler: deleted and created again.
+void rescheduleMessage(
+	not_null<Main::Session*> session,
+	MsgId remoteId,
+	TimeId date,
+	std::optional<QString> markdown = std::nullopt);
+void handleSchedulerEvent(
+	not_null<Main::Session*> session,
+	const QJsonObject &param);
+
 // The local messages of the call materials in the call thread.
 [[nodiscard]] std::vector<MsgId> callMaterialMessages(
 	PeerId peerId,

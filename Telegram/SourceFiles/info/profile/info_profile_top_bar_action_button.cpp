@@ -73,11 +73,18 @@ void TopBarActionButton::toggle(bool state) {
 	_toggleState = state;
 	const auto &lottie = _toggleState ? _onLottie : _offLottie;
 	setupLottie(lottie);
+	const auto raw = _lottie.get();
 	_lottie->animate([=] {
 		update();
 		if (_lottie->frameIndex() == _lottie->framesCount() - 1) {
 			_icon = _toggleState ? _onIcon : _offIcon;
-			_lottie.reset();
+			// Not from inside its own callback: it is destroyed with it.
+			crl::on_main(this, [=] {
+				if (_lottie.get() == raw) {
+					_lottie.reset();
+					update();
+				}
+			});
 		}
 	}, 0, _lottie->framesCount() - 1);
 }

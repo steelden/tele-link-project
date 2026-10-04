@@ -605,7 +605,12 @@ void RepliesList::loadAround(MsgId id) {
 			_skippedBefore = std::nullopt;
 			_list.clear();
 
-			if (messages.isEmpty()) {
+			// The call materials are local, not in the server answer: a call
+			// without a chat has only them in its thread.
+			const auto locals = MtsLink::callMaterialMessages(
+				peerId,
+				_rootId);
+			if (messages.isEmpty() && locals.empty()) {
 				_fullCount = _skippedBefore = _skippedAfter = 0;
 			} else {
 				_loadingHistorical = true;
@@ -617,10 +622,7 @@ void RepliesList::loadAround(MsgId id) {
 					}
 				}
 				_loadingHistorical = false;
-				// The call materials are local, not in the server answer.
-				for (const auto &local : MtsLink::callMaterialMessages(
-						peerId,
-						_rootId)) {
+				for (const auto &local : locals) {
 					if (!ranges::contains(_list, local)) {
 						_list.push_back(local);
 					}

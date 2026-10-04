@@ -622,6 +622,7 @@ protected:
 private:
 	void fillNames();
 	[[nodiscard]] not_null<Ui::EmptyUserpic*> ensureEmptyUserpic() const;
+	mutable QString _userpicEmptyName;
 	[[nodiscard]] virtual auto unavailableReasons() const
 		-> const std::vector<Data::UnavailableReason> &;
 
