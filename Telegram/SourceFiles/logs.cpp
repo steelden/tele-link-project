@@ -256,7 +256,7 @@ NEW LOGGING INSTANCE STARTED!!!\n\
 		QString postfix = QString("_%4_%5").arg((part * switchEach) / 60, 2, 10, QChar('0')).arg((part * switchEach) % 60, 2, 10, QChar('0'));
 
 		reopen(LogDataDebug, dayIndex, postfix);
-		reopen(LogDataMtp, dayIndex, postfix);
+		// No mtp_*.txt: TeleLink has no MTProto connections.
 	}
 
 };
@@ -270,6 +270,9 @@ LogsInMemoryList *DeletedLogsInMemory = SharedMemoryLocation<LogsInMemoryList, 0
 QString LogsBeforeSingleInstanceChecked; // LogsInMemory already dumped in LogsData, but LogsData is about to be deleted
 
 void _logsWrite(LogDataType type, const QString &msg) {
+	if (type == LogDataMtp) {
+		return; // No MTProto log in TeleLink.
+	}
 	if (LogsData && (type == LogDataMain || LogsStartIndexChosen < 0)) {
 		if (type == LogDataMain || Logs::DebugEnabled()) {
 			LogsData->write(type, msg);

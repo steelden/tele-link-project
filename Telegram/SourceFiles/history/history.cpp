@@ -2404,10 +2404,10 @@ void History::setUnreadCount(int newUnreadCount) {
 	if (_unreadCount == newUnreadCount) {
 		return;
 	}
-	if (MtsLink::hasChatId(peer->id)) {
+	if (_unreadCount && MtsLink::hasChatId(peer->id)) {
 		LOG(("MtsLink Unread: '%1' count %2 -> %3"
 			).arg(peer->name()
-			).arg(_unreadCount ? QString::number(*_unreadCount) : u"?"_q
+			).arg(*_unreadCount
 			).arg(newUnreadCount));
 	}
 	const auto notifier = unreadStateChangeNotifier(useMyUnreadInParent());

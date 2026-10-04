@@ -713,8 +713,6 @@ void applyUserpic(
 	if (peer->userpicPhotoId() == photoId) {
 		return;
 	}
-	LOG(("MtsLink Userpic: '%1' file=%2 from line %3"
-		).arg(peer->name(), fileId).arg(line));
 	const auto url = avatarCdnBase() + fileId + u"_s.jpg"_q;
 	const auto location = ImageLocation(
 		DownloadLocation{ PlainUrlLocation{ url } }, 160, 160);
@@ -2969,11 +2967,6 @@ void applyDialogData(
 	} else if (!history->chatListTimeId()) {
 		history->setChatListTimeId(TimeId(1));
 	}
-	LOG(("MtsLink Unread: server '%1' unread=%2 ts=%3 local=%4"
-		).arg(src.name
-		).arg(src.unreadCount
-		).arg(src.lastMessageTimestamp
-		).arg(history->unreadCount()));
 	if (src.unreadCount >= 0 && src.lastMessageTimestamp) {
 		history->setUnreadCount(src.unreadCount);
 	}
@@ -3115,11 +3108,6 @@ void applyChannelData(
 	} else if (!history->chatListTimeId()) {
 		history->setChatListTimeId(TimeId(1));
 	}
-	LOG(("MtsLink Unread: server '%1' unread=%2 ts=%3 local=%4"
-		).arg(src.name
-		).arg(src.unreadCount
-		).arg(src.lastMessageTimestamp
-		).arg(history->unreadCount()));
 	if (src.unreadCount >= 0 && src.lastMessageTimestamp) {
 		history->setUnreadCount(src.unreadCount);
 	}
@@ -5837,9 +5825,6 @@ void loadMessagesFromCache(
 				return;
 			}
 			const auto strong = weak.get();
-			LOG(("MtsLink Cache: loaded %1 messages for chatId=%2")
-				.arg(cached->messages.size())
-				.arg(chatId));
 			const auto oldestId = cached->messages.last().id;
 			(void)addOlderMessages(
 				strong,
@@ -6673,8 +6658,6 @@ void applyUserStatus(
 	} else {
 		UserStatuses.insert(peerId, { emoji, expiresAt });
 	}
-	LOG(("MtsLink Status: user %1 emoji '%2' expires %3"
-		).arg(userId, emoji).arg(expiresAt));
 	if (const auto user = session->data().userLoaded(peerToUser(peerId))) {
 		// The status emoji is painted over the userpic.
 		session->changes().peerUpdated(

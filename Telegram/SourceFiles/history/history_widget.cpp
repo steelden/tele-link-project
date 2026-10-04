@@ -3105,21 +3105,6 @@ void HistoryWidget::showHistory(
 								const auto item = msg->data();
 								++totalScanned;
 								if (item->isRegular()) {
-									const auto views = item->Get<
-										HistoryMessageViews>();
-									if (views && views->commentsMaxId) {
-										LOG(("MtsLink ReClick: msg=%1 "
-											"maxId=%2 readTill=%3 "
-											"unread=%4")
-											.arg(item->id.bare)
-											.arg(views->commentsMaxId
-												.bare)
-											.arg(views
-												->commentsInboxReadTillId
-												.bare)
-											.arg(item
-												->areCommentsUnread()));
-									}
 									if (item->areCommentsUnread()) {
 										threadParent = item;
 										break;
@@ -3129,13 +3114,6 @@ void HistoryWidget::showHistory(
 							if (threadParent) break;
 						}
 					}
-					LOG(("MtsLink ReClick: loadedBottom=%1 "
-						"scanned=%2 found=%3 pending=%4")
-						.arg(loadedBottom)
-						.arg(totalScanned)
-						.arg(threadParent ? 1 : 0)
-						.arg(MtsLink::pendingThreadUnreadCount(
-							_peer->id)));
 					if (threadParent && threadParent->mainView()) {
 						const auto msgTop = _list->itemTop(
 							threadParent->mainView());
@@ -3163,10 +3141,6 @@ void HistoryWidget::showHistory(
 						const auto parentUuid =
 							MtsLink::firstPendingThreadUnreadUuid(
 								_peer->id);
-						LOG(("MtsLink ReClick: loadAround "
-							"parent=%1 uuid=%2")
-							.arg(pendingParent.bare)
-							.arg(parentUuid));
 						const auto chatId =
 							MtsLink::peerIdToChatId(_peer->id);
 						const auto peerId = _peer->id;
@@ -3612,19 +3586,6 @@ void HistoryWidget::showHistory(
 		}
 		if (MtsLink::hasChatId(_history->peer->id)) {
 			MtsLink::subscribeTyping(&session(), _history->peer->id);
-			const auto state = _history->chatListBadgesState();
-			LOG(("MtsLink Unread: open '%1' count=%2 mark=%3 mentions=%4 "
-				"reactions=%5 badge: unread=%6 mention=%7 reaction=%8 "
-				"counter=%9"
-				).arg(_history->peer->name()
-				).arg(_history->unreadCount()
-				).arg(_history->unreadMark() ? 1 : 0
-				).arg(_history->unreadMentions().count()
-				).arg(_history->unreadReactions().count()
-				).arg(state.unread ? 1 : 0
-				).arg(state.mention ? 1 : 0
-				).arg(state.reaction ? 1 : 0
-				).arg(state.unreadCounter));
 		}
 		if (_history->scrollTopItem
 			|| (_migrated && _migrated->scrollTopItem)

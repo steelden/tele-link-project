@@ -970,6 +970,9 @@ UserData *ParticipantsAdditionalData::applyAdmin(
 		} else {
 			i->second = by;
 		}
+	} else if (!data.by()) {
+		// MTS Link has no "promoted by" of the admins.
+		_adminPromotedBy.erase(user);
 	} else {
 		LOG(("API Error: No user %1 for admin promoted by."
 			).arg(data.by().bare));

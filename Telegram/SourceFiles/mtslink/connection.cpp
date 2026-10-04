@@ -358,7 +358,9 @@ void Connection::handleControl(const QJsonObject &control, int seq) {
 	const auto name = control.value("name").toString();
 	const auto param = control.value("param").toObject();
 
-	LOG(("MtsLink WS: control '%1'").arg(name));
+	if (name != u"pong"_q) { // Every few seconds.
+		LOG(("MtsLink WS: control '%1'").arg(name));
+	}
 	if (name == "open") {
 		_sid = param.value("sid").toString();
 		const auto pingInterval = param.value("pingInterval").toInt(
