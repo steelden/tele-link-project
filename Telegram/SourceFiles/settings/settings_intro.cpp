@@ -64,7 +64,7 @@ object_ptr<Ui::RpWidget> CreateIntroSettings(
 	Ui::AddDivider(result);
 	Ui::AddSkip(result);
 	SetupLanguageButton(window, result);
-	SetupConnectionType(window, &window->account(), result);
+	// No "Connection type": the Telegram proxy is not used by TeleLink.
 	Ui::AddSkip(result);
 	if (HasUpdate()) {
 		Ui::AddDivider(result);

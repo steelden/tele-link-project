@@ -6492,6 +6492,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_settings_conferences" = "Video conferences";
 "lng_mtslink_settings_embedded_browser" = "Open in the built-in browser";
 "lng_mtslink_settings_help" = "MTS Link Help";
+"lng_mtslink_connection_system" = "System proxy";
+"lng_mtslink_connection_none" = "No proxy";
 "lng_mtslink_call_in_browser" = "In browser";
 "lng_mtslink_call_in_app" = "In TeleLink";
 "lng_mtslink_call_open_browser" = "Open in browser";

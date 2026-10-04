@@ -7065,6 +7065,8 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_settings_conferences" = "Видеоконференции";
 "lng_mtslink_settings_embedded_browser" = "Открывать во встроенном браузере";
 "lng_mtslink_settings_help" = "Справка МТС Линк";
+"lng_mtslink_connection_system" = "Системный прокси";
+"lng_mtslink_connection_none" = "Без прокси";
 "lng_mtslink_call_in_browser" = "В браузере";
 "lng_mtslink_call_in_app" = "В TeleLink";
 "lng_mtslink_call_open_browser" = "Открыть в браузере";

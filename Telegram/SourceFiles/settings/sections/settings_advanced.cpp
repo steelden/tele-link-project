@@ -82,6 +82,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #endif // !TDESKTOP_DISABLE_SPELLCHECK
 
 #include "mtslink/call_window.h"
+#include "styles/style_boxes.h"
 
 #include <ksandbox.h>
 
@@ -129,11 +130,49 @@ void BuildMtsLinkConferencesSection(SectionBuilder &builder) {
 	builder.addSkip();
 }
 
+// The connection of TeleLink: the system proxy or none. The Telegram proxy
+// box checks the proxies through the Telegram servers, it is not used.
+[[nodiscard]] QString MtsLinkConnectionTypeText() {
+	return Core::App().settings().proxy().isSystem()
+		? tr::lng_mtslink_connection_system(tr::now)
+		: tr::lng_mtslink_connection_none(tr::now);
+}
+
+void MtsLinkConnectionTypeBox(not_null<Ui::GenericBox*> box) {
+	using Settings = MTP::ProxyData::Settings;
+	box->setTitle(tr::lng_settings_connection_type());
+	const auto group = std::make_shared<Ui::RadioenumGroup<Settings>>(
+		Core::App().settings().proxy().isSystem()
+			? Settings::System
+			: Settings::Disabled);
+	const auto add = [&](Settings value, const QString &text) {
+		box->addRow(
+			object_ptr<Ui::Radioenum<Settings>>(
+				box,
+				group,
+				value,
+				text,
+				st::defaultBoxCheckbox),
+			st::boxRowPadding + style::margins(
+				0,
+				st::boxOptionListSkip,
+				0,
+				0));
+	};
+	add(Settings::System, tr::lng_proxy_use_system_settings(tr::now));
+	add(Settings::Disabled, tr::lng_proxy_disable(tr::now));
+	box->addButton(tr::lng_settings_save(), [=] {
+		Core::App().setCurrentProxy(MTP::ProxyData(), group->current());
+		Core::App().saveSettingsDelayed();
+		box->closeBox();
+	});
+	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+}
+
 void BuildDataStorageSection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
 	const auto container = builder.container();
 	const auto session = builder.session();
-	const auto account = &session->account();
 
 	builder.addSkip();
 	builder.addSubsectionTitle({
@@ -142,30 +181,19 @@ void BuildDataStorageSection(SectionBuilder &builder) {
 		.keywords = { u"storage"_q, u"data"_q, u"download"_q, u"connection"_q },
 	});
 
-	const auto connectionType = [=] {
-		const auto transport = account->mtp().dctransport();
-		if (!Core::App().settings().proxy().isEnabled()) {
-			return transport.isEmpty()
-				? tr::lng_connection_auto_connecting(tr::now)
-				: tr::lng_connection_auto(tr::now, lt_transport, transport);
-		} else {
-			return transport.isEmpty()
-				? tr::lng_connection_proxy_connecting(tr::now)
-				: tr::lng_connection_proxy(tr::now, lt_transport, transport);
-		}
-	};
-
+	// "Connection type": the system proxy or none, the Telegram proxy box
+	// (checked through the Telegram servers) is not used.
 	builder.addButton({
 		.id = u"advanced/connection_type"_q,
 		.title = tr::lng_settings_connection_type(),
 		.icon = { &st::menuIconNetwork },
-		.label = rpl::merge(
-			Core::App().settings().proxy().connectionTypeChanges(),
-			tr::lng_connection_auto_connecting() | rpl::to_empty
-		) | rpl::map(connectionType),
+		.label = rpl::single(
+			rpl::empty
+		) | rpl::then(
+			Core::App().settings().proxy().connectionTypeChanges()
+		) | rpl::map(MtsLinkConnectionTypeText),
 		.onClick = [=] {
-			controller->window().show(
-				ProxiesBoxController::CreateOwningBox(account));
+			controller->show(Box(MtsLinkConnectionTypeBox));
 		},
 		.keywords = { u"connection"_q, u"proxy"_q, u"network"_q, u"vpn"_q },
 	});
