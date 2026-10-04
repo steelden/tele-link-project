@@ -66,9 +66,21 @@ private:
 	int _sendSeq = 0;
 	int _recvSeq = 0;
 	int _ackSeq = 0;
-	std::deque<crl::time> _sentTimes; // Send times within the last second.
+	struct Sent {
+		crl::time when = 0;
+		QStringList types; // The methods of the messages in the frame.
+	};
+	std::deque<Sent> _sentTimes; // Sent within the last second.
 	std::deque<QJsonArray> _sendQueue;
 	QTimer _sendQueueTimer;
+
+	// Statistics of the sent messages by type, logged periodically and on
+	// the rate limit.
+	QHash<QString, int> _sentStats;
+	int _sentStatsTotal = 0;
+	crl::time _sentStatsLogged = 0;
+	void countSent(const QStringList &types);
+	void logSentStats();
 
 	bool _authenticated = false;
 };

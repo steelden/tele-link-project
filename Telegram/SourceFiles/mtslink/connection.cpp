@@ -176,6 +176,72 @@ void Connection::sendControl(const QString &name, const QJsonObject &param) {
 		QJsonDocument(frame).toJson(QJsonDocument::Compact)));
 }
 
+namespace {
+
+// "Chat.ReadMessage" for commands, the kind / type for the rest.
+[[nodiscard]] QStringList MessageTypes(const QJsonArray &messages) {
+	auto result = QStringList();
+	for (const auto &value : messages) {
+		const auto message = value.toObject();
+		auto type = message.value("method").toString();
+		if (type.isEmpty()) {
+			type = message.value("kind").toString();
+		}
+		if (type.isEmpty()) {
+			type = message.value("type").toString();
+		}
+		result.push_back(type.isEmpty() ? u"?"_q : type);
+	}
+	return result;
+}
+
+[[nodiscard]] QString CountTypes(const QHash<QString, int> &counts) {
+	auto list = std::vector<std::pair<int, QString>>();
+	for (auto i = counts.begin(); i != counts.end(); ++i) {
+		list.push_back({ i.value(), i.key() });
+	}
+	ranges::sort(list, ranges::greater());
+	auto result = QStringList();
+	for (const auto &[count, type] : list) {
+		result.push_back(type + ':' + QString::number(count));
+	}
+	return result.join(u", "_q);
+}
+
+} // namespace
+
+void Connection::countSent(const QStringList &types) {
+	for (const auto &type : types) {
+		++_sentStats[type];
+		++_sentStatsTotal;
+	}
+	constexpr auto kLogEach = crl::time(10 * 60 * 1000);
+	const auto now = crl::now();
+	if (!_sentStatsLogged) {
+		_sentStatsLogged = now;
+	} else if (now - _sentStatsLogged >= kLogEach) {
+		_sentStatsLogged = now;
+		logSentStats();
+	}
+}
+
+void Connection::logSentStats() {
+	auto top = QHash<QString, int>();
+	auto list = std::vector<std::pair<int, QString>>();
+	for (auto i = _sentStats.begin(); i != _sentStats.end(); ++i) {
+		list.push_back({ i.value(), i.key() });
+	}
+	ranges::sort(list, ranges::greater());
+	constexpr auto kTop = 15;
+	for (auto i = 0; i != int(list.size()) && i != kTop; ++i) {
+		top.insert(list[i].second, list[i].first);
+	}
+	LOG(("MtsLink WS: sent %1 messages of %2 types since connect, top: %3"
+		).arg(_sentStatsTotal
+		).arg(_sentStats.size()
+		).arg(CountTypes(top)));
+}
+
 void Connection::sendMessages(const QJsonArray &messages) {
 	_sendQueue.push_back(messages);
 	flushSendQueue();
@@ -188,19 +254,24 @@ void Connection::flushSendQueue() {
 	constexpr auto kWindow = crl::time(1000);
 	while (!_sendQueue.empty()) {
 		const auto now = crl::now();
-		while (!_sentTimes.empty() && now - _sentTimes.front() >= kWindow) {
+		while (!_sentTimes.empty()
+			&& now - _sentTimes.front().when >= kWindow) {
 			_sentTimes.pop_front();
 		}
 		if (int(_sentTimes.size()) >= kMaxPerSecond) {
 			if (!_sendQueueTimer.isActive()) {
-				const auto wait = kWindow - (now - _sentTimes.front()) + 1;
+				const auto wait = kWindow
+					- (now - _sentTimes.front().when)
+					+ 1;
 				_sendQueueTimer.start(int(std::max(wait, crl::time(1))));
 			}
 			return;
 		}
-		_sentTimes.push_back(now);
 		const auto messages = _sendQueue.front();
 		_sendQueue.pop_front();
+		const auto types = MessageTypes(messages);
+		_sentTimes.push_back({ now, types });
+		countSent(types);
 		sendMessagesNow(messages);
 	}
 }
@@ -383,10 +454,28 @@ void Connection::handleControl(const QJsonObject &control, int seq) {
 	} else if (name == "pong") {
 		// keepalive acknowledged
 	} else if (name == "rateLimitIsReached") {
-		LOG(("MtsLink WS: rate limit reached, sent in the last second: %1, "
-			"queued: %2")
+		auto sent = QHash<QString, int>();
+		const auto now = crl::now();
+		for (const auto &entry : _sentTimes) {
+			if (now - entry.when < 1000) {
+				for (const auto &type : entry.types) {
+					++sent[type];
+				}
+			}
+		}
+		auto queued = QHash<QString, int>();
+		for (const auto &messages : _sendQueue) {
+			for (const auto &type : MessageTypes(messages)) {
+				++queued[type];
+			}
+		}
+		LOG(("MtsLink WS: rate limit reached, sent in the last second: %1 "
+			"[%2], queued: %3 [%4]")
 			.arg(_sentTimes.size())
-			.arg(_sendQueue.size()));
+			.arg(CountTypes(sent))
+			.arg(_sendQueue.size())
+			.arg(CountTypes(queued)));
+		logSentStats();
 	}
 
 	Q_EMIT controlReceived(name, param);
@@ -407,6 +496,12 @@ void Connection::onSocketDisconnected() {
 	_sendQueueTimer.stop();
 	_sendQueue.clear();
 	_sentTimes.clear();
+	if (_sentStatsTotal) {
+		logSentStats();
+	}
+	_sentStats.clear();
+	_sentStatsTotal = 0;
+	_sentStatsLogged = 0;
 	_authenticated = false;
 	_wsHandshakeDone = false;
 	_readBuffer.clear();
