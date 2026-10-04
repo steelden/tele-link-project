@@ -167,32 +167,8 @@ void DcOptions::constructFromBuiltIn() {
 	WriteLocker lock(this);
 	_data.clear();
 
-	readBuiltInPublicKeys();
-
-	const auto list = isTestMode()
-		? gsl::make_span(kBuiltInDcsTest)
-		: gsl::make_span(kBuiltInDcs).subspan(0);
-	for (const auto &entry : list) {
-		const auto flags = Flag::f_static | 0;
-		applyOneGuarded(entry.id, flags, entry.ip, entry.port, {});
-		DEBUG_LOG(("MTP Info: adding built in DC %1 connect option: %2:%3"
-			).arg(entry.id
-			).arg(entry.ip
-			).arg(entry.port));
-	}
-
-	const auto listv6 = isTestMode()
-		? gsl::make_span(kBuiltInDcsIPv6Test)
-		: gsl::make_span(kBuiltInDcsIPv6).subspan(0);
-	for (const auto &entry : listv6) {
-		const auto flags = Flag::f_static | Flag::f_ipv6;
-		applyOneGuarded(entry.id, flags, entry.ip, entry.port, {});
-		DEBUG_LOG(("MTP Info: adding built in DC %1 IPv6 connect option: "
-			"%2:%3"
-			).arg(entry.id
-			).arg(entry.ip
-			).arg(entry.port));
-	}
+	// TeleLink works with the MTS Link server only: no built in Telegram
+	// data centers and keys, MTProto never connects anywhere.
 }
 
 void DcOptions::processFromList(

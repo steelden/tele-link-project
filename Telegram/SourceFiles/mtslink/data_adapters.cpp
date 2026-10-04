@@ -1425,16 +1425,28 @@ void applyThreadsList(
 					});
 				}
 			}
-			history->addNewLocalMessage(
-				HistoryItemCommonFields{
-					.id = rootId,
-					.flags = msgFlags,
-					.from = fromId,
-					.date = date,
-				},
-				parseMentionedText(
-					msgText, markdown, mentions, session),
-				MTP_messageMediaEmpty());
+			auto text = parseMentionedText(
+				msgText, markdown, mentions, session);
+			// The list is applied again on every reload: the preview item
+			// is updated, a new one with the same id destroyed the old one.
+			if (const auto existing = session->data().message(
+					channel->id,
+					rootId)) {
+				if (existing->originalText() != text) {
+					existing->setText(std::move(text));
+					session->data().requestItemTextRefresh(existing);
+				}
+			} else {
+				history->addNewLocalMessage(
+					HistoryItemCommonFields{
+						.id = rootId,
+						.flags = msgFlags,
+						.from = fromId,
+						.date = date,
+					},
+					std::move(text),
+					MTP_messageMediaEmpty());
+			}
 		}
 		const auto parentPeerId = chatIdToPeerId(thread.chatId);
 		// The parent message may never be loaded in its chat, but the thread
