@@ -396,17 +396,17 @@ int Launcher::exec() {
 
 	// Must be started before Platform is started.
 	Logs::start();
-	base::options::init(cWorkingDir() + "tdata/experimental_options.json");
-
 	// TeleLink: no Qt RHI where Telegram does not offer it (Windows x64):
 	// the main window composited by it showed a gray block under the media
 	// viewer. As in the Telegram release, OpenGL is used there.
+	// Before init(): set() schedules the file write, that needs the app.
 	{
 		auto &rhi = base::options::lookup<bool>(Ui::GL::kOptionUseQtRhi);
 		if (!rhi.relevant() && rhi.value()) {
 			rhi.set(false);
 		}
 	}
+	base::options::init(cWorkingDir() + "tdata/experimental_options.json");
 
 	// Must be called after options are inited.
 	initHighDpi();
