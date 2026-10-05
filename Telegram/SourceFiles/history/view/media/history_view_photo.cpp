@@ -631,9 +631,10 @@ QImage Photo::prepareImageCacheWithLarge(QSize outer, Image *large) const {
 	const auto resize = large
 		? ::Media::Streaming::DecideFrameResize(outer, large->size())
 		: ::Media::Streaming::ExpandDecision();
-	if (large && !resize.expanding) {
-		// A small image: no blurred copy of it around (it looked like a
-		// gray square), the space around is transparent.
+	if (large
+		&& (!resize.expanding || large->original().hasAlphaChannel())) {
+		// A small image or one with transparency: no blurred copy of it
+		// around or under it (it looked like a gray square), transparent.
 		const auto ratio = style::DevicePixelRatio();
 		auto result = QImage(
 			outer * ratio,
