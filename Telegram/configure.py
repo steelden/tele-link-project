@@ -51,6 +51,10 @@ if not qt_version.resolve(arch):
 if 'qt6' in arguments:
     arguments.remove('qt6')
 
+# TeleLink: our own updater, the autoupdate is on for the default target.
+if not any(a.startswith('-DDESKTOP_APP_DISABLE_AUTOUPDATE') for a in arguments):
+    arguments.append('-DDESKTOP_APP_DISABLE_AUTOUPDATE=OFF')
+
 if officialTarget != '':
     officialApiIdFile = scriptPath + '/../../DesktopPrivate/custom_api_id.h'
     if not os.path.isfile(officialApiIdFile):

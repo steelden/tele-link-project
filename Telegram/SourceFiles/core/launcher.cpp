@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/platform_launcher.h"
 #include "platform/platform_specific.h"
 #include "base/options.h"
+#include "ui/gl/gl_detection.h"
 #include "base/platform/base_platform_info.h"
 #include "base/platform/base_platform_file_utilities.h"
 #include "ui/main_queue_processor.h"
@@ -396,6 +397,16 @@ int Launcher::exec() {
 	// Must be started before Platform is started.
 	Logs::start();
 	base::options::init(cWorkingDir() + "tdata/experimental_options.json");
+
+	// TeleLink: no Qt RHI where Telegram does not offer it (Windows x64):
+	// the main window composited by it showed a gray block under the media
+	// viewer. As in the Telegram release, OpenGL is used there.
+	{
+		auto &rhi = base::options::lookup<bool>(Ui::GL::kOptionUseQtRhi);
+		if (!rhi.relevant() && rhi.value()) {
+			rhi.set(false);
+		}
+	}
 
 	// Must be called after options are inited.
 	initHighDpi();
