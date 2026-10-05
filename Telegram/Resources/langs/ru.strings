@@ -394,7 +394,7 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_proxy_box_username" = "Логин";
 "lng_proxy_box_password" = "Пароль";
 "lng_proxy_invalid" = "Некорректная ссылка на прокси.";
-"lng_proxy_unsupported" = "Ссылка некорректна или тип прокси-сервера не поддерживается в Telegram Desktop. Убедитесь, что используете последнюю версию приложения.";
+"lng_proxy_unsupported" = "Ссылка некорректна или тип прокси-сервера не поддерживается в TeleLink. Убедитесь, что используете последнюю версию приложения.";
 "lng_proxy_incorrect_secret" = "В этой прокси-ссылке используется неверный параметр **ключ**.\n\nПожалуйста, свяжитесь с провайдером прокси и попросите его обновить исходный код MTProxy и настроить его с использованием правильного значения **ключа**.\n\nЗатем попросите его предоставить новую ссылку.";
 "lng_proxy_check_ip_warning_title" = "Внимание";
 "lng_proxy_check_ip_warning" = "Ваш IP-адрес станет известен администратору прокси-сервера.";
@@ -2669,12 +2669,12 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_sure_delete_selected_days#many" = "{count} выбранных дней";
 "lng_sure_delete_selected_days#other" = "{count} выбранных дня";
 "lng_message_empty" = "Пустое сообщение";
-"lng_message_unsupported" = "Это сообщение не поддерживается в Вашей версии Telegram. Пожалуйста, обновитесь до последней версии через Настройки > Продвинутые настройки или установите её по ссылке {link}. Если Вы уже используете свежую версию приложения, возможно, в сообщении используется нововведение, которое пока не поддерживается.";
+"lng_message_unsupported" = "Это сообщение не поддерживается в Вашей версии TeleLink. Пожалуйста, обновитесь до последней версии через Настройки > Продвинутые настройки или установите её по ссылке {link}. Если Вы уже используете свежую версию приложения, возможно, в сообщении используется нововведение, которое пока не поддерживается.";
 "lng_unsupported_message_title" = "Сообщение не поддерживается";
-"lng_unsupported_message_text" = "Чтобы увидеть это сообщение, обновите Telegram";
+"lng_unsupported_message_text" = "Чтобы увидеть это сообщение, обновите TeleLink";
 "lng_unsupported_message_update" = "Обновить";
 "lng_unsupported_block_title" = "Элемент не поддерживается";
-"lng_unsupported_block_text" = "Чтобы увидеть эту часть сообщения, обновите Telegram";
+"lng_unsupported_block_text" = "Чтобы увидеть эту часть сообщения, обновите TeleLink";
 "lng_message_not_found" = "Сообщение не найдено.";
 "lng_duration_minsec_minutes#one" = "{count} мин.";
 "lng_duration_minsec_minutes#few" = "{count} мин.";
@@ -6751,7 +6751,7 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_theme_preview_users#few" = "Число установок: {count}";
 "lng_theme_preview_users#many" = "Число установок: {count}";
 "lng_theme_preview_users#other" = "Число установок: {count}";
-"lng_new_version_wrap" = "Telegram Desktop обновился до версии {version}\n\n{changes}\n\nВся история изменений доступна здесь:\n{link}";
+"lng_new_version_wrap" = "TeleLink обновился до версии {version}\n\n{changes}\n\nВся история изменений доступна здесь:\n{link}";
 "lng_new_version_minor" = "— Исправления и улучшения";
 "lng_menu_insert_unicode" = "Вставить управляющий символ Unicode";
 "lng_menu_formatting" = "Форматирование";
@@ -8071,7 +8071,7 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_passport_error_cant_read" = "Не удается прочитать файл. Пожалуйста, выберите изображение.";
 "lng_passport_bad_name" = "Пожалуйста, используйте только латиницу.";
 "lng_passport_wait_upload" = "Пожалуйста, дождитесь конца загрузки.";
-"lng_passport_app_out_of_date" = "К сожалению, Ваша версия приложения устарела и не может обработать этот запрос. Пожалуйста, обновите Telegram.";
+"lng_passport_app_out_of_date" = "К сожалению, Ваша версия приложения устарела и не может обработать этот запрос. Пожалуйста, обновите TeleLink.";
 "lng_export_title" = "Экспорт данных";
 "lng_export_progress_title" = "Экспорт данных";
 "lng_export_option_info" = "Информация об аккаунте";
@@ -8442,7 +8442,7 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_outdated_title" = "НЕОБХОДИМО ОБНОВИТЬ ОПЕРАЦИОННУЮ СИСТЕМУ.";
 "lng_outdated_title_bits" = "НЕОБХОДИМА 64-БИТНАЯ ОПЕРАЦИОННАЯ СИСТЕМА";
 "lng_outdated_soon" = "Иначе приложение перестанет обновляться с {date}.";
-"lng_outdated_now" = "Чтобы приложение Telegram могло получать обновления.";
+"lng_outdated_now" = "Чтобы приложение TeleLink могло получать обновления.";
 "lng_screen_reader_bar_text" = "Telegram работает в режиме чтения с экрана.";
 "lng_screen_reader_bar_disable" = "Отключить";
 "lng_screen_reader_confirm_text" = "Telegram обнаружил, что в системе используется специальное программное обеспечение для людей с ограниченными возможностями, и работает в режиме, оптимизированном для сервисов чтения с экрана.\n\nЭто может привести к неожиданным изменениям в работе пользовательского интерфейса Telegram.\n\nЕсли вы не используете программы для чтения с экрана в Telegram, отключите этот режим.";
