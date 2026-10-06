@@ -38,6 +38,8 @@ struct ChannelData {
 	QString memberRole;
 	QString interlocutorId;
 	int memberCount = 0;
+	// Chat.GetChatV3: the profiles of the members (of the dialog).
+	QList<QJsonObject> memberProfiles;
 };
 
 class Channels final : public QObject {

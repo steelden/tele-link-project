@@ -335,6 +335,9 @@ struct PendingChatEvent {
 QHash<QString, QList<PendingChatEvent>> PendingChatEvents;
 QHash<QString, QList<PendingChatEvent>> PendingUserEvents;
 QSet<QString> ChatInfoRequested;
+// The chats the user was just added to: placed in the chat list by the
+// time of joining (as Telegram does), not by their (unknown) last message.
+QSet<QString> JustJoinedChats;
 QSet<QString> UserProfileRequested;
 // Authors whose messages are shown without waiting for the profile.
 QSet<QString> AuthorWaitExpired;
@@ -2360,9 +2363,26 @@ void connectToSession(
 	QObject::connect(
 		mtsSession->channels(),
 		&Api::Channels::chatInfoLoaded,
-		[mainSession, mtsSession](const Api::ChannelData &ch) {
+		[mainSession, mtsSession](const Api::ChannelData &info) {
+			auto ch = info;
 			LOG(("MtsLink: chat info loaded %1 type=%2 role=%3"
 				).arg(ch.id).arg(int(ch.type)).arg(ch.memberRole));
+			// The members of a new chat: the full profiles (the dialog of
+			// a new person had only the name and the userpic).
+			for (const auto &profile : ch.memberProfiles) {
+				const auto parsed = Api::ParseMemberProfile(profile);
+				if (parsed.userId.isEmpty()) {
+					continue;
+				}
+				applyUserData(mainSession, parsed);
+				if (ch.type == ChatType::Dialog
+					&& ch.interlocutorId.isEmpty()
+					&& parsed.userId != mtsSession->userId()) {
+					LOG(("MtsLink ChatInfo: dialog %1 interlocutor from "
+						"the profiles: %2").arg(ch.id, parsed.userId));
+					ch.interlocutorId = parsed.userId;
+				}
+			}
 			if (ch.type == ChatType::Dialog
 				|| ch.type == ChatType::Favorites) {
 				applyDialogData(mainSession, ch);
@@ -2370,6 +2390,24 @@ void connectToSession(
 				applyChannelData(mainSession, ch);
 				if (!ch.isReadOnly) {
 					mtsSession->users()->loadChatMembers(ch.id);
+				}
+			}
+			if (JustJoinedChats.remove(ch.id)) {
+				const auto history = mainSession->data().history(
+					chatIdToPeerId(ch.id));
+				const auto now = base::unixtime::now();
+				LOG(("MtsLink Channel: joined %1, last message time %2, "
+					"list time %3 -> %4"
+					).arg(ch.id
+					).arg(ch.lastMessageTimestamp
+					).arg(history->chatListTimeId()
+					).arg(now));
+				if (history->chatListTimeId() < now) {
+					history->setChatListTimeId(now);
+				}
+				// The last message for the preview in the list.
+				if (!history->lastMessage()) {
+					mtsSession->messages()->loadPreview(ch.id, 1);
 				}
 			}
 			const auto pending = PendingChatEvents.take(ch.id);
@@ -3707,6 +3745,9 @@ void applyDialogData(
 		UserBareIdToUuidMap.insert(bareId, src.interlocutorId);
 	} else {
 		peerId = chatIdToPeerId(src.id, ChatType::Dialog);
+		LOG(("MtsLink Dialog: %1 has no interlocutor, peer %2 by the chat"
+			).arg(src.id
+			).arg(peerId.value));
 	}
 	const auto userId = peerToUser(peerId);
 	const auto user = session->data().user(userId);
@@ -4122,6 +4163,11 @@ void requestUserDetails(not_null<UserData*> user) {
 		|| userId.isEmpty()
 		|| UserDetailsMap.value(user->id).full
 		|| UserDetailsRequested.contains(user->id)) {
+		if (userId.isEmpty()) {
+			LOG(("MtsLink Profile: no MTS Link id of the peer %1 (%2)"
+				).arg(user->id.value
+				).arg(user->name()));
+		}
 		return;
 	}
 	UserDetailsRequested.emplace(user->id);
@@ -5805,6 +5851,7 @@ void handleChatEvent(
 			return;
 		} else if (self && (!channel || !channel->amIn())) {
 			LOG(("MtsLink Channel: added to %1").arg(chatId));
+			JustJoinedChats.insert(chatId);
 			mts->channels()->loadChatInfo(chatId);
 			return;
 		}
@@ -5871,6 +5918,7 @@ void handleChatEvent(
 		if (!channel || !channel->amIn()) {
 			if (const auto mts = session->account().mtsLinkSession()) {
 				LOG(("MtsLink Channel: %1, loading %2").arg(type, chatId));
+				JustJoinedChats.insert(chatId);
 				mts->channels()->loadChatInfo(chatId);
 			}
 		}
