@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "api/api_toggling_media.h"
 
+#include "mtslink/data_adapters.h"
+
 #include "apiwrap.h"
 #include "data/data_document.h"
 #include "data/data_file_origin.h"
@@ -66,6 +68,11 @@ void ToggleFavedSticker(
 		Data::FileOrigin origin,
 		bool faved) {
 	if (faved && !document->sticker()) {
+		return;
+	}
+	if (document->session().account().mtsLinkSession()) {
+		// MTS Link: the favorite stickers are local only.
+		MtsLink::toggleFavedSticker(document, faved);
 		return;
 	}
 	auto done = [=] {

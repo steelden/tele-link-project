@@ -238,6 +238,19 @@ void rememberUploadedContent(
 	const QString &fileId,
 	const QByteArray &content);
 
+// The local stickers (the favorites of the stickers panel): images of the
+// messages, kept with their content in the session cache.
+[[nodiscard]] bool canAddPhotoToStickers(not_null<PhotoData*> photo);
+// A local sticker, or a sticker of a message (kept as a local one).
+bool toggleFavedSticker(not_null<DocumentData*> document, bool faved);
+void addPhotoToStickers(not_null<PhotoData*> photo);
+void restoreLocalStickers(not_null<Main::Session*> session);
+// A local sticker pack: a zip with images, or the images of a folder.
+void importStickerPack(
+	not_null<Main::Session*> session,
+	QPointer<QWidget> parent,
+	Fn<void(QString)> showToast);
+
 // The saved GIFs (the GIFs panel): local only, kept in the session cache.
 void restoreSavedGifs(not_null<Main::Session*> session);
 // Sends a GIF of the panel by its MTS Link file, false if it is not known.

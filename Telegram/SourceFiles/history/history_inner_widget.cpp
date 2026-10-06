@@ -3112,6 +3112,11 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				copyContextImage(photo, itemId);
 			}, &st::menuIconCopy);
 		}
+		if (MtsLink::canAddPhotoToStickers(photo)) {
+			_menu->addAction(tr::lng_mtslink_add_to_stickers(tr::now), [=] {
+				MtsLink::addPhotoToStickers(photo);
+			}, &st::menuIconStickers);
+		}
 		if (photo->hasAttachedStickers()) {
 			_menu->addAction(tr::lng_context_attached_stickers(tr::now), [=] {
 				session->api().attachedStickers().requestAttachedStickerSets(

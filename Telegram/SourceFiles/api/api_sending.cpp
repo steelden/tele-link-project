@@ -1419,14 +1419,28 @@ void SendConfirmedFile(
 			}
 			return;
 		}
+		// In a thread: the message of the thread (parentId), not a reply
+		// to its root in the chat.
+		const auto parentMtsId = file->to.replyTo.topicRootId
+			? MtsLink::msgIdToMtsLinkId(
+				file->to.peer,
+				file->to.replyTo.topicRootId)
+			: QString();
+		const auto isThreadSend = !parentMtsId.isEmpty();
 		const auto replyMsgId = [&] {
 			if (!file->to.replyTo.messageId) {
 				return QString();
 			}
-			return MtsLink::msgIdToMtsLinkId(
+			const auto result = MtsLink::msgIdToMtsLinkId(
 				file->to.replyTo.messageId.peer,
 				file->to.replyTo.messageId.msg);
+			return (result == parentMtsId) ? QString() : result;
 		}();
+		const auto clientId = isThreadSend
+			? QUuid::createUuid().toString(QUuid::WithoutBraces)
+			: QString();
+		LOG(("MtsLink Files: sending '%1' parent='%2' reply='%3'"
+			).arg(filename, parentMtsId, replyMsgId));
 
 		const auto tempId = QUuid::createUuid().toString(QUuid::WithoutBraces);
 		const auto peerId = file->to.peer;
@@ -1438,6 +1452,8 @@ void SendConfirmedFile(
 			msg.authorId = mts->userId();
 			msg.text = caption;
 			msg.createdAt = QDateTime::currentMSecsSinceEpoch();
+			msg.repliedMessageId = replyMsgId;
+			msg.parentId = parentMtsId;
 			auto fileData = MtsLink::Api::FileData{
 				.id = tempId,
 				.name = filename,
@@ -1463,7 +1479,7 @@ void SendConfirmedFile(
 				}
 			}
 			msg.files.push_back(std::move(fileData));
-			const auto item = MtsLink::addMessage(session, msg);
+			const auto item = MtsLink::addMessage(session, msg, isThreadSend);
 			if (item) {
 				if (const auto media = item->media()) {
 					if (const auto photo = media->photo()) {
@@ -1517,7 +1533,11 @@ void SendConfirmedFile(
 		}
 		const auto tempMsgId = MsgId(
 			MtsLink::uuidToBareId(tempId) & 0x7FFFFFFFLL);
-		MtsLink::setPendingTempMessage(peerId, tempMsgId);
+		if (isThreadSend) {
+			MtsLink::addPendingThreadSend(clientId);
+		} else {
+			MtsLink::setPendingTempMessage(peerId, tempMsgId);
+		}
 		// The clock while uploading and sending.
 		MtsLink::markLocalSending(session, peerId, tempMsgId);
 		// The chat is scrolled to the sent message (laid out first).
@@ -1573,7 +1593,8 @@ void SendConfirmedFile(
 					QJsonArray(),
 					replyMsgId,
 					QStringList{ result.id },
-					QString());
+					parentMtsId,
+					clientId);
 			},
 			[=](const QString &error) {
 				LOG(("MtsLink Files: upload failed for '%1': %2")

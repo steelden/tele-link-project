@@ -7082,6 +7082,11 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_materials_failed" = "Не удалось загрузить материалы звонка.";
 "lng_mtslink_materials_record_text" = "Запись встречи";
 "lng_mtslink_materials_record_open" = "Нажмите, чтобы посмотреть";
+"lng_mtslink_add_to_stickers" = "Добавить в стикеры";
+"lng_mtslink_import_stickers" = "Импорт набора";
+"lng_mtslink_import_stickers_title" = "Выберите zip со стикерами или картинки стикеров";
+"lng_mtslink_import_stickers_done" = "Набор стикеров «{pack}» добавлен";
+"lng_mtslink_import_stickers_empty" = "Не найдено картинок PNG, WEBP или JPEG";
 "lng_mtslink_info_email" = "Эл. почта";
 "lng_mtslink_info_position" = "Должность";
 "lng_mtslink_info_department" = "Подразделение";

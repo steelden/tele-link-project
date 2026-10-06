@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/stickers_box.h"
 
+#include "mtslink/data_adapters.h"
 #include "apiwrap.h"
 #include "base/timer.h"
 #include "boxes/peers/edit_peer_color_box.h"
@@ -677,6 +678,16 @@ void StickersBox::prepare() {
 		addButton(
 			close ? tr::lng_close() : tr::lng_about_done(),
 			[=] { closeBox(); });
+		if (!_isMasks && !close) {
+			// MTS Link: the local sticker packs.
+			addLeftButton(tr::lng_mtslink_import_stickers(), [=] {
+				const auto show = _show;
+				MtsLink::importStickerPack(
+					&session(),
+					this,
+					[=](QString text) { show->showToast(text); });
+			});
+		}
 	}
 
 	if (_section == Section::Installed) {

@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
 #include "main/main_app_config.h"
 #include "mtproto/mtproto_config.h"
 #include "ui/toast/toast.h"
@@ -524,7 +525,12 @@ void Stickers::checkFavedLimit(
 		std::shared_ptr<ChatHelpers::Show> show) {
 	const auto session = &_owner->session();
 	const auto limits = Data::PremiumLimits(session);
-	if (set.stickers.size() <= limits.stickersFavedCurrent()) {
+	// MTS Link: the local favorites, no Premium limit.
+	constexpr auto kMtsLinkFavedLimit = 200;
+	const auto limit = session->account().mtsLinkSession()
+		? kMtsLinkFavedLimit
+		: limits.stickersFavedCurrent();
+	if (set.stickers.size() <= limit) {
 		return;
 	}
 	auto removing = set.stickers.back();
@@ -666,6 +672,17 @@ void Stickers::setIsNotFaved(not_null<DocumentData*> document) {
 	RemoveFromSet(setsRef(), document, FavedSetId);
 	session().local().writeFavedStickers();
 	notifyUpdated(StickersType::Stickers);
+}
+
+void Stickers::mtsLinkSetFaved(
+		not_null<DocumentData*> document,
+		bool faved) {
+	if (faved) {
+		// No emoji list from a set: not requested from the server.
+		setIsFaved(nullptr, document, std::vector<not_null<EmojiPtr>>());
+	} else {
+		setIsNotFaved(document);
+	}
 }
 
 void Stickers::setFaved(

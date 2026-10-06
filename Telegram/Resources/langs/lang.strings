@@ -6509,6 +6509,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_materials_failed" = "Could not load the call materials.";
 "lng_mtslink_materials_record_text" = "Call recording";
 "lng_mtslink_materials_record_open" = "Click to watch";
+"lng_mtslink_add_to_stickers" = "Add to stickers";
+"lng_mtslink_import_stickers" = "Import pack";
+"lng_mtslink_import_stickers_title" = "Choose a zip with stickers or sticker images";
+"lng_mtslink_import_stickers_done" = "Sticker pack «{pack}» added";
+"lng_mtslink_import_stickers_empty" = "No PNG, WEBP or JPEG images found";
 "lng_mtslink_info_email" = "Email";
 "lng_mtslink_info_position" = "Position";
 "lng_mtslink_info_department" = "Department";

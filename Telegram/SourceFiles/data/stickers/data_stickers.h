@@ -224,6 +224,8 @@ public:
 		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<DocumentData*> document,
 		bool faved);
+	// MTS Link: a local sticker (no set on the server) in the favorites.
+	void mtsLinkSetFaved(not_null<DocumentData*> document, bool faved);
 
 	void setsReceived(const QVector<MTPStickerSet> &data, uint64 hash);
 	void masksReceived(const QVector<MTPStickerSet> &data, uint64 hash);

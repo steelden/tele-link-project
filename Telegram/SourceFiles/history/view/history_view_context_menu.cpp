@@ -384,6 +384,11 @@ void AddPhotoActions(
 			}
 		}, &st::menuIconCopy);
 	}
+	if (MtsLink::canAddPhotoToStickers(photo)) {
+		menu->addAction(tr::lng_mtslink_add_to_stickers(tr::now), [=] {
+			MtsLink::addPhotoToStickers(photo);
+		}, &st::menuIconStickers);
+	}
 	if (photo->hasAttachedStickers()) {
 		const auto controller = list->controller();
 		auto callback = [=] {

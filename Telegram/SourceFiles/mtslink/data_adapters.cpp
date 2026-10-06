@@ -16,6 +16,11 @@ based on Telegram Desktop.
 #include "data/data_document_media.h"
 #include "main/main_domain.h"
 #include "storage/storage_account.h"
+#include "storage/file_download.h"
+#include "data/stickers/data_stickers_set.h"
+#include <QtGui/QImageReader>
+#include <QtCore/QCollator>
+#include "base/zlib_help.h"
 #include "data/data_session.h"
 #include "data/data_channel.h"
 #include "data/data_chat_participant_status.h"
@@ -527,6 +532,48 @@ void reapplyPhotoUrls(
 	photo->clearFailed(Data::PhotoSize::Large);
 }
 
+// The GIF files by their documents: the saved GIFs are kept and sent by
+// the MTS Link file ids.
+QHash<DocumentId, Api::FileData> GifFiles;
+// The image files by their photos: added to the local stickers.
+QHash<PhotoId, Api::FileData> PhotoFiles;
+// The animated stickers of the messages (sent by TeleLink): by documents.
+QHash<DocumentId, Api::FileData> StickerFiles;
+
+constexpr auto kTgsMime = "application/x-tgsticker";
+constexpr auto kWebmStickerSuffix = ".sticker.webm";
+constexpr auto kAnimatedStickerSide = 512;
+
+// TeleLink sends the animated stickers as files: "*.tgs" (Lottie) and
+// "*.sticker.webm" (video), shown as stickers by these names.
+[[nodiscard]] bool isTgsStickerFile(const QString &name, const QString &mime) {
+	return (mime == QLatin1String(kTgsMime))
+		|| name.endsWith(u".tgs"_q, Qt::CaseInsensitive);
+}
+
+[[nodiscard]] bool isWebmStickerFile(const QString &name) {
+	return name.endsWith(
+		QLatin1String(kWebmStickerSuffix),
+		Qt::CaseInsensitive);
+}
+
+[[nodiscard]] QVector<MTPDocumentAttribute> stickerAttributes(
+		const QString &name,
+		int width,
+		int height) {
+	return {
+		MTP_documentAttributeFilename(MTP_string(name)),
+		MTP_documentAttributeImageSize(
+			MTP_int(width > 0 ? width : kAnimatedStickerSide),
+			MTP_int(height > 0 ? height : kAnimatedStickerSide)),
+		MTP_documentAttributeSticker(
+			MTP_flags(0),
+			MTP_string(),
+			MTP_inputStickerSetEmpty(),
+			MTPMaskCoords()),
+	};
+}
+
 MTPMessageMedia buildPhotoMedia(
 		not_null<Main::Session*> session,
 		const Api::FileData &file,
@@ -535,6 +582,7 @@ MTPMessageMedia buildPhotoMedia(
 	const auto fullUrl = privateCdnThumbBase() + file.id + u".jpg"_q;
 
 	const auto photoId = PhotoId(uuidToBareId(file.id));
+	PhotoFiles.insert(photoId, file);
 
 	const auto thumbLocation = ImageLocation(
 		DownloadLocation{ PlainUrlLocation{ thumbUrl } },
@@ -575,9 +623,6 @@ MTPMessageMedia buildPhotoMedia(
 		MTPDocument());
 }
 
-// The GIF files by their documents: the saved GIFs are kept and sent by
-// the MTS Link file ids.
-QHash<DocumentId, Api::FileData> GifFiles;
 
 MTPMessageMedia buildFileMedia(
 		not_null<Main::Session*> session,
@@ -596,6 +641,54 @@ MTPMessageMedia buildFileMedia(
 	}
 
 	const auto fileUrl = fileDownloadBase() + file.id + u"/download"_q;
+
+	const auto isTgs = isTgsStickerFile(file.name, file.mime);
+	const auto isWebmSticker = !isTgs && isWebmStickerFile(file.name);
+	if (isTgs || isWebmSticker) {
+		// An animated sticker: the mime type of Telegram, not of the server.
+		const auto mime = isTgs ? QString(kTgsMime) : u"video/webm"_q;
+		const auto attrs = stickerAttributes(
+			file.name,
+			isTgs ? 0 : file.width,
+			isTgs ? 0 : file.height);
+		const auto docId = DocumentId(uuidToBareId(file.id));
+		auto kept = file;
+		kept.mime = mime;
+		StickerFiles.insert(docId, kept);
+		const auto doc = session->data().document(
+			docId,
+			uint64(0),
+			QByteArray(),
+			date,
+			attrs,
+			mime,
+			InlineImageLocation(),
+			ImageWithLocation(),
+			ImageWithLocation(),
+			false,
+			session->mainDcId(),
+			file.size);
+		doc->setContentUrl(fileUrl);
+		using Flag = MTPDmessageMediaDocument::Flag;
+		return MTP_messageMediaDocument(
+			MTP_flags(Flag::f_document),
+			MTP_document(
+				MTP_flags(0),
+				MTP_long(docId),
+				MTP_long(0),
+				MTP_bytes(),
+				MTP_int(date),
+				MTP_string(mime),
+				MTP_long(file.size),
+				MTP_vector<MTPPhotoSize>(),
+				MTPVector<MTPVideoSize>(),
+				MTP_int(session->mainDcId()),
+				MTP_vector<MTPDocumentAttribute>(attrs)),
+			MTPVector<MTPDocument>(),
+			MTPPhoto(),
+			MTPint(),
+			MTP_int(0));
+	}
 
 	const auto isVideo = file.mime.startsWith(u"video/"_q);
 
@@ -2966,6 +3059,7 @@ void connectToSession(
 	// The titles of the organization profile fields, for the profiles.
 	requestProfileFields(mainSession);
 	restoreSavedGifs(mainSession);
+	restoreLocalStickers(mainSession);
 	// Diagnostics: the unread chats and threads, once a minute.
 	{
 		static const auto summaryTimer = new base::Timer([=] {
@@ -5915,6 +6009,13 @@ struct PendingSend {
 };
 QHash<QString, PendingSend> PendingSends; // By the client id.
 
+struct PendingUpload {
+	PeerId peerId = 0;
+	MsgId localId = 0;
+	Fn<void()> upload;
+};
+std::vector<PendingUpload> PendingUploads;
+
 void sendTracked(not_null<Main::Session*> session, const QString &clientId) {
 	const auto i = PendingSends.constFind(clientId);
 	const auto mts = session->account().mtsLinkSession();
@@ -5954,7 +6055,18 @@ void sendTracked(not_null<Main::Session*> session, const QString &clientId) {
 
 } // namespace
 
+void addPendingUpload(PeerId peerId, MsgId localId, Fn<void()> upload) {
+	PendingUploads.push_back({ peerId, localId, std::move(upload) });
+}
+
 void resendPendingSends(not_null<Main::Session*> session) {
+	for (auto &pending : base::take(PendingUploads)) {
+		if (!session->data().message(pending.peerId, pending.localId)) {
+			continue; // Deleted meanwhile.
+		}
+		LOG(("MtsLink Sending: upload of %1 again").arg(pending.localId.bare));
+		pending.upload();
+	}
 	for (const auto &clientId : PendingSends.keys()) {
 		const auto &send = PendingSends[clientId];
 		if (!session->data().message(send.peerId, send.localId)) {
@@ -8908,14 +9020,14 @@ void putToDocumentCache(
 
 // The content of a file: loaded already, or downloaded with the session.
 void loadFileBytes(
-		not_null<DocumentData*> document,
+		DocumentData *document,
 		const QString &fileId,
 		Fn<void(QByteArray)> done) {
 	auto bytes = QByteArray();
-	if (const auto media = document->activeMediaView()) {
+	if (const auto media = document ? document->activeMediaView() : nullptr) {
 		bytes = media->bytes();
 	}
-	if (bytes.isEmpty()) {
+	if (bytes.isEmpty() && document) {
 		const auto &location = document->location(true);
 		if (!location.isEmpty() && location.accessEnable()) {
 			auto f = QFile(location.name());
@@ -9008,6 +9120,633 @@ void saveSavedGifs(not_null<Main::Session*> session) {
 }
 
 } // namespace
+
+namespace {
+
+struct LocalSticker {
+	QString key; // The MTS Link file id of the image.
+	QString name;
+	QString mime;
+	int width = 0;
+	int height = 0;
+};
+constexpr auto kMtsLinkStickersTag = uint64(0xBC09'0000'0000'0001ULL);
+constexpr auto kMtsLinkStickerBytesTag = uint64(0xBC0A'0000'0000'0000ULL);
+QHash<DocumentId, LocalSticker> LocalStickers;
+bool RestoringLocalStickers = false;
+// The imported sticker packs: local sets, by their ids.
+QSet<uint64> LocalPackIds;
+constexpr auto kMaxPackStickers = 120;
+constexpr auto kPackStickerSide = 512;
+
+[[nodiscard]] Storage::Cache::Key stickersCacheKey() {
+	return { kMtsLinkStickersTag, 0 };
+}
+
+[[nodiscard]] Storage::Cache::Key stickerBytesCacheKey(const QString &key) {
+	const auto hash = QCryptographicHash::hash(
+		key.toUtf8(),
+		QCryptographicHash::Md5);
+	uint64 low = 0;
+	memcpy(&low, hash.constData(), sizeof(low));
+	return { kMtsLinkStickerBytesTag, low };
+}
+
+[[nodiscard]] QString stickerUrl(const QString &key) {
+	// Not loaded from anywhere: the content is in the cache.
+	return u"mtslink-sticker://"_q + key;
+}
+
+[[nodiscard]] DocumentId stickerDocumentId(const QString &key) {
+	return DocumentId(uuidToBareId(u"mtslink-sticker:"_q + key));
+}
+
+// A sticker document of a local image: shown in the stickers panel.
+not_null<DocumentData*> makeLocalSticker(
+		not_null<Main::Session*> session,
+		const LocalSticker &sticker,
+		int64 size) {
+	const auto id = stickerDocumentId(sticker.key);
+	LocalStickers.insert(id, sticker);
+	const auto attrs = stickerAttributes(
+		sticker.name,
+		sticker.width,
+		sticker.height);
+	const auto document = session->data().document(
+		id,
+		uint64(0),
+		QByteArray(),
+		base::unixtime::now(),
+		attrs,
+		sticker.mime,
+		InlineImageLocation(),
+		ImageWithLocation(),
+		ImageWithLocation(),
+		false,
+		session->mainDcId(),
+		size);
+	document->setContentUrl(stickerUrl(sticker.key));
+	return document;
+}
+
+void writeLocalSticker(QDataStream &s, const LocalSticker &sticker) {
+	s << sticker.key << sticker.name << sticker.mime
+		<< qint32(sticker.width) << qint32(sticker.height);
+}
+
+[[nodiscard]] std::optional<LocalSticker> readLocalSticker(QDataStream &s) {
+	auto sticker = LocalSticker();
+	auto w = qint32();
+	auto h = qint32();
+	s >> sticker.key >> sticker.name >> sticker.mime >> w >> h;
+	if (s.status() != QDataStream::Ok) {
+		return std::nullopt;
+	}
+	sticker.width = w;
+	sticker.height = h;
+	return sticker;
+}
+
+[[nodiscard]] QList<LocalSticker> localStickersOf(
+		const Data::StickersPack &pack) {
+	auto result = QList<LocalSticker>();
+	for (const auto document : pack) {
+		const auto j = LocalStickers.constFind(document->id);
+		if (j != LocalStickers.constEnd()) {
+			result.push_back(j.value());
+		}
+	}
+	return result;
+}
+
+void saveLocalStickers(not_null<Main::Session*> session) {
+	using Flag = Data::StickersSetFlag;
+	const auto &sets = session->data().stickers().sets();
+	const auto i = sets.find(Data::Stickers::FavedSetId);
+	const auto faved = (i != sets.end())
+		? localStickersOf(i->second->stickers)
+		: QList<LocalSticker>();
+
+	// The installed packs, in the order of the panel.
+	struct Pack {
+		uint64 id = 0;
+		QString title;
+		QList<LocalSticker> stickers;
+	};
+	auto packs = std::vector<Pack>();
+	for (const auto setId : session->data().stickers().setsOrder()) {
+		if (!LocalPackIds.contains(setId)) {
+			continue;
+		}
+		const auto j = sets.find(setId);
+		if (j != sets.end() && (j->second->flags & Flag::Installed)) {
+			packs.push_back({
+				setId,
+				j->second->title,
+				localStickersOf(j->second->stickers),
+			});
+		}
+	}
+	for (auto j = LocalPackIds.begin(); j != LocalPackIds.end();) {
+		const auto id = *j;
+		const auto kept = ranges::any_of(packs, [&](const Pack &pack) {
+			return (pack.id == id);
+		});
+		if (!kept) {
+			LOG(("MtsLink Stickers: pack %1 removed").arg(id));
+			j = LocalPackIds.erase(j);
+		} else {
+			++j;
+		}
+	}
+
+	// The removed stickers: their contents are not kept anymore.
+	auto used = QSet<QString>();
+	for (const auto &sticker : faved) {
+		used.insert(sticker.key);
+	}
+	for (const auto &pack : packs) {
+		for (const auto &sticker : pack.stickers) {
+			used.insert(sticker.key);
+		}
+	}
+	for (auto j = LocalStickers.begin(); j != LocalStickers.end();) {
+		if (!used.contains(j->key)) {
+			session->data().cache().remove(stickerBytesCacheKey(j->key));
+			j = LocalStickers.erase(j);
+		} else {
+			++j;
+		}
+	}
+	auto data = QByteArray();
+	{
+		QDataStream s(&data, QIODevice::WriteOnly);
+		s.setVersion(QDataStream::Qt_5_1);
+		s << qint32(2) << qint32(faved.size());
+		for (const auto &sticker : faved) {
+			writeLocalSticker(s, sticker);
+		}
+		s << qint32(packs.size());
+		for (const auto &pack : packs) {
+			s << quint64(pack.id) << pack.title << qint32(pack.stickers.size());
+			for (const auto &sticker : pack.stickers) {
+				writeLocalSticker(s, sticker);
+			}
+		}
+	}
+	LOG(("MtsLink Stickers: saved %1 faved, %2 packs"
+		).arg(faved.size()
+		).arg(packs.size()));
+	session->data().cache().put(stickersCacheKey(), std::move(data));
+}
+
+// The content of a local sticker from the cache: shown from it.
+void showLocalStickerFromCache(
+		not_null<Main::Session*> session,
+		not_null<DocumentData*> document,
+		const QString &key) {
+	const auto weak = base::make_weak(session);
+	session->data().cache().get(stickerBytesCacheKey(key), [=](
+			QByteArray &&bytes) {
+		crl::on_main(weak, [=, bytes = std::move(bytes)] {
+			if (weak.get() && !bytes.isEmpty()) {
+				putToDocumentCache(document, stickerUrl(key), bytes);
+			}
+		});
+	});
+}
+
+// An imported pack: an installed set of the panel (no set on the server).
+void applyLocalPack(
+		not_null<Main::Session*> session,
+		uint64 setId,
+		const QString &title,
+		const Data::StickersPack &stickers,
+		bool toFront) {
+	using Flag = Data::StickersSetFlag;
+	auto &sets = session->data().stickers().setsRef();
+	const auto now = base::unixtime::now();
+	auto i = sets.find(setId);
+	if (i == sets.end()) {
+		i = sets.emplace(setId, std::make_unique<Data::StickersSet>(
+			&session->data(),
+			setId,
+			uint64(0), // No access hash: not requested from the server.
+			uint64(0),
+			title,
+			QString(),
+			int(stickers.size()),
+			Flag::Installed,
+			now)).first;
+	}
+	const auto set = i->second.get();
+	set->title = title;
+	set->flags = Flag::Installed;
+	set->installDate = now;
+	set->count = int(stickers.size());
+	set->stickers = stickers;
+	set->dates = std::vector<TimeId>(stickers.size(), now);
+	set->emoji.clear();
+	LocalPackIds.insert(setId);
+	auto &order = session->data().stickers().setsOrderRef();
+	if (toFront) {
+		order.removeAll(setId);
+		order.push_front(setId);
+	} else if (!order.contains(setId)) {
+		order.push_back(setId);
+	}
+}
+
+} // namespace
+
+// The content of an image by its file: the urls of buildPhotoMedia.
+void putToImageCache(
+		not_null<Main::Session*> session,
+		const QString &fileId,
+		const QByteArray &bytes) {
+	for (const auto &url : {
+		privateCdnThumbBase() + fileId + u"_s.jpg"_q,
+		privateCdnThumbBase() + fileId + u".jpg"_q,
+	}) {
+		LOG(("MtsLink Stickers: image cache %1 (%2 bytes)"
+			).arg(url
+			).arg(bytes.size()));
+		session->data().cache().put(
+			Data::UrlCacheKey(url),
+			Storage::Cache::Database::TaggedValue(
+				QByteArray(bytes),
+				Data::kImageCacheTag));
+	}
+}
+
+bool toggleFavedSticker(not_null<DocumentData*> document, bool faved) {
+	auto &stickers = document->owner().stickers();
+	if (!faved || LocalStickers.contains(document->id)) {
+		stickers.mtsLinkSetFaved(document, faved);
+		return true;
+	}
+	const auto i = StickerFiles.constFind(document->id);
+	if (i == StickerFiles.constEnd()) {
+		LOG(("MtsLink Stickers: not a local sticker %1").arg(document->id));
+		return false;
+	}
+	// The sticker of a message: kept with its content, as the images.
+	const auto file = i.value();
+	const auto session = &document->session();
+	const auto weak = base::make_weak(session);
+	loadFileBytes(document, file.id, [=](QByteArray bytes) {
+		const auto strong = weak.get();
+		if (!strong || bytes.isEmpty()) {
+			LOG(("MtsLink Stickers: no content of %1").arg(file.id));
+			return;
+		}
+		const auto sticker = LocalSticker{
+			.key = file.id,
+			.name = file.name,
+			.mime = file.mime,
+			.width = kAnimatedStickerSide,
+			.height = kAnimatedStickerSide,
+		};
+		const auto local = makeLocalSticker(strong, sticker, bytes.size());
+		strong->data().cache().put(
+			stickerBytesCacheKey(file.id),
+			QByteArray(bytes));
+		putToDocumentCache(local, stickerUrl(file.id), bytes);
+		LOG(("MtsLink Stickers: added sticker %1 (%2 bytes)"
+			).arg(file.id
+			).arg(bytes.size()));
+		strong->data().stickers().mtsLinkSetFaved(local, true);
+	});
+	return true;
+}
+
+bool canAddPhotoToStickers(not_null<PhotoData*> photo) {
+	const auto i = PhotoFiles.constFind(photo->id);
+	return (i != PhotoFiles.constEnd())
+		&& (i->size <= Storage::kMaxStickerBytesSize)
+		&& !LocalStickers.contains(stickerDocumentId(i->id));
+}
+
+void addPhotoToStickers(not_null<PhotoData*> photo) {
+	const auto i = PhotoFiles.constFind(photo->id);
+	if (i == PhotoFiles.constEnd()) {
+		return;
+	}
+	const auto file = i.value();
+	const auto session = &photo->session();
+	const auto weak = base::make_weak(session);
+	loadFileBytes(nullptr, file.id, [=](QByteArray bytes) {
+		const auto strong = weak.get();
+		if (!strong || bytes.isEmpty()) {
+			LOG(("MtsLink Stickers: no content of %1").arg(file.id));
+			return;
+		}
+		const auto sticker = LocalSticker{
+			.key = file.id,
+			.name = file.name,
+			.mime = file.mime,
+			.width = file.width,
+			.height = file.height,
+		};
+		const auto document = makeLocalSticker(strong, sticker, bytes.size());
+		strong->data().cache().put(stickerBytesCacheKey(file.id), QByteArray(bytes));
+		putToDocumentCache(document, stickerUrl(file.id), bytes);
+		LOG(("MtsLink Stickers: added %1 (%2 bytes)"
+			).arg(file.id
+			).arg(bytes.size()));
+		strong->data().stickers().mtsLinkSetFaved(document, true);
+	});
+}
+
+void restoreLocalStickers(not_null<Main::Session*> session) {
+	const auto weak = base::make_weak(session);
+	RestoringLocalStickers = true;
+	session->data().stickers().updated(
+		Data::StickersType::Stickers
+	) | rpl::on_next([=] {
+		if (const auto strong = weak.get()
+			; strong && !RestoringLocalStickers) {
+			saveLocalStickers(strong);
+		}
+	}, session->lifetime());
+
+	session->data().cache().get(stickersCacheKey(), [=](QByteArray &&data) {
+		crl::on_main(weak, [=, data = std::move(data)] {
+			const auto strong = weak.get();
+			if (!strong) {
+				return;
+			}
+			const auto finish = gsl::finally([] {
+				RestoringLocalStickers = false;
+			});
+			if (data.isEmpty()) {
+				return;
+			}
+			QDataStream s(data);
+			s.setVersion(QDataStream::Qt_5_1);
+			auto version = qint32();
+			auto count = qint32();
+			s >> version >> count;
+			if (s.status() != QDataStream::Ok
+				|| (version != 1 && version != 2)
+				|| count < 0) {
+				return;
+			}
+			const auto readStickers = [&](int count) {
+				auto result = Data::StickersPack();
+				for (auto i = 0; i != count; ++i) {
+					const auto sticker = readLocalSticker(s);
+					if (!sticker) {
+						return std::optional<Data::StickersPack>();
+					}
+					const auto document = makeLocalSticker(
+						strong,
+						*sticker,
+						0);
+					showLocalStickerFromCache(strong, document, sticker->key);
+					result.push_back(document);
+				}
+				return std::make_optional(result);
+			};
+			const auto faved = readStickers(count);
+			if (!faved) {
+				return;
+			}
+			auto documents = std::vector<not_null<DocumentData*>>();
+			for (const auto document : *faved) {
+				documents.push_back(document);
+			}
+			auto packs = qint32();
+			if (version == 2) {
+				s >> packs;
+				for (auto i = 0; i < packs; ++i) {
+					auto setId = quint64();
+					auto title = QString();
+					auto size = qint32();
+					s >> setId >> title >> size;
+					if (s.status() != QDataStream::Ok || size < 0) {
+						break;
+					}
+					const auto stickers = readStickers(size);
+					if (!stickers) {
+						break;
+					}
+					applyLocalPack(strong, setId, title, *stickers, false);
+				}
+				if (packs > 0) {
+					strong->data().stickers().notifyUpdated(
+						Data::StickersType::Stickers);
+				}
+			}
+			// The first one is the newest: pushed to the front the last.
+			for (const auto document : ranges::views::reverse(documents)) {
+				strong->data().stickers().mtsLinkSetFaved(document, true);
+			}
+			LOG(("MtsLink Stickers: restored %1 faved, %2 packs"
+				).arg(documents.size()
+				).arg(packs));
+		});
+	});
+}
+
+namespace {
+
+struct ImportedImage {
+	QString name;
+	QByteArray bytes;
+};
+
+[[nodiscard]] bool IsPackImageName(const QString &name) {
+	const auto lower = name.toLower();
+	return !lower.startsWith(u"__macosx/"_q)
+		&& !QFileInfo(lower).fileName().startsWith('.')
+		&& (lower.endsWith(u".png"_q)
+			|| lower.endsWith(u".tgs"_q)
+			|| lower.endsWith(u".webm"_q)
+			|| lower.endsWith(u".webp"_q)
+			|| lower.endsWith(u".jpg"_q)
+			|| lower.endsWith(u".jpeg"_q));
+}
+
+[[nodiscard]] std::vector<ImportedImage> ReadPackZip(const QString &path) {
+	constexpr auto kMaxZipSize = 100 * 1024 * 1024;
+	constexpr auto kMaxImageSize = 10 * 1024 * 1024;
+	auto result = std::vector<ImportedImage>();
+	auto f = QFile(path);
+	if (f.size() > kMaxZipSize || !f.open(QIODevice::ReadOnly)) {
+		LOG(("MtsLink Stickers: can't read %1").arg(path));
+		return result;
+	}
+	auto zip = zlib::FileToRead(f.readAll());
+	if (zip.goToFirstFile() != UNZ_OK) {
+		LOG(("MtsLink Stickers: not a zip %1").arg(path));
+		return result;
+	}
+	do {
+		const auto name = zip.getCurrentFileName();
+		if (IsPackImageName(name)) {
+			auto bytes = zip.readCurrentFileContent(kMaxImageSize);
+			if (!bytes.isEmpty() && zip.error() == UNZ_OK) {
+				result.push_back({ QFileInfo(name).fileName(), bytes });
+			}
+		}
+	} while (zip.goToNextFile() == UNZ_OK
+		&& int(result.size()) < kMaxPackStickers);
+	return result;
+}
+
+// The sticker image: PNG or JPEG of a limited size (as sent to the chats),
+// other formats and the big images are converted.
+[[nodiscard]] std::optional<LocalSticker> PreparePackImage(
+		ImportedImage &image) {
+	constexpr auto kMaxAnimatedSize = 5 * 1024 * 1024;
+	const auto lower = image.name.toLower();
+	const auto tgs = lower.endsWith(u".tgs"_q);
+	if (tgs || lower.endsWith(u".webm"_q)) {
+		// Animated: as is, sent as a file with the sticker name.
+		if (image.bytes.size() > kMaxAnimatedSize) {
+			LOG(("MtsLink Stickers: too big %1").arg(image.name));
+			return std::nullopt;
+		}
+		const auto base = QFileInfo(image.name).completeBaseName();
+		return LocalSticker{
+			.key = QUuid::createUuid().toString(QUuid::WithoutBraces),
+			.name = tgs
+				? image.name
+				: isWebmStickerFile(image.name)
+				? image.name
+				: (base + QLatin1String(kWebmStickerSuffix)),
+			.mime = tgs ? QString(kTgsMime) : u"video/webm"_q,
+			.width = kAnimatedStickerSide,
+			.height = kAnimatedStickerSide,
+		};
+	}
+	QBuffer buffer(&image.bytes);
+	buffer.open(QIODevice::ReadOnly);
+	QImageReader reader(&buffer);
+	const auto format = reader.format().toLower();
+	auto frame = reader.read();
+	buffer.close();
+	if (frame.isNull()) {
+		LOG(("MtsLink Stickers: not an image %1").arg(image.name));
+		return std::nullopt;
+	}
+	auto mime = (format == "png")
+		? u"image/png"_q
+		: (format == "jpeg" || format == "jpg")
+		? u"image/jpeg"_q
+		: QString();
+	const auto big = (image.bytes.size() > Storage::kMaxStickerBytesSize)
+		|| (frame.width() > 2560)
+		|| (frame.height() > 2560);
+	auto name = image.name;
+	if (mime.isEmpty() || big) {
+		if (frame.width() > kPackStickerSide
+			|| frame.height() > kPackStickerSide) {
+			frame = frame.scaled(
+				kPackStickerSide,
+				kPackStickerSide,
+				Qt::KeepAspectRatio,
+				Qt::SmoothTransformation);
+		}
+		auto png = QByteArray();
+		QBuffer out(&png);
+		out.open(QIODevice::WriteOnly);
+		frame.save(&out, "PNG");
+		out.close();
+		image.bytes = png;
+		mime = u"image/png"_q;
+		name = QFileInfo(name).completeBaseName() + u".png"_q;
+	}
+	return LocalSticker{
+		.key = QUuid::createUuid().toString(QUuid::WithoutBraces),
+		.name = name,
+		.mime = mime,
+		.width = frame.width(),
+		.height = frame.height(),
+	};
+}
+
+} // namespace
+
+void importStickerPack(
+		not_null<Main::Session*> session,
+		QPointer<QWidget> parent,
+		Fn<void(QString)> showToast) {
+	const auto weak = base::make_weak(session);
+	FileDialog::GetOpenPaths(
+		parent,
+		tr::lng_mtslink_import_stickers_title(tr::now),
+		u"Sticker packs (*.zip *.png *.webp *.jpg *.jpeg *.tgs *.webm);;"_q
+			+ FileDialog::AllFilesFilter(),
+		[=](FileDialog::OpenResult &&result) {
+		const auto strong = weak.get();
+		if (!strong || result.paths.isEmpty()) {
+			return;
+		}
+		const auto &paths = result.paths;
+		auto images = std::vector<ImportedImage>();
+		auto title = QString();
+		if (paths.size() == 1
+			&& paths.front().endsWith(u".zip"_q, Qt::CaseInsensitive)) {
+			images = ReadPackZip(paths.front());
+			title = QFileInfo(paths.front()).completeBaseName();
+		} else {
+			for (const auto &path : paths) {
+				if (!IsPackImageName(path)
+					|| int(images.size()) >= kMaxPackStickers) {
+					continue;
+				}
+				auto f = QFile(path);
+				if (f.open(QIODevice::ReadOnly)) {
+					images.push_back({ QFileInfo(path).fileName(), f.readAll() });
+				}
+			}
+			title = QFileInfo(paths.front()).dir().dirName();
+		}
+		auto collator = QCollator();
+		collator.setNumericMode(true);
+		collator.setCaseSensitivity(Qt::CaseInsensitive);
+		ranges::sort(images, [&](const ImportedImage &a, const ImportedImage &b) {
+			return collator.compare(a.name, b.name) < 0;
+		});
+		auto pack = Data::StickersPack();
+		for (auto &image : images) {
+			const auto sticker = PreparePackImage(image);
+			if (!sticker) {
+				continue;
+			}
+			const auto document = makeLocalSticker(
+				strong,
+				*sticker,
+				image.bytes.size());
+			strong->data().cache().put(
+				stickerBytesCacheKey(sticker->key),
+				QByteArray(image.bytes));
+			putToDocumentCache(document, stickerUrl(sticker->key), image.bytes);
+			pack.push_back(document);
+		}
+		LOG(("MtsLink Stickers: import '%1' from %2 files: %3 stickers"
+			).arg(title
+			).arg(paths.size()
+			).arg(pack.size()));
+		if (pack.isEmpty()) {
+			showToast(tr::lng_mtslink_import_stickers_empty(tr::now));
+			return;
+		}
+		auto setId = uint64();
+		do {
+			setId = (base::RandomValue<uint64>() & 0x3FFF'FFFF'FFFF'FFFFULL)
+				| 1ULL;
+		} while (strong->data().stickers().sets().contains(setId));
+		applyLocalPack(strong, setId, title, pack, true);
+		strong->data().stickers().notifyUpdated(Data::StickersType::Stickers);
+		showToast(tr::lng_mtslink_import_stickers_done(
+			tr::now,
+			lt_pack,
+			title));
+	});
+}
 
 void rememberUploadedContent(
 		not_null<Main::Session*> session,
@@ -9106,10 +9845,13 @@ bool sendSavedGif(
 		MsgId replyToId,
 		MsgId topicRootId) {
 	const auto i = GifFiles.constFind(document->id);
+	const auto sticker = LocalStickers.constFind(document->id);
 	const auto mts = session->account().mtsLinkSession();
 	const auto peerId = history->peer->id;
 	const auto chatId = peerIdToChatId(peerId);
-	if (i == GifFiles.constEnd() || !mts || chatId.isEmpty()) {
+	const auto isSticker = (sticker != LocalStickers.constEnd());
+	const auto isImageSticker = isSticker && isImageMime(sticker->mime);
+	if ((i == GifFiles.constEnd() && !isSticker) || !mts || chatId.isEmpty()) {
 		LOG(("MtsLink Gifs: no file for the GIF %1").arg(document->id));
 		return false;
 	}
@@ -9119,7 +9861,18 @@ bool sendSavedGif(
 	const auto parentMtsId = topicRootId
 		? msgIdToMtsLinkId(peerId, topicRootId)
 		: QString();
-	const auto file = i.value();
+	const auto file = isSticker
+		? Api::FileData{
+			.id = sticker->key,
+			.name = sticker->name,
+			.mime = sticker->mime,
+			.width = sticker->width,
+			.height = sticker->height,
+		}
+		: i.value();
+	const auto bytesKey = isSticker
+		? stickerBytesCacheKey(sticker->key)
+		: gifBytesCacheKey(file.id);
 	const auto weak = base::make_weak(session);
 
 	// The message with the content: a local one right away, as for a sent
@@ -9153,11 +9906,17 @@ bool sendSavedGif(
 		msg.parentId = parentMtsId;
 		auto local = file;
 		local.id = tempId;
+		local.size = bytes.size();
 		msg.files.push_back(local);
 		// The content is in the cache of the local document before it is
 		// shown: not loaded by its temporary (not existing) url.
 		const auto tempDocument = strong->data().document(
 			DocumentId(uuidToBareId(tempId)));
+		if (isImageSticker) {
+			// The image of the local message (and of the real one later)
+			// is shown from the content, not loaded from the CDN.
+			putToImageCache(strong, tempId, bytes);
+		}
 		addMessage(strong, msg, isThreadSend);
 		markLocalSending(
 			strong,
@@ -9167,6 +9926,14 @@ bool sendSavedGif(
 		// The upload progress is shown, as for a sent file.
 		tempDocument->uploadingData = std::make_unique<Data::UploadState>(
 			bytes.size());
+		// A sticker is an image: the upload progress is on its photo.
+		const auto tempPhoto = isImageSticker
+			? strong->data().photo(PhotoId(uuidToBareId(tempId))).get()
+			: nullptr;
+		if (tempPhoto) {
+			tempPhoto->uploadingData = std::make_unique<Data::UploadState>(
+				bytes.size());
+		}
 		if (isThreadSend) {
 			addPendingThreadSend(clientId);
 		} else {
@@ -9184,6 +9951,24 @@ bool sendSavedGif(
 			).arg(file.name
 			).arg(bytes.size()
 			).arg(chatId));
+		const auto localId = MsgId(uuidToBareId(tempId) & 0x7FFFFFFFLL);
+		const auto upload = std::make_shared<Fn<void()>>();
+		*upload = [=, self = std::weak_ptr<Fn<void()>>(upload)] {
+		// Kept by the callbacks of the upload, may be run again.
+		const auto keep = self.lock();
+		const auto strong = weak.get();
+		const auto mts = strong
+			? strong->account().mtsLinkSession()
+			: nullptr;
+		if (!mts) {
+			return;
+		} else if (!mts->rpc() || !mts->rpc()->isConnected()) {
+			LOG(("MtsLink Gifs: upload waits for the connection"));
+			if (const auto again = self.lock()) {
+				addPendingUpload(peerId, localId, [again] { (*again)(); });
+			}
+			return;
+		}
 		mts->files()->uploadFile(
 			file.name.isEmpty() ? u"animation.gif"_q : file.name,
 			bytes,
@@ -9202,6 +9987,13 @@ bool sendSavedGif(
 					tempDocument,
 					fileDownloadUrl(result.id),
 					bytes);
+				if (isImageSticker) {
+					putToImageCache(strong, result.id, bytes);
+				}
+				if (tempPhoto) {
+					tempPhoto->uploadingData = nullptr;
+					tempPhoto->owner().requestPhotoViewRepaint(tempPhoto);
+				}
 				trackSend(
 					strong,
 					peerId,
@@ -9217,6 +10009,16 @@ bool sendSavedGif(
 			},
 			[=](const QString &error) {
 				LOG(("MtsLink Gifs: upload failed: %1").arg(error));
+				if (error == u"disconnected"_q) {
+					// Lost with the connection: uploaded after a reconnect.
+					if (const auto again = keep) {
+						addPendingUpload(
+							peerId,
+							localId,
+							[again] { (*again)(); });
+					}
+					return;
+				}
 				if (const auto strong = weak.get()) {
 					markLocalFailed(
 						strong,
@@ -9226,6 +10028,10 @@ bool sendSavedGif(
 				tempDocument->uploadingData = nullptr;
 				tempDocument->owner().requestDocumentViewRepaint(
 					tempDocument);
+				if (tempPhoto) {
+					tempPhoto->uploadingData = nullptr;
+					tempPhoto->owner().requestPhotoViewRepaint(tempPhoto);
+				}
 			},
 			[=](qint64 sent, qint64 total) {
 				if (const auto uploading = tempDocument->uploadingData.get()) {
@@ -9233,15 +10039,24 @@ bool sendSavedGif(
 					tempDocument->owner().requestDocumentViewRepaint(
 						tempDocument);
 				}
+				if (const auto uploading = tempPhoto
+						? tempPhoto->uploadingData.get()
+						: nullptr) {
+					uploading->offset = sent;
+					tempPhoto->owner().requestPhotoViewRepaint(tempPhoto);
+				}
 			});
+		};
+		(*upload)();
 	};
-	session->data().cache().get(gifBytesCacheKey(file.id), [=](
-			QByteArray &&bytes) {
+	session->data().cache().get(bytesKey, [=](QByteArray &&bytes) {
 		crl::on_main(weak, [=, bytes = std::move(bytes)]() mutable {
 			if (!bytes.isEmpty()) {
 				sendBytes(std::move(bytes));
-			} else {
+			} else if (!isSticker) {
 				loadFileBytes(document, file.id, sendBytes);
+			} else {
+				LOG(("MtsLink Stickers: no content of %1").arg(file.id));
 			}
 		});
 	});
