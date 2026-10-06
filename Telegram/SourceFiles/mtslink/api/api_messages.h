@@ -145,6 +145,19 @@ public:
 		const MessageId &messageId,
 		int limit = 50);
 
+	// A page of a thread, "Before" or "After" the given message (the
+	// first replies: after the parent itself), done(messages, profiles).
+	using ThreadPageDone = std::function<void(
+		QList<MessageData>,
+		QList<MemberProfile>)>;
+	void loadThreadPage(
+		const ChatId &chatId,
+		const MessageId &parentId,
+		const MessageId &fromMessageId,
+		bool after,
+		int limit,
+		ThreadPageDone done);
+
 	// Search in all my chats, done(messages, profiles, total, rawCount).
 	using GlobalSearchDone = std::function<void(
 		QList<MessageData>,

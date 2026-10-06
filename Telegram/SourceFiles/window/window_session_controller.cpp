@@ -1363,8 +1363,12 @@ void SessionNavigation::showPeerInfo(
 		const SectionShow &params) {
 	if (MtsLink::isThreadPeer(peerId)) {
 		const auto authorPeerId = MtsLink::threadAuthorPeerId(peerId);
-		if (authorPeerId) {
+		if (authorPeerId && authorPeerId != _session->userPeerId()) {
 			showPeerInfo(_session->data().peer(authorPeerId), params);
+			return;
+		} else if (const auto parent = MtsLink::threadParentInfo(
+				peerId).first) {
+			showPeerInfo(_session->data().peer(parent), params);
 			return;
 		}
 	}
@@ -1423,9 +1427,14 @@ void SessionNavigation::showPeerInfo(
 	//}
 	if (MtsLink::isThreadPeer(peer->id)) {
 		const auto authorPeerId = MtsLink::threadAuthorPeerId(peer->id);
-		if (authorPeerId) {
+		if (authorPeerId && authorPeerId != _session->userPeerId()) {
 			showSection(std::make_shared<Info::Memento>(
 				_session->data().peer(authorPeerId)), params);
+			return;
+		} else if (const auto parent = MtsLink::threadParentInfo(
+				peer->id).first) {
+			showSection(std::make_shared<Info::Memento>(
+				_session->data().peer(parent)), params);
 			return;
 		}
 	}

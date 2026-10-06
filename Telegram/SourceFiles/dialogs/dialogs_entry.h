@@ -227,12 +227,14 @@ auto Entry::unreadStateChangeNotifier(bool required) {
 	Expects(!(_flags & Flag::InUnreadChangeBlock));
 
 	_flags |= Flag::InUnreadChangeBlock;
-	const auto notify = required && inChatList();
+	// MTS Link: the thread rows live in the folder lists only, not in the
+	// main list, their unread state counts in those folders as well.
+	const auto notify = required
+		&& (inChatList() || !_chatListLinks.empty());
 	const auto wasState = notify ? chatListUnreadState() : UnreadState();
 	return gsl::finally([=, this] {
 		_flags &= ~Flag::InUnreadChangeBlock;
-		if (notify) {
-			Assert(inChatList());
+		if (notify && (inChatList() || !_chatListLinks.empty())) {
 			notifyUnreadStateChange(wasState);
 		}
 	});

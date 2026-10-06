@@ -12,6 +12,7 @@ based on Telegram Desktop.
 #include "data/components/scheduled_messages.h"
 #include "api/api_text_entities.h"
 #include "main/main_account.h"
+#include "main/main_domain.h"
 #include "storage/storage_account.h"
 #include "data/data_session.h"
 #include "data/data_channel.h"
@@ -33,6 +34,9 @@ based on Telegram Desktop.
 #include "lang/lang_keys.h"
 #include "history/view/history_view_send_action.h"
 #include "dialogs/dialogs_main_list.h"
+#include "dialogs/dialogs_indexed_list.h"
+#include "history/history_unread_things.h"
+#include "base/timer.h"
 #include "dialogs/dialogs_pinned_list.h"
 #include "ui/text/format_values.h"
 #include "ui/boxes/confirm_box.h"
@@ -2938,6 +2942,13 @@ void connectToSession(
 	mtsSession->users()->loadOrganizationMembers();
 	// The titles of the organization profile fields, for the profiles.
 	requestProfileFields(mainSession);
+	// Diagnostics: the unread chats and threads, once a minute.
+	{
+		static const auto summaryTimer = new base::Timer([=] {
+			logUnreadSummary(mainSession, u"timer"_q);
+		});
+		summaryTimer->callEach(60 * crl::time(1000));
+	}
 	// The default notification settings are kept locally.
 	restoreDefaultNotify(mainSession);
 }
@@ -3423,6 +3434,70 @@ void addThreadEntryUnread(
 		history->setChatListTimeId(date);
 	}
 	session->data().refreshChatListEntry(Dialogs::Key(history));
+	{
+		const auto badges = history->chatListBadgesState();
+		LOG(("MtsLink ReadDebug: thread entry '%1' peer=%2 unread=%3 "
+			"known=%4 badge=%5 badgeUnread=%6 muted=%7 inThreads=%8 "
+			"inMain=%9"
+			).arg(history->peer->name()
+			).arg(history->peer->id.value
+			).arg(history->unreadCount()
+			).arg(history->unreadCountKnown() ? 1 : 0
+			).arg(badges.unreadCounter
+			).arg(badges.unread ? 1 : 0
+			).arg(history->muted() ? 1 : 0
+			).arg(history->inChatList(FilterId(5)) ? 1 : 0
+			).arg(history->inChatList() ? 1 : 0));
+	}
+}
+
+int threadEntryUnreadCount(PeerId parentPeerId, MsgId rootId) {
+	const auto it = ThreadReverseMap.constFind({ parentPeerId, rootId });
+	if (it == ThreadReverseMap.constEnd()) {
+		return -1;
+	}
+	for (const auto &account : Core::App().domain().accounts()) {
+		if (const auto session = account.account->maybeSession()) {
+			if (const auto history = session->data().historyLoaded(
+					it.value())) {
+				return history->unreadCountKnown()
+					? history->unreadCount()
+					: -1;
+			}
+		}
+	}
+	return -1;
+}
+
+// Diagnostics: all the chats and threads with something unread.
+void logUnreadSummary(
+		not_null<Main::Session*> session,
+		const QString &reason) {
+	auto lines = QStringList();
+	auto total = 0;
+	for (const auto &row : session->data().chatsList()->indexed()->all()) {
+		const auto history = row->key().history();
+		if (!history) {
+			continue;
+		}
+		const auto unread = history->unreadCount();
+		const auto mark = history->unreadMark();
+		const auto mentions = history->unreadMentions().count();
+		if (unread > 0 || mark || mentions > 0) {
+			total += unread;
+			lines.push_back(u"'%1'%2 unread=%3 mark=%4 mentions=%5 muted=%6"_q
+				.arg(history->peer->name())
+				.arg(isThreadPeer(history->peer->id) ? u" (thread)"_q : QString())
+				.arg(unread)
+				.arg(mark ? 1 : 0)
+				.arg(mentions)
+				.arg(history->muted() ? 1 : 0));
+		}
+	}
+	LOG(("MtsLink ReadDebug: unread summary (%1), total=%2: %3"
+		).arg(reason
+		).arg(total
+		).arg(lines.isEmpty() ? u"none"_q : lines.join(u"; "_q)));
 }
 
 void resetThreadEntryUnread(
@@ -3430,6 +3505,11 @@ void resetThreadEntryUnread(
 		PeerId parentPeerId,
 		MsgId rootId) {
 	const auto history = threadEntryHistory(session, parentPeerId, rootId);
+	LOG(("MtsLink ReadDebug: reset thread entry root=%1 entry='%2' "
+		"unread=%3"
+		).arg(rootId.bare
+		).arg(history ? history->peer->name() : u"-"_q
+		).arg(history ? history->unreadCount() : -1));
 	if (history && history->unreadCount() > 0) {
 		history->setUnreadCount(0);
 		session->data().refreshChatListEntry(Dialogs::Key(history));
@@ -4939,10 +5019,12 @@ void handleChatEvent(
 			if (!isOutgoing) {
 				const auto history =
 					session->data().history(chatPeerId);
+				// The server does not count the thread replies as unread
+				// in the chat itself (ChatUnreadMessageCountUpdatedEvent):
+				// they are unread in the thread entry only.
 				const auto channel = session->data().channelLoaded(
 					peerToChannel(chatPeerId));
-				const auto skipUnread = isThread
-					&& channel && channel->isBroadcast();
+				const auto skipUnread = isThread;
 				if (!skipUnread && history->unreadCountKnown()) {
 					history->setUnreadCount(
 						history->unreadCount() + 1);
@@ -5013,12 +5095,37 @@ void handleChatEvent(
 			}
 			const auto threadIt = ThreadReverseMap.constFind(
 				{ chatPeerId, parentMsgId });
+			{
+				const auto entry = threadEntryHistory(
+					session,
+					chatPeerId,
+					parentMsgId);
+				const auto views = parent
+					? parent->Get<HistoryMessageViews>()
+					: nullptr;
+				LOG(("MtsLink ReadDebug: thread reply root=%1 own=%2 open=%3 "
+					"mapped=%4 entry='%5' entryUnread=%6 parent=%7 "
+					"rootUnread=%8"
+					).arg(parentMsgId.bare
+					).arg(isOwn ? 1 : 0
+					).arg(threadIsOpen ? 1 : 0
+					).arg((threadIt != ThreadReverseMap.constEnd()) ? 1 : 0
+					).arg(entry ? entry->peer->name() : u"-"_q
+					).arg(entry ? entry->unreadCount() : -1
+					).arg(parent ? 1 : 0
+					).arg(views
+						? int(views->commentsMaxId.bare
+							- views->commentsInboxReadTillId.bare)
+						: -1));
+			}
 			if (threadIt != ThreadReverseMap.constEnd()) {
+				// The counter itself comes in ChatUnreadMessageCountUpdated
+				// with the "parentId" of the thread.
 				addThreadEntryUnread(
 					session,
 					chatPeerId,
 					parentMsgId,
-					(isOwn || threadIsOpen) ? 0 : 1,
+					0,
 					TimeId(msg.createdAt / 1000));
 				const auto notifiable = ThreadNotifiable.value(
 					threadIt.value(),
@@ -5136,12 +5243,60 @@ void handleChatEvent(
 			mts->messages()->reloadPinned(chatId);
 		}
 	} else if (type == "ChatUnreadMessageCountUpdatedEvent") {
+		logUnreadSummary(session, u"event"_q);
 		const auto eventChatId = value.value("chatId").toString();
 		if (eventChatId.isEmpty()) {
 			return;
 		}
 		const auto peerId = chatIdToPeerId(eventChatId);
 		if (!hasChatId(peerId)) {
+			return;
+		}
+		// With "parentId" it is the unread counter of that thread, not of
+		// the chat itself: MTS Link shows it in the "Threads" folder only.
+		if (const auto parentId = value.value("parentId").toString()
+			; !parentId.isEmpty()) {
+			const auto rootId = MsgId(uuidToBareId(parentId) & 0x7FFFFFFFLL);
+			const auto entry = threadEntryHistory(session, peerId, rootId);
+			const auto count = value.value("unreadMessageCount").toInt();
+			LOG(("MtsLink Unread: thread event root=%1 entry='%2' count=%3"
+				).arg(rootId.bare
+				).arg(entry ? entry->peer->name() : u"-"_q
+				).arg(count));
+			if (entry) {
+				entry->setUnreadCount(count);
+				session->data().refreshChatListEntry(Dialogs::Key(entry));
+			}
+			// The unread dot on the root message in the chat.
+			if (const auto root = session->data().message(peerId, rootId)) {
+				const auto views = root->Get<HistoryMessageViews>();
+				const auto replies = std::max(
+					views ? views->replies.count : 0,
+					count);
+				if (replies > 0) {
+					auto repliesData = HistoryMessageRepliesData();
+					repliesData.isNull = false;
+					repliesData.repliesCount = replies;
+					repliesData.maxId = MsgId(replies);
+					repliesData.readMaxId = MsgId(
+						std::max(replies - count, 1));
+					root->setReplies(std::move(repliesData));
+					session->data().requestItemViewRefresh(root);
+				}
+			}
+			for (const auto &filter : session->data().chatsFilters().list()) {
+				const auto list = session->data().chatsFilters().chatsList(
+					filter.id());
+				const auto state = list->unreadState();
+				LOG(("MtsLink ReadDebug: folder %1 '%2' chats=%3 messages=%4 "
+					"contains=%5 inList=%6"
+					).arg(filter.id()
+					).arg(filter.title().text.text
+					).arg(state.chats
+					).arg(state.messages
+					).arg((entry && filter.contains(entry)) ? 1 : 0
+					).arg((entry && entry->inChatList(filter.id())) ? 1 : 0));
+			}
 			return;
 		}
 		const auto history = session->data().historyLoaded(peerId);
@@ -5965,6 +6120,13 @@ void fetchThreadLastRead(
 		[session, peerId, rootId](const QJsonObject &result) {
 			const auto obj = result.value("value").toObject();
 			const auto lastReadId = obj.value("id").toString();
+			LOG(("MtsLink ReadDebug: last read child root=%1 id='%2' "
+				"createdAt=%3 cached=%4 type=%5"
+				).arg(rootId.bare
+				).arg(lastReadId
+				).arg(qint64(obj.value("createdAt").toDouble())
+				).arg(cachedRepliesList(peerId, rootId) ? 1 : 0
+				).arg(result.value("type").toString()));
 			if (lastReadId.isEmpty()) {
 				return;
 			}

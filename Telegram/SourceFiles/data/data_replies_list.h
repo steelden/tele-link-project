@@ -12,6 +12,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class History;
 
+namespace MtsLink::Api {
+struct MessageData;
+struct MemberProfile;
+} // namespace MtsLink::Api
+
 namespace Data {
 
 class ForumTopic;
@@ -59,6 +64,15 @@ public:
 		not_null<const HistoryItem*> item) const;
 
 	void setMtsLinkInboxReadDate(TimeId date);
+	// MTS Link: the read state from the unread counter of the root
+	// message, for the unread bar and the reading while scrolling.
+	void applyMtsLinkRootUnread();
+	// MTS Link: the older pages are loaded till the thread start, then
+	// the callback is called (the "go to the root message" bar click).
+	void mtsLinkLoadToTop(Fn<void()> done);
+	// MTS Link: the first page of the thread (after its root), the list
+	// gets a gap below it, the newer pages are loaded by loadAfter().
+	void mtsLinkLoadFromStart(Fn<void()> done);
 
 	void requestUnreadCount();
 
@@ -125,6 +139,11 @@ private:
 	// until the jump target is found.
 	MsgId _mtsLinkSeekId = 0;
 	int _mtsLinkSeekPages = 0;
+	Fn<void()> _mtsLinkTopLoaded;
+	bool _mtsLinkLoadingAfter = false;
+	void mtsLinkApplyPage(
+		const QList<MtsLink::Api::MessageData> &messages,
+		const QList<MtsLink::Api::MemberProfile> &profiles);
 	rpl::variable<std::optional<int>> _unreadCount;
 	MsgId _inboxReadTillId = 0;
 	MsgId _outboxReadTillId = 0;

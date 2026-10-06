@@ -492,6 +492,47 @@ void Messages::loadThread(
 		});
 }
 
+void Messages::loadThreadPage(
+		const ChatId &chatId,
+		const MessageId &parentId,
+		const MessageId &fromMessageId,
+		bool after,
+		int limit,
+		ThreadPageDone done) {
+	_rpc->call(
+		"Chat.GetMessagesV2",
+		QJsonObject{
+			{ "chatId", chatId },
+			{ "parentId", parentId },
+			{ "from", fromMessageId },
+			{ "direction", after ? u"After"_q : u"Before"_q },
+			{ "limit", limit },
+		},
+		[=](const QJsonObject &result) {
+			const auto value = result.value("value").toObject();
+			auto messages = QList<MessageData>();
+			for (const auto &item : value.value("messages").toArray()) {
+				auto msg = parseMessage(item.toObject());
+				if (msg.isDeleted) {
+					continue;
+				}
+				if (msg.chatId.isEmpty()) {
+					msg.chatId = chatId;
+				}
+				messages.push_back(std::move(msg));
+			}
+			auto profiles = QList<MemberProfile>();
+			for (const auto &item
+					: value.value("memberProfiles").toArray()) {
+				profiles.push_back(parseProfile(item.toObject()));
+			}
+			done(std::move(messages), std::move(profiles));
+		},
+		[=](const QString &) {
+			done({}, {});
+		});
+}
+
 void Messages::loadAround(
 		const ChatId &chatId,
 		const MessageId &messageId,

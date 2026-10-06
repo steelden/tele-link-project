@@ -3003,15 +3003,21 @@ auto MainWidget::thirdSectionForCurrentMainSection(
 		; sublist && sublist->parentChat()) {
 		return std::make_shared<Info::Memento>(sublist);
 	} else if (const auto peer = key.peer()) {
+		// A thread shows its author, if it is not the user itself (then
+		// the self profile is "Favorites"): the chat of the thread.
+		const auto self = peer->session().userPeerId();
 		if (MtsLink::isThreadPeer(peer->id)) {
 			const auto authorPeerId = MtsLink::threadAuthorPeerId(peer->id);
-			if (authorPeerId) {
+			if (authorPeerId && authorPeerId != self) {
 				return Info::Memento::Default(
 					peer->owner().peer(authorPeerId));
+			} else if (const auto parent = MtsLink::threadParentInfo(
+					peer->id).first) {
+				return Info::Memento::Default(peer->owner().peer(parent));
 			}
 		}
 		const auto threadAuthor = MtsLink::currentOpenThreadAuthor(peer->id);
-		if (threadAuthor) {
+		if (threadAuthor && threadAuthor != self) {
 			return Info::Memento::Default(
 				peer->owner().peer(threadAuthor));
 		}

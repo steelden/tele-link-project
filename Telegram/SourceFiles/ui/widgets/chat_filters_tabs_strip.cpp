@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/filters/edit_filter_box.h"
 #include "boxes/premium_limits_box.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "core/shortcuts.h"
 #include "core/ui_integration.h"
 #include "data/data_chat_filters.h"
@@ -240,8 +241,12 @@ not_null<Ui::RpWidget*> AddChatFiltersTabsStrip(
 			) | rpl::on_next([=](
 					const Dialogs::UnreadState &state,
 					bool includeMuted) {
-				const auto chats = state.chats;
-				const auto chatsMuted = state.chatsMuted;
+				// MTS Link: the unread messages, as the total counter does.
+				const auto messages = Core::App().settings().countUnreadMessages();
+				const auto chats = messages ? state.messages : state.chats;
+				const auto chatsMuted = messages
+					? state.messagesMuted
+					: state.chatsMuted;
 				const auto muted = (chatsMuted + state.marksMuted);
 				const auto count = (chats + state.marks)
 					- (includeMuted ? 0 : muted);

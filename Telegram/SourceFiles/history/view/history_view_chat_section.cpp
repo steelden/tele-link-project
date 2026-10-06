@@ -3766,6 +3766,16 @@ bool ChatWidget::cornerButtonsHas(CornerButtonType type) {
 
 void ChatWidget::showAtStart() {
 	showAtPosition(Data::MinMessagePosition);
+	if (_replies && MtsLink::hasChatId(_peer->id)) {
+		// Only a part of the thread may be loaded: the rest is loaded and
+		// the thread is shown from its very start then.
+		const auto weak = base::make_weak(this);
+		_replies->mtsLinkLoadFromStart([=] {
+			if (const auto strong = weak.get()) {
+				strong->showAtPosition(Data::MinMessagePosition);
+			}
+		});
+	}
 }
 
 void ChatWidget::showAtEnd() {
@@ -4320,11 +4330,37 @@ void ChatWidget::restoreState(not_null<ChatMemento*> memento) {
 	const auto mtsLinkThread = !memento->highlightId()
 		&& _repliesRootId
 		&& MtsLink::hasChatId(_peer->id);
-	const auto mtsLinkSaved = mtsLinkThread
+	// New messages since the last visit: the unread bar, not the place
+	// (or the end) where the thread was left.
+	const auto mtsLinkHasUnread = mtsLinkThread && [&] {
+		const auto views = _repliesRoot
+			? _repliesRoot->Get<HistoryMessageViews>()
+			: nullptr;
+		return (views
+				&& (views->commentsMaxId > views->commentsInboxReadTillId))
+			|| (MtsLink::threadEntryUnreadCount(
+				_peer->id,
+				_repliesRootId) > 0);
+	}();
+	const auto mtsLinkSaved = (mtsLinkThread && !mtsLinkHasUnread)
 		? MtsLink::threadScroll(_peer->id, _repliesRootId)
 		: std::nullopt;
 	const auto mtsLinkShowAtEnd = mtsLinkThread
 		&& (!mtsLinkSaved || !mtsLinkSaved->itemId);
+	if (mtsLinkHasUnread && _replies) {
+		// The list may be loaded before (in memory): the read state for the
+		// unread bar is taken from the root counter now.
+		_replies->applyMtsLinkRootUnread();
+	}
+	if (mtsLinkThread) {
+		LOG(("MtsLink ReadDebug: thread open root=%1 hasRoot=%2 unread=%3 "
+			"saved=%4 atEnd=%5"
+			).arg(_repliesRootId.bare
+			).arg(_repliesRoot ? 1 : 0
+			).arg(mtsLinkHasUnread ? 1 : 0
+			).arg((mtsLinkSaved && mtsLinkSaved->itemId) ? 1 : 0
+			).arg(mtsLinkShowAtEnd ? 1 : 0));
+	}
 	if (mtsLinkSaved && mtsLinkSaved->itemId) {
 		const auto savedPosition = Data::MessagePosition{
 			.fullId = mtsLinkSaved->itemId,
@@ -4341,7 +4377,11 @@ void ChatWidget::restoreState(not_null<ChatMemento*> memento) {
 		if (mtsLinkSaved) {
 			showAtEnd();
 		} else {
-			showAtPosition(Data::UnreadMessagePosition);
+			// Instantly: an animated scroll starts at the bottom and the
+			// messages shown there on the way are marked as read.
+			_inner->showAtUnreadOnOpen(Window::SectionShow(
+				Window::SectionShow::Way::Forward,
+				anim::type::instant));
 		}
 	}
 	if (const auto highlight = memento->highlightId()) {
@@ -5217,10 +5257,9 @@ void ChatWidget::listSelectionChanged(SelectedItems &&items) {
 
 void ChatWidget::listMarkReadTill(not_null<HistoryItem*> item) {
 	if (_replies) {
+		// MTS Link: the unread bar stays while reading, it is removed by a
+		// click in the messages (ListWidget::mousePressEvent).
 		_replies->readTill(item);
-		if (MtsLink::hasChatId(item->history()->peer->id)) {
-			_inner->clearUnreadBar();
-		}
 	} else if (_sublist) {
 		_sublist->readTill(item);
 	} else {

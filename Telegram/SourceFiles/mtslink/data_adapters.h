@@ -203,6 +203,15 @@ void handleSchedulerEvent(
 	not_null<Main::Session*> session,
 	const QJsonObject &param);
 
+// The unread count of the thread row ("Threads" folder), from the server
+// thread counter, or -1 if there is no row for that thread.
+[[nodiscard]] int threadEntryUnreadCount(PeerId parentPeerId, MsgId rootId);
+
+// Diagnostics: the chats and threads with something unread.
+void logUnreadSummary(
+	not_null<Main::Session*> session,
+	const QString &reason);
+
 // The local messages of the call materials in the call thread.
 [[nodiscard]] std::vector<MsgId> callMaterialMessages(
 	PeerId peerId,

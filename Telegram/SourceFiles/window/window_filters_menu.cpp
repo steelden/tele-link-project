@@ -613,8 +613,12 @@ base::unique_qptr<Ui::SideBarButton> FiltersMenu::prepareButton(
 		) | rpl::on_next([=](
 				const Dialogs::UnreadState &state,
 				bool includeMuted) {
-			const auto chats = state.chats;
-			const auto chatsMuted = state.chatsMuted;
+			// MTS Link: the unread messages, as the total counter does.
+			const auto messages = Core::App().settings().countUnreadMessages();
+			const auto chats = messages ? state.messages : state.chats;
+			const auto chatsMuted = messages
+				? state.messagesMuted
+				: state.chatsMuted;
 			const auto muted = (chatsMuted + state.marksMuted);
 			const auto count = (chats + state.marks)
 				- (includeMuted ? 0 : muted);

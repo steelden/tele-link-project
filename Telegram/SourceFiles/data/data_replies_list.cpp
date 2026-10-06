@@ -369,10 +369,19 @@ bool RepliesList::buildFromData(not_null<Viewer*> viewer) {
 	}
 	const auto isMtsLink = MtsLink::hasChatId(_history->peer->id);
 	const auto around = [&] {
-		if (viewer->around != ShowAtUnreadMsgId) {
+		if (isMtsLink
+			&& viewer->around == Data::MaxMessagePosition.fullId.msg) {
+			// The end of the thread: reloaded from the end if only its
+			// start is loaded (after a jump to the thread start).
+			return MsgId(0);
+		} else if (viewer->around != ShowAtUnreadMsgId) {
 			return viewer->around;
 		} else if (isMtsLink) {
-			return _list.empty() ? MsgId(0) : _list.front();
+			// The unread messages are at the end: if only the start of the
+			// thread is loaded, it is reloaded from the end.
+			return (_list.empty() || _skippedAfter != 0)
+				? MsgId(0)
+				: _list.front();
 		} else if (lookupRoot()) {
 			return computeInboxReadTillFull();
 		} else if (_owningTopic) {
@@ -396,7 +405,10 @@ bool RepliesList::buildFromData(not_null<Viewer*> viewer) {
 			if (it != end(_list)) {
 				return it;
 			}
+			// MinMessagePosition (the list scrolled to the top) is the
+			// oldest loaded message, not the newest one.
 			const auto atTop = (around == _rootId)
+				|| (around == Data::MinMessagePosition.fullId.msg)
 				|| (_divider && around == _divider->id);
 			return atTop ? end(_list) : begin(_list);
 		}
@@ -664,29 +676,28 @@ void RepliesList::loadAround(MsgId id) {
 					}
 				}
 			}
-			if (!_list.empty()) {
-				auto &data = _history->owner();
-				const auto root = data.message(peerId, _rootId);
-				if (root) {
-					if (const auto views = root->Get<HistoryMessageViews>()) {
-						const auto unread = int(
-							views->commentsMaxId.bare
-							- views->commentsInboxReadTillId.bare);
-						if (unread <= 0) {
-							const auto newest = data.message(
-								peerId, _list.front());
-							if (newest) {
-								_mtsLinkInboxReadDate = newest->date();
-							}
-						} else if (unread < int(_list.size())) {
-							const auto lastRead = data.message(
-								peerId, _list[unread]);
-							if (lastRead) {
-								_mtsLinkInboxReadDate = lastRead->date();
-							}
-						}
-					}
-				}
+			applyMtsLinkRootUnread();
+			{
+				const auto root = _history->owner().message(
+					peerId,
+					_rootId);
+				const auto views = root
+					? root->Get<HistoryMessageViews>()
+					: nullptr;
+				LOG(("MtsLink ReadDebug: thread loaded root=%1 around=%2 "
+					"list=%3 server=%4 rootUnread=%5 readDate=%6 "
+					"readTill=%7 unread=%8"
+					).arg(_rootId.bare
+					).arg(id.bare
+					).arg(_list.size()
+					).arg(messages.size()
+					).arg(views
+						? int(views->commentsMaxId.bare
+							- views->commentsInboxReadTillId.bare)
+						: -1
+					).arg(_mtsLinkInboxReadDate
+					).arg(_inboxReadTillId.bare
+					).arg(_unreadCount.current().value_or(-1)));
 			}
 			checkReadTillEnd();
 			if (id
@@ -846,7 +857,15 @@ void RepliesList::loadBefore() {
 			_listChanges.fire({});
 			if (const auto seek = _mtsLinkSeekId) {
 				constexpr auto kMaxSeekPages = 40;
-				if (ranges::contains(_list, seek)) {
+				if (seek == _rootId && _skippedBefore == 0) {
+					// Loaded till the thread start.
+					LOG(("MtsLink Thread: %1 loaded to the top after %2 pages"
+						).arg(seek.bare).arg(_mtsLinkSeekPages + 1));
+					_mtsLinkSeekId = 0;
+					if (const auto done = base::take(_mtsLinkTopLoaded)) {
+						done();
+					}
+				} else if (ranges::contains(_list, seek)) {
 					LOG(("MtsLink Thread: target %1 found after %2 pages"
 						).arg(seek.bare).arg(_mtsLinkSeekPages + 1));
 					_mtsLinkSeekId = 0;
@@ -910,6 +929,36 @@ void RepliesList::loadAfter() {
 	Expects(!_list.empty());
 
 	if (MtsLink::hasChatId(_history->peer->id)) {
+		// After a jump to the thread start: the newer pages.
+		if (_mtsLinkLoadingAfter || _skippedAfter == 0) {
+			return;
+		}
+		const auto peerId = _history->peer->id;
+		const auto chatId = MtsLink::peerIdToChatId(peerId);
+		const auto parentId = MtsLink::msgIdToMtsLinkId(peerId, _rootId);
+		const auto fromId = MtsLink::msgIdToMtsLinkId(peerId, _list.front());
+		const auto mts = _history->session().account().mtsLinkSession();
+		if (!mts || chatId.isEmpty() || fromId.isEmpty()) {
+			return;
+		}
+		constexpr auto kPage = 50;
+		_mtsLinkLoadingAfter = true;
+		const auto weak = base::make_weak(this);
+		mts->messages()->loadThreadPage(chatId, parentId, fromId, true, kPage, [=](
+				QList<MtsLink::Api::MessageData> messages,
+				QList<MtsLink::Api::MemberProfile> profiles) {
+			const auto strong = weak.get();
+			if (!strong) {
+				return;
+			}
+			_mtsLinkLoadingAfter = false;
+			LOG(("MtsLink Thread: %1 newer page: %2 messages"
+				).arg(_rootId.bare
+				).arg(messages.size()));
+			mtsLinkApplyPage(messages, profiles);
+			_skippedAfter = (messages.size() >= kPage) ? 1 : 0;
+			_listChanges.fire({});
+		});
 		return;
 	}
 
@@ -1151,6 +1200,152 @@ int RepliesList::displayedUnreadCount() const {
 	return (_inboxReadTillId > 1) ? unreadCountCurrent() : 0;
 }
 
+void RepliesList::mtsLinkApplyPage(
+		const QList<MtsLink::Api::MessageData> &messages,
+		const QList<MtsLink::Api::MemberProfile> &profiles) {
+	const auto session = &_history->session();
+	const auto peerId = _history->peer->id;
+	for (const auto &p : profiles) {
+		MtsLink::applyUserData(session, p);
+	}
+	_loadingHistorical = true;
+	for (const auto &message : messages) {
+		const auto item = MtsLink::addMessage(session, message, true);
+		if (item && !ranges::contains(_list, item->id)) {
+			_list.push_back(item->id);
+		}
+	}
+	_loadingHistorical = false;
+	auto &owner = _history->owner();
+	for (const auto &msgId : _list) {
+		if (const auto item = owner.message(peerId, msgId)) {
+			if (item->replyToTop() != _rootId) {
+				item->ensureReplyComponent();
+				item->setReplyFields(
+					item->replyToTop() ? item->replyToTop() : _rootId,
+					_rootId,
+					false);
+			}
+			item->updateDependencyItem();
+		}
+	}
+	ranges::sort(_list, [&](MsgId a, MsgId b) {
+		const auto ia = owner.message(peerId, a);
+		const auto ib = owner.message(peerId, b);
+		if (!ia || !ib) return a > b;
+		if (ia->date() != ib->date()) {
+			return ia->date() > ib->date();
+		}
+		return a > b;
+	});
+}
+
+void RepliesList::mtsLinkLoadFromStart(Fn<void()> done) {
+	if (_skippedBefore == 0) {
+		if (done) {
+			done();
+		}
+		return;
+	}
+	const auto peerId = _history->peer->id;
+	const auto chatId = MtsLink::peerIdToChatId(peerId);
+	const auto parentId = MtsLink::msgIdToMtsLinkId(peerId, _rootId);
+	const auto mts = _history->session().account().mtsLinkSession();
+	if (!mts || chatId.isEmpty() || parentId.isEmpty()) {
+		return;
+	}
+	constexpr auto kPage = 50;
+	const auto weak = base::make_weak(this);
+	LOG(("MtsLink Thread: loading %1 from the start").arg(_rootId.bare));
+	mts->messages()->loadThreadPage(chatId, parentId, parentId, true, kPage, [=](
+			QList<MtsLink::Api::MessageData> messages,
+			QList<MtsLink::Api::MemberProfile> profiles) {
+		const auto strong = weak.get();
+		if (!strong) {
+			return;
+		}
+		LOG(("MtsLink Thread: %1 start page: %2 messages"
+			).arg(_rootId.bare
+			).arg(messages.size()));
+		if (messages.isEmpty()) {
+			// The "After" page is not given: page by page from the end.
+			mtsLinkLoadToTop(done);
+			return;
+		}
+		_list.clear();
+		mtsLinkApplyPage(messages, profiles);
+		_skippedBefore = 0;
+		_skippedAfter = (messages.size() >= kPage) ? 1 : 0;
+		if (_skippedAfter == 0) {
+			_fullCount = int(_list.size());
+		}
+		_listChanges.fire({});
+		if (done) {
+			done();
+		}
+	});
+}
+
+void RepliesList::mtsLinkLoadToTop(Fn<void()> done) {
+	if (_list.empty() || _skippedBefore == 0) {
+		if (done) {
+			done();
+		}
+		return;
+	}
+	LOG(("MtsLink Thread: loading %1 to the top").arg(_rootId.bare));
+	_mtsLinkTopLoaded = std::move(done);
+	_mtsLinkSeekId = _rootId;
+	_mtsLinkSeekPages = 0;
+	loadBefore();
+}
+
+void RepliesList::applyMtsLinkRootUnread() {
+	if (_list.empty()) {
+		return;
+	}
+	const auto peerId = _history->peer->id;
+	auto &data = _history->owner();
+	const auto root = data.message(peerId, _rootId);
+	const auto views = root ? root->Get<HistoryMessageViews>() : nullptr;
+	// The server thread counter (the "Threads" folder row) is the exact
+	// one, the root message may be not loaded or its counter not updated.
+	const auto rootUnread = views
+		? int(views->commentsMaxId.bare - views->commentsInboxReadTillId.bare)
+		: -1;
+	const auto entryUnread = MtsLink::threadEntryUnreadCount(peerId, _rootId);
+	if (rootUnread < 0 && entryUnread < 0) {
+		return;
+	}
+	const auto unread = std::max(rootUnread, entryUnread);
+	// The list is newest first: the read till message is right after the
+	// unread ones (the ids are hashes, only the dates are ordered).
+	if (unread <= 0) {
+		if (const auto newest = data.message(peerId, _list.front())) {
+			_mtsLinkInboxReadDate = newest->date();
+			_inboxReadTillId = newest->id;
+		}
+		_unreadCount = 0;
+	} else if (unread < int(_list.size())) {
+		if (const auto lastRead = data.message(peerId, _list[unread])) {
+			_mtsLinkInboxReadDate = lastRead->date();
+			_inboxReadTillId = lastRead->id;
+		}
+		_unreadCount = unread;
+	} else if (_skippedBefore == 0) {
+		// All the loaded messages are unread.
+		_inboxReadTillId = MsgId(1);
+		_unreadCount = unread;
+	}
+	LOG(("MtsLink ReadDebug: thread root unread root=%1 unread=%2 list=%3 "
+		"readTill=%4 readDate=%5"
+		).arg(_rootId.bare
+		).arg(unread
+		).arg(_list.size()
+		).arg(_inboxReadTillId.bare
+		).arg(_mtsLinkInboxReadDate));
+}
+
 void RepliesList::setMtsLinkInboxReadDate(TimeId date) {
 	if (date > _mtsLinkInboxReadDate) {
 		_mtsLinkInboxReadDate = date;
@@ -1289,6 +1484,14 @@ void RepliesList::requestUnreadCount() {
 }
 
 void RepliesList::readTill(not_null<HistoryItem*> item) {
+	if (MtsLink::hasChatId(_history->peer->id)) {
+		LOG(("MtsLink ReadDebug: thread readTill root=%1 item=%2 date=%3 "
+			"readDate=%4"
+			).arg(_rootId.bare
+			).arg(item->id.bare
+			).arg(item->date()
+			).arg(_mtsLinkInboxReadDate));
+	}
 	readTill(item->id, item);
 }
 
@@ -1404,6 +1607,12 @@ void RepliesList::sendReadTillRequest() {
 					}
 				}
 			}
+			LOG(("MtsLink ReadDebug: thread read request root=%1 till=%2 "
+				"mtsId='%3' unread=%4"
+				).arg(_rootId.bare
+				).arg(tillId.bare
+				).arg(mtsId
+				).arg(_unreadCount.current().value_or(-1)));
 			if (!chatId.isEmpty() && !mtsId.isEmpty()) {
 				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);

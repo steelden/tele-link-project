@@ -3602,12 +3602,31 @@ HistoryItem *Session::addNewMessage(
 	return result;
 }
 
+Dialogs::UnreadState Session::totalUnreadState() const {
+	auto result = _chatsList.unreadState();
+	for (const auto &filter : _chatsFilters->list()) {
+		if (filter.flags() & ChatFilter::Flag::Threads) {
+			const auto threads = _chatsFilters->chatsList(filter.id());
+			const auto state = threads->unreadState();
+			result.messages += state.messages;
+			result.messagesMuted += state.messagesMuted;
+			result.chats += state.chats;
+			result.chatsMuted += state.chatsMuted;
+			result.marks += state.marks;
+			result.marksMuted += state.marksMuted;
+			result.mentions += state.mentions;
+			break;
+		}
+	}
+	return result;
+}
+
 int Session::unreadBadge() const {
-	return computeUnreadBadge(_chatsList.unreadState());
+	return computeUnreadBadge(totalUnreadState());
 }
 
 int Session::unreadWithMentionsBadge() const {
-	auto state = _chatsList.unreadState();
+	auto state = totalUnreadState();
 	if (state.mentions) {
 		state.messages -= state.mentions;
 	}
@@ -3615,11 +3634,11 @@ int Session::unreadWithMentionsBadge() const {
 }
 
 bool Session::unreadBadgeMuted() const {
-	return computeUnreadBadgeMuted(_chatsList.unreadState());
+	return computeUnreadBadgeMuted(totalUnreadState());
 }
 
 bool Session::unreadWithMentionsBadgeMuted() const {
-	const auto state = _chatsList.unreadState();
+	const auto state = totalUnreadState();
 	return !state.mentions && computeUnreadBadgeMuted(state);
 }
 
@@ -3627,7 +3646,7 @@ int Session::unreadBadgeIgnoreOne(Dialogs::Key key) const {
 	const auto remove = (key && key.entry()->inChatList())
 		? key.entry()->chatListUnreadState()
 		: Dialogs::UnreadState();
-	return computeUnreadBadge(_chatsList.unreadState() - remove);
+	return computeUnreadBadge(totalUnreadState() - remove);
 }
 
 bool Session::unreadBadgeMutedIgnoreOne(Dialogs::Key key) const {
@@ -3637,11 +3656,11 @@ bool Session::unreadBadgeMutedIgnoreOne(Dialogs::Key key) const {
 	const auto remove = (key && key.entry()->inChatList())
 		? key.entry()->chatListUnreadState()
 		: Dialogs::UnreadState();
-	return computeUnreadBadgeMuted(_chatsList.unreadState() - remove);
+	return computeUnreadBadgeMuted(totalUnreadState() - remove);
 }
 
 int Session::unreadOnlyMutedBadge() const {
-	const auto state = _chatsList.unreadState();
+	const auto state = totalUnreadState();
 	return Core::App().settings().countUnreadMessages()
 		? state.messagesMuted
 		: state.chatsMuted;

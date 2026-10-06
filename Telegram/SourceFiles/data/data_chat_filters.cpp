@@ -386,8 +386,12 @@ bool ChatFilter::contains(
 	const auto state = (_flags & (Flag::NoMuted | Flag::NoRead))
 		? history->chatListBadgesState()
 		: Dialogs::BadgesState();
+	// MTS Link: the threads with something unread are in the folders
+	// of the unread chats as well, not only in the "Threads" folder.
+	const auto typeMatches = (_flags & flag)
+		|| ((flag == Flag::Threads) && (_flags & Flag::NoRead));
 	return false
-		|| ((_flags & flag)
+		|| (typeMatches
 			&& (!(_flags & Flag::NoMuted)
 				|| !history->muted()
 				|| (state.mention

@@ -271,10 +271,14 @@ void Entry::updateChatListExistence() {
 
 void Entry::notifyUnreadStateChange(const UnreadState &wasState) {
 	Expects(folderKnown());
-	Expects(inChatList());
 
 	const auto nowState = chatListUnreadState();
-	owner().chatsListFor(this)->unreadStateChanged(wasState, nowState);
+	if (inChatList()) {
+		owner().chatsListFor(this)->unreadStateChanged(wasState, nowState);
+	} else {
+		// The thread rows: in the total counter, but not in the main list.
+		owner().notifyUnreadBadgeChanged();
+	}
 	auto &filters = owner().chatsFilters();
 	for (const auto &[filterId, links] : _chatListLinks) {
 		if (filterId) {

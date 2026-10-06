@@ -362,6 +362,9 @@ public:
 		Data::MessagePosition position,
 		const Window::SectionShow &params,
 		Fn<void(bool found)> done = nullptr);
+	// Opening a thread: the unread bar even if the restored scroll state
+	// is at the bottom (no "at the unread already, jump to the end").
+	void showAtUnreadOnOpen(const Window::SectionShow &params);
 	void refreshViewer();
 	void overrideInitialScroll(Fn<bool()> callback);
 
@@ -995,6 +998,7 @@ private:
 	ScrollTopState _scrollTopState;
 	Ui::Animations::Simple _scrollToAnimation;
 	Fn<bool()> _overrideInitialScroll;
+	bool _clearUnreadBarOnClick = false;
 
 	bool _scrollInited = false;
 	bool _scrollDateShown = false;

@@ -683,6 +683,8 @@ public:
 		NewMessageType type);
 
 	[[nodiscard]] int unreadBadge() const;
+	// MTS Link: the main list and the thread rows (in folders only).
+	[[nodiscard]] Dialogs::UnreadState totalUnreadState() const;
 	[[nodiscard]] int unreadWithMentionsBadge() const;
 	[[nodiscard]] bool unreadBadgeMuted() const;
 	[[nodiscard]] bool unreadWithMentionsBadgeMuted() const;
