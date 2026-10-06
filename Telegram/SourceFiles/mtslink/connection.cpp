@@ -101,7 +101,12 @@ Connection::Connection(QObject *parent)
 }
 
 Connection::~Connection() {
+	// The socket is destroyed the last of the members and emits
+	// "disconnected" then: the handler used the destroyed statistics
+	// (a crash on quit).
+	QObject::disconnect(&_socket, nullptr, this, nullptr);
 	disconnect();
+	_socket.abort();
 }
 
 void Connection::connectToServer(const QString &token) {
