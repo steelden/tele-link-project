@@ -12,6 +12,8 @@ based on Telegram Desktop.
 #include "data/components/scheduled_messages.h"
 #include "api/api_text_entities.h"
 #include "main/main_account.h"
+#include "data/stickers/data_stickers.h"
+#include "data/data_document_media.h"
 #include "main/main_domain.h"
 #include "storage/storage_account.h"
 #include "data/data_session.h"
@@ -56,6 +58,7 @@ based on Telegram Desktop.
 #include "calls/calls_call.h"
 #include "window/notifications_manager.h"
 #include "base/unixtime.h"
+#include "settings.h"
 #include "base/random.h"
 #include "base/call_delayed.h"
 #include "ui/image/image_location.h"
@@ -82,6 +85,9 @@ based on Telegram Desktop.
 #include <QtGui/QClipboard>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
+#include <QtCore/QFile>
+#include <QtCore/QUuid>
+#include <QtCore/QDateTime>
 #include <QtNetwork/QNetworkRequest>
 #include <QtNetwork/QNetworkCookie>
 
@@ -569,6 +575,10 @@ MTPMessageMedia buildPhotoMedia(
 		MTPDocument());
 }
 
+// The GIF files by their documents: the saved GIFs are kept and sent by
+// the MTS Link file ids.
+QHash<DocumentId, Api::FileData> GifFiles;
+
 MTPMessageMedia buildFileMedia(
 		not_null<Main::Session*> session,
 		const Api::FileData &file,
@@ -577,7 +587,11 @@ MTPMessageMedia buildFileMedia(
 		return MTP_messageMediaEmpty();
 	}
 
-	if (isImageMime(file.mime) && file.width > 0 && file.height > 0) {
+	const auto isGif = (file.mime == u"image/gif"_q);
+	if (!isGif
+		&& isImageMime(file.mime)
+		&& file.width > 0
+		&& file.height > 0) {
 		return buildPhotoMedia(session, file, date);
 	}
 
@@ -613,6 +627,10 @@ MTPMessageMedia buildFileMedia(
 		attrs.push_back(MTP_documentAttributeImageSize(
 			MTP_int(file.width), MTP_int(file.height)));
 	}
+	if (isGif) {
+		// An animation: the GIF player and "Save GIF".
+		attrs.push_back(MTP_documentAttributeAnimated());
+	}
 
 	auto thumbnail = ImageWithLocation{};
 	const auto hasVisualThumb = !file.id.isEmpty()
@@ -628,6 +646,9 @@ MTPMessageMedia buildFileMedia(
 	}
 
 	const auto docId = DocumentId(uuidToBareId(file.id));
+	if (isGif) {
+		GifFiles.insert(docId, file);
+	}
 	const auto doc = session->data().document(
 		docId,
 		uint64(0),
@@ -2942,6 +2963,7 @@ void connectToSession(
 	mtsSession->users()->loadOrganizationMembers();
 	// The titles of the organization profile fields, for the profiles.
 	requestProfileFields(mainSession);
+	restoreSavedGifs(mainSession);
 	// Diagnostics: the unread chats and threads, once a minute.
 	{
 		static const auto summaryTimer = new base::Timer([=] {
@@ -5311,9 +5333,8 @@ void handleChatEvent(
 			).arg(count
 			).arg(localCount
 			).arg(wasReadRequest ? 1 : 0));
-		if (count < localCount && !wasReadRequest) {
-			return;
-		}
+		// The server counter is the exact one: a chat read in another
+		// client comes here only (the thread counters have "parentId").
 		history->setUnreadCount(count);
 		if (wasReadRequest && count == 0) {
 			history->destroyUnreadBar();
@@ -5809,16 +5830,18 @@ void deleteMessage(
 	const auto msgId = (mapped != MtsLinkIdToMsgMap.constEnd())
 		? mapped.value().second
 		: MsgId(uuidToBareId(messageId) & 0x7FFFFFFFLL);
-	const auto item = session->data().message(chatPeerId, msgId);
-	if (item) {
+	if (const auto item = session->data().message(chatPeerId, msgId)) {
 		item->destroy();
-		const auto hash = QCryptographicHash::hash(
-			chatId.toUtf8(), QCryptographicHash::Md5);
-		uint64 low = 0;
-		memcpy(&low, hash.constData(), sizeof(low));
-		session->data().cache().remove(
-			Storage::Cache::Key{ kMtsLinkMsgCacheTag, low });
 	}
+	// The cached messages of the chat are dropped even if the message is
+	// already destroyed (deleted here, the event comes after that): it
+	// was shown from the cache after a restart otherwise.
+	const auto hash = QCryptographicHash::hash(
+		chatId.toUtf8(), QCryptographicHash::Md5);
+	uint64 low = 0;
+	memcpy(&low, hash.constData(), sizeof(low));
+	session->data().cache().remove(
+		Storage::Cache::Key{ kMtsLinkMsgCacheTag, low });
 }
 
 void updateMessage(
@@ -5924,6 +5947,14 @@ bool replacePendingWithReal(
 				doc->uploadingData = nullptr;
 				doc->setContentUrl(
 					fileDownloadBase() + f.id + u"/download"_q);
+				if (f.width > 0 && f.height > 0) {
+					doc->dimensions = QSize(f.width, f.height);
+				}
+				if (doc->isGifv()) {
+					// Saved and sent by the real file of MTS Link.
+					GifFiles.insert(doc->id, f);
+				}
+				session->data().requestItemResize(item);
 			}
 		}
 	}
@@ -8698,6 +8729,374 @@ void handleSchedulerEvent(
 	if (const auto history = session->data().historyLoaded(peerId)) {
 		session->scheduledMessages().mtsLinkRefresh(history);
 	}
+}
+
+namespace {
+
+constexpr auto kMtsLinkSavedGifsTag = uint64(0xBC07'0000'0000'0001ULL);
+constexpr auto kMtsLinkGifBytesTag = uint64(0xBC08'0000'0000'0000ULL);
+bool RestoringSavedGifs = false;
+QSet<QString> GifBytesKept;
+
+[[nodiscard]] Storage::Cache::Key savedGifsCacheKey() {
+	return { kMtsLinkSavedGifsTag, 0 };
+}
+
+// The content of a saved GIF in the session cache, by its MTS Link file:
+// its message (and the file on the server with it) may be deleted.
+[[nodiscard]] Storage::Cache::Key gifBytesCacheKey(const QString &fileId) {
+	const auto hash = QCryptographicHash::hash(
+		fileId.toUtf8(),
+		QCryptographicHash::Md5);
+	uint64 low = 0;
+	memcpy(&low, hash.constData(), sizeof(low));
+	return { kMtsLinkGifBytesTag, low };
+}
+
+[[nodiscard]] QString fileDownloadUrl(const QString &fileId) {
+	return fileDownloadBase() + fileId + u"/download"_q;
+}
+
+// The content in the file cache of the document (as Telegram keeps the
+// loaded files): it is shown from the cache, not loaded from the server.
+void putToDocumentCache(
+		not_null<DocumentData*> document,
+		const QString &url,
+		QByteArray bytes) {
+	document->session().data().cache().put(
+		Data::UrlCacheKey(url),
+		Storage::Cache::Database::TaggedValue(
+			std::move(bytes),
+			document->cacheTag()));
+}
+
+// The content of a file: loaded already, or downloaded with the session.
+void loadFileBytes(
+		not_null<DocumentData*> document,
+		const QString &fileId,
+		Fn<void(QByteArray)> done) {
+	auto bytes = QByteArray();
+	if (const auto media = document->activeMediaView()) {
+		bytes = media->bytes();
+	}
+	if (bytes.isEmpty()) {
+		const auto &location = document->location(true);
+		if (!location.isEmpty() && location.accessEnable()) {
+			auto f = QFile(location.name());
+			if (f.open(QIODevice::ReadOnly)) {
+				bytes = f.readAll();
+			}
+			location.accessDisable();
+		}
+	}
+	if (!bytes.isEmpty()) {
+		done(std::move(bytes));
+		return;
+	}
+	static const auto manager = new QNetworkAccessManager();
+	auto request = QNetworkRequest(QUrl(fileDownloadUrl(fileId)));
+	auto cookies = QStringList();
+	for (const auto &cookie : fileAuthCookies()) {
+		cookies.push_back(QString::fromLatin1(cookie.name())
+			+ '='
+			+ QString::fromLatin1(cookie.value()));
+	}
+	request.setRawHeader("Cookie", cookies.join(u"; "_q).toLatin1());
+	request.setAttribute(
+		QNetworkRequest::RedirectPolicyAttribute,
+		QNetworkRequest::NoLessSafeRedirectPolicy);
+	const auto reply = manager->get(request);
+	QObject::connect(reply, &QNetworkReply::finished, [=] {
+		reply->deleteLater();
+		const auto status = reply->attribute(
+			QNetworkRequest::HttpStatusCodeAttribute).toInt();
+		done((status == 200) ? reply->readAll() : QByteArray());
+	});
+}
+
+void keepGifBytes(
+		not_null<Main::Session*> session,
+		not_null<DocumentData*> document,
+		const QString &fileId) {
+	if (GifBytesKept.contains(fileId)) {
+		return;
+	}
+	GifBytesKept.insert(fileId);
+	const auto weak = base::make_weak(session);
+	loadFileBytes(document, fileId, [=](QByteArray bytes) {
+		const auto strong = weak.get();
+		if (!strong || bytes.isEmpty()) {
+			GifBytesKept.remove(fileId);
+			return;
+		}
+		LOG(("MtsLink Gifs: kept %1 bytes of %2"
+			).arg(bytes.size()
+			).arg(fileId));
+		strong->data().cache().put(
+			gifBytesCacheKey(fileId),
+			std::move(bytes));
+	});
+}
+
+void saveSavedGifs(not_null<Main::Session*> session) {
+	auto files = QList<Api::FileData>();
+	for (const auto document : session->data().stickers().savedGifs()) {
+		const auto i = GifFiles.constFind(document->id);
+		if (i != GifFiles.constEnd()) {
+			files.push_back(i.value());
+			keepGifBytes(session, document, i->id);
+		}
+	}
+	// The removed GIFs: their contents are not kept anymore.
+	for (const auto &id : base::duplicate(GifBytesKept)) {
+		const auto used = ranges::any_of(files, [&](const Api::FileData &f) {
+			return (f.id == id);
+		});
+		if (!used) {
+			GifBytesKept.remove(id);
+			session->data().cache().remove(gifBytesCacheKey(id));
+		}
+	}
+	auto data = QByteArray();
+	{
+		QDataStream s(&data, QIODevice::WriteOnly);
+		s.setVersion(QDataStream::Qt_5_1);
+		s << qint32(1) << qint32(files.size());
+		for (const auto &f : files) {
+			s << f.id << f.name << f.size << f.mime
+				<< qint32(f.width) << qint32(f.height);
+		}
+	}
+	LOG(("MtsLink Gifs: saved %1 GIFs").arg(files.size()));
+	session->data().cache().put(savedGifsCacheKey(), std::move(data));
+}
+
+} // namespace
+
+void rememberUploadedContent(
+		not_null<Main::Session*> session,
+		DocumentId localDocumentId,
+		const QString &fileId,
+		const QByteArray &content) {
+	const auto document = session->data().document(localDocumentId);
+	if (content.isEmpty() || !document->location(true).isEmpty()) {
+		return; // Shown from its file on the disk.
+	}
+	putToDocumentCache(document, fileDownloadUrl(fileId), content);
+}
+
+void restoreSavedGifs(not_null<Main::Session*> session) {
+	const auto weak = base::make_weak(session);
+	// Not saved till restored: Telegram notifies about its own (empty)
+	// list at the start, it overwrote the kept one.
+	RestoringSavedGifs = true;
+	session->data().stickers().savedGifsUpdated(
+	) | rpl::on_next([=] {
+		if (const auto strong = weak.get(); strong && !RestoringSavedGifs) {
+			saveSavedGifs(strong);
+		}
+	}, session->lifetime());
+
+	session->data().cache().get(savedGifsCacheKey(), [=](QByteArray &&data) {
+		crl::on_main(weak, [=, data = std::move(data)] {
+			const auto strong = weak.get();
+			if (!strong) {
+				return;
+			} else if (data.isEmpty()) {
+				RestoringSavedGifs = false;
+				return;
+			}
+			const auto finish = gsl::finally([] {
+				RestoringSavedGifs = false;
+			});
+			QDataStream s(data);
+			s.setVersion(QDataStream::Qt_5_1);
+			auto version = qint32();
+			auto count = qint32();
+			s >> version >> count;
+			if (s.status() != QDataStream::Ok || version != 1 || count < 0) {
+				return;
+			}
+			auto documents = QVector<DocumentData*>();
+			for (auto i = 0; i != count; ++i) {
+				auto f = Api::FileData();
+				auto w = qint32();
+				auto h = qint32();
+				s >> f.id >> f.name >> f.size >> f.mime >> w >> h;
+				if (s.status() != QDataStream::Ok) {
+					return;
+				}
+				f.width = w;
+				f.height = h;
+				(void)buildFileMedia(strong, f, base::unixtime::now());
+				const auto document = strong->data().document(
+					DocumentId(uuidToBareId(f.id)));
+				if (!document->isGifv()) {
+					continue;
+				}
+				documents.push_back(document);
+				GifBytesKept.insert(f.id);
+				// Shown from the kept content, not from the server.
+				const auto fileId = f.id;
+				strong->data().cache().get(gifBytesCacheKey(fileId), [=](
+						QByteArray &&bytes) {
+					crl::on_main(weak, [=, bytes = std::move(bytes)] {
+						if (weak.get() && !bytes.isEmpty()) {
+							putToDocumentCache(
+								document,
+								fileDownloadUrl(fileId),
+								bytes);
+						}
+					});
+				});
+			}
+			LOG(("MtsLink Gifs: restored %1 GIFs").arg(documents.size()));
+			auto &saved = strong->data().stickers().savedGifsRef();
+			saved.clear();
+			for (const auto document : documents) {
+				saved.push_back(document);
+			}
+			strong->data().stickers().notifySavedGifsUpdated();
+			// Telegram keeps the list as well (without the file urls).
+			strong->local().writeSavedGifs();
+		});
+	});
+}
+
+bool sendSavedGif(
+		not_null<Main::Session*> session,
+		not_null<History*> history,
+		not_null<DocumentData*> document,
+		MsgId replyToId,
+		MsgId topicRootId) {
+	const auto i = GifFiles.constFind(document->id);
+	const auto mts = session->account().mtsLinkSession();
+	const auto peerId = history->peer->id;
+	const auto chatId = peerIdToChatId(peerId);
+	if (i == GifFiles.constEnd() || !mts || chatId.isEmpty()) {
+		LOG(("MtsLink Gifs: no file for the GIF %1").arg(document->id));
+		return false;
+	}
+	const auto replyMtsId = replyToId
+		? msgIdToMtsLinkId(peerId, replyToId)
+		: QString();
+	const auto parentMtsId = topicRootId
+		? msgIdToMtsLinkId(peerId, topicRootId)
+		: QString();
+	const auto file = i.value();
+	const auto weak = base::make_weak(session);
+
+	// The message with the content: a local one right away, as for a sent
+	// file, the content is uploaded again (FILE_ALREADY_USED otherwise).
+	const auto sendBytes = [=](QByteArray bytes) {
+		const auto strong = weak.get();
+		const auto mts = strong
+			? strong->account().mtsLinkSession()
+			: nullptr;
+		if (!mts) {
+			return;
+		} else if (bytes.isEmpty()) {
+			LOG(("MtsLink Gifs: no content of the file %1").arg(file.id));
+			return;
+		}
+		const auto tempId = QUuid::createUuid().toString(
+			QUuid::WithoutBraces);
+		const auto isThreadSend = !parentMtsId.isEmpty();
+		const auto clientId = isThreadSend
+			? QUuid::createUuid().toString(QUuid::WithoutBraces)
+			: QString();
+		auto msg = Api::MessageData();
+		msg.id = tempId;
+		msg.chatId = chatId;
+		msg.authorId = mts->userId();
+		msg.createdAt = QDateTime::currentMSecsSinceEpoch();
+		msg.type = MessageType::Text;
+		if (replyMtsId != parentMtsId) {
+			msg.repliedMessageId = replyMtsId;
+		}
+		msg.parentId = parentMtsId;
+		auto local = file;
+		local.id = tempId;
+		msg.files.push_back(local);
+		// The content is in the cache of the local document before it is
+		// shown: not loaded by its temporary (not existing) url.
+		const auto tempDocument = strong->data().document(
+			DocumentId(uuidToBareId(tempId)));
+		addMessage(strong, msg, isThreadSend);
+		putToDocumentCache(tempDocument, fileDownloadUrl(tempId), bytes);
+		// The upload progress is shown, as for a sent file.
+		tempDocument->uploadingData = std::make_unique<Data::UploadState>(
+			bytes.size());
+		if (isThreadSend) {
+			addPendingThreadSend(clientId);
+		} else {
+			setPendingTempMessage(
+				peerId,
+				MsgId(uuidToBareId(tempId) & 0x7FFFFFFFLL));
+		}
+		if (const auto history = strong->data().historyLoaded(peerId)) {
+			strong->data().sendHistoryChangeNotifications();
+			strong->changes().historyUpdated(
+				history,
+				Data::HistoryUpdate::Flag::MessageSent);
+		}
+		LOG(("MtsLink Gifs: uploading '%1' (%2 bytes) to %3"
+			).arg(file.name
+			).arg(bytes.size()
+			).arg(chatId));
+		mts->files()->uploadFile(
+			file.name.isEmpty() ? u"animation.gif"_q : file.name,
+			bytes,
+			file.mime,
+			[=](const Api::UploadResult &result) {
+				const auto strong = weak.get();
+				const auto mts = strong
+					? strong->account().mtsLinkSession()
+					: nullptr;
+				if (!mts) {
+					return;
+				}
+				// The real file is in the cache as well (the local message
+				// gets its url).
+				putToDocumentCache(
+					tempDocument,
+					fileDownloadUrl(result.id),
+					bytes);
+				mts->sending()->sendMessage(
+					chatId,
+					QString(),
+					QJsonArray(),
+					QJsonArray(),
+					(replyMtsId == parentMtsId) ? QString() : replyMtsId,
+					QStringList{ result.id },
+					parentMtsId,
+					clientId);
+			},
+			[=](const QString &error) {
+				LOG(("MtsLink Gifs: upload failed: %1").arg(error));
+				tempDocument->uploadingData = nullptr;
+				tempDocument->owner().requestDocumentViewRepaint(
+					tempDocument);
+			},
+			[=](qint64 sent, qint64 total) {
+				if (const auto uploading = tempDocument->uploadingData.get()) {
+					uploading->offset = sent;
+					tempDocument->owner().requestDocumentViewRepaint(
+						tempDocument);
+				}
+			});
+	};
+	session->data().cache().get(gifBytesCacheKey(file.id), [=](
+			QByteArray &&bytes) {
+		crl::on_main(weak, [=, bytes = std::move(bytes)]() mutable {
+			if (!bytes.isEmpty()) {
+				sendBytes(std::move(bytes));
+			} else {
+				loadFileBytes(document, file.id, sendBytes);
+			}
+		});
+	});
+	return true;
 }
 
 } // namespace MtsLink

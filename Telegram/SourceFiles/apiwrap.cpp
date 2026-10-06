@@ -3338,6 +3338,9 @@ void ApiWrap::requestFeaturedEmoji(TimeId now) {
 }
 
 void ApiWrap::requestSavedGifs(TimeId now) {
+	if (_session->account().mtsLinkSession()) {
+		return; // The saved GIFs are local only.
+	}
 	if (!_session->data().stickers().savedGifsUpdateNeeded(now)
 		|| _savedGifsUpdateRequest) {
 		return;
@@ -4798,6 +4801,11 @@ void ApiWrap::sendMessage(
 				msg.parentId = parentMtsId;
 			}
 			MtsLink::addMessage(_session, msg, isThreadSend);
+			// The chat is scrolled to the sent message (laid out first).
+			_session->data().sendHistoryChangeNotifications();
+			_session->changes().historyUpdated(
+				history,
+				Data::HistoryUpdate::Flag::MessageSent);
 		}
 		const auto tempMsgId = MsgId(
 			MtsLink::uuidToBareId(tempId) & 0x7FFFFFFFLL);

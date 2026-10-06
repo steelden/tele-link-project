@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_photo_media.h"
 
 #include <QtCore/QBuffer>
+#include <QtGui/QImageReader>
 #include "data/data_channel.h" // ChannelData::addsSignature.
 #include "data/data_user.h" // UserData::name
 #include "data/data_session.h"
@@ -713,6 +714,17 @@ void SendExistingDocument(
 		MessageToSend &&message,
 		not_null<DocumentData*> document,
 		std::optional<MsgId> localMessageId) {
+	const auto history = message.action.history;
+	if (MtsLink::hasChatId(history->peer->id)) {
+		const auto &replyTo = message.action.replyTo;
+		MtsLink::sendSavedGif(
+			&history->session(),
+			history,
+			document,
+			replyTo.messageId.msg,
+			replyTo.topicRootId);
+		return;
+	}
 	const auto inputMedia = [=] {
 		return MTP_inputMediaDocument(
 			MTP_flags(message.action.options.mediaSpoiler
@@ -1441,6 +1453,14 @@ void SendConfirmedFile(
 					fileData.width = img.width();
 					fileData.height = img.height();
 				}
+			} else if (file->filemime == u"image/gif"_q) {
+				// A GIF: the size for the animation view while uploading.
+				QBuffer buffer(&fileContent);
+				const auto size = QImageReader(&buffer).size();
+				if (size.isValid()) {
+					fileData.width = size.width();
+					fileData.height = size.height();
+				}
 			}
 			msg.files.push_back(std::move(fileData));
 			const auto item = MtsLink::addMessage(session, msg);
@@ -1485,6 +1505,12 @@ void SendConfirmedFile(
 						doc->uploadingData
 							= std::make_unique<Data::UploadState>(
 								fileSize);
+						// Shown (played) from the disk while uploading and
+						// after it, not downloaded back from the server.
+						if (!file->filepath.isEmpty()) {
+							doc->setLocation(
+								Core::FileLocation(file->filepath));
+						}
 					}
 				}
 			}
@@ -1492,6 +1518,13 @@ void SendConfirmedFile(
 		const auto tempMsgId = MsgId(
 			MtsLink::uuidToBareId(tempId) & 0x7FFFFFFFLL);
 		MtsLink::setPendingTempMessage(peerId, tempMsgId);
+		// The chat is scrolled to the sent message (laid out first).
+		if (const auto history = session->data().historyLoaded(peerId)) {
+			session->data().sendHistoryChangeNotifications();
+			session->changes().historyUpdated(
+				history,
+				Data::HistoryUpdate::Flag::MessageSent);
+		}
 
 		const auto upload = [=](
 				MtsLink::Api::Files::DoneHandler done,
@@ -1519,6 +1552,15 @@ void SendConfirmedFile(
 		};
 		upload(
 			[=](const MtsLink::Api::UploadResult &result) {
+				// Shown from the cache after the upload, not downloaded
+				// back from the server (a file with no path on the disk).
+				if (file->type != SendMediaType::Photo || file->forceFile) {
+					MtsLink::rememberUploadedContent(
+						session,
+						DocumentId(MtsLink::uuidToBareId(tempId)),
+						result.id,
+						fileContent);
+				}
 				mts->sending()->sendMessage(
 					chatId,
 					caption,

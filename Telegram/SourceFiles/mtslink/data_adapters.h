@@ -207,6 +207,24 @@ void handleSchedulerEvent(
 // thread counter, or -1 if there is no row for that thread.
 [[nodiscard]] int threadEntryUnreadCount(PeerId parentPeerId, MsgId rootId);
 
+// The content of an uploaded file in the file cache of its document: the
+// sent message shows it, not downloads it back from the server.
+void rememberUploadedContent(
+	not_null<Main::Session*> session,
+	DocumentId localDocumentId,
+	const QString &fileId,
+	const QByteArray &content);
+
+// The saved GIFs (the GIFs panel): local only, kept in the session cache.
+void restoreSavedGifs(not_null<Main::Session*> session);
+// Sends a GIF of the panel by its MTS Link file, false if it is not known.
+bool sendSavedGif(
+	not_null<Main::Session*> session,
+	not_null<History*> history,
+	not_null<DocumentData*> document,
+	MsgId replyToId,
+	MsgId topicRootId);
+
 // Diagnostics: the chats and threads with something unread.
 void logUnreadSummary(
 	not_null<Main::Session*> session,

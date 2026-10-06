@@ -188,8 +188,16 @@ void Files::doHttpUpload(
 	}
 
 	if (progress) {
+		const auto last = std::make_shared<qint64>(0);
 		QObject::connect(reply, &QNetworkReply::uploadProgress, this,
 			[=](qint64 sent, qint64 total) {
+				if (total <= 0) {
+					return; // Qt reports (0, 0) when finished.
+				} else if (sent < *last) {
+					LOG(("MtsLink Files: upload progress restarted %1 -> %2 "
+						"of %3").arg(*last).arg(sent).arg(total));
+				}
+				*last = sent;
 				progress(sent, total);
 			});
 	}
@@ -205,8 +213,10 @@ void Files::doHttpUpload(
 				}
 				return;
 			}
-			LOG(("MtsLink Files: upload complete, fileId='%1'")
-				.arg(result.id));
+			LOG(("MtsLink Files: upload complete, fileId='%1' status=%2")
+				.arg(result.id)
+				.arg(reply->attribute(
+					QNetworkRequest::HttpStatusCodeAttribute).toInt()));
 			if (done) {
 				done(result);
 			}

@@ -519,7 +519,10 @@ void DocumentData::setattributes(
 			|| type == AnimatedDocument
 			|| type == RoundVideoDocument
 			|| isAnimation()) {
-			if (!enforceNameType(Type::Video)) {
+			// MTS Link: a "*.gif" file is an animation (a GIF) as it is.
+			const auto gifFile = (type == AnimatedDocument)
+				&& hasMimeType(u"image/gif"_q);
+			if (!gifFile && !enforceNameType(Type::Video)) {
 				type = FileDocument;
 				_additional = nullptr;
 			}
@@ -1926,8 +1929,9 @@ bool DocumentData::isAnimation() const {
 }
 
 bool DocumentData::isGifv() const {
+	// MTS Link: the GIF files are "image/gif", not converted to mp4.
 	return (type == AnimatedDocument)
-		&& hasMimeType(u"video/mp4"_q);
+		&& (hasMimeType(u"video/mp4"_q) || hasMimeType(u"image/gif"_q));
 }
 
 bool DocumentData::isTheme() const {

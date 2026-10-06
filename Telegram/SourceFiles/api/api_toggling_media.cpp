@@ -12,6 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_origin.h"
 #include "data/data_session.h"
 #include "data/stickers/data_stickers.h"
+#include "main/main_account.h"
+#include "main/main_session.h"
 #include "window/window_session_controller.h"
 #include "main/main_session.h"
 
@@ -108,6 +110,13 @@ void ToggleSavedGif(
 		Data::FileOrigin origin,
 		bool saved) {
 	if (saved && !document->isGifv()) {
+		return;
+	}
+	if (document->session().account().mtsLinkSession()) {
+		// MTS Link: the saved GIFs are local only.
+		if (saved) {
+			document->owner().stickers().addSavedGif(show, document);
+		}
 		return;
 	}
 	auto done = [=] {
