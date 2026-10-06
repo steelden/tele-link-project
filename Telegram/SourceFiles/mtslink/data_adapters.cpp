@@ -2199,9 +2199,11 @@ void connectToSession(
 		mtsSession,
 		&Session::initialized,
 		mtsSession->messages(),
-		[mtsSession] {
+		[mainSession, mtsSession] {
 			mtsSession->messages()->retryFailedLoads();
 			saveCachedUserId(mtsSession->userId());
+			// The messages lost with the connection are sent again.
+			resendPendingSends(mainSession);
 		});
 	const auto refreshLastMessages = [mainSession, mtsSession](
 			const QList<Api::ChannelData> &list) {
@@ -5018,8 +5020,12 @@ void handleChatEvent(
 		HistoryItem *newItem = nullptr;
 		if (isThreadReply) {
 			LOG(("MtsLink NewMsg: treating as thread reply"));
-			replacePendingWithReal(session, chatPeerId, msg);
-		} else if (!replacePendingWithReal(session, chatPeerId, msg)) {
+			replacePendingWithReal(session, chatPeerId, msg, clientId);
+		} else if (!replacePendingWithReal(
+				session,
+				chatPeerId,
+				msg,
+				clientId)) {
 			newItem = addMessage(session, msg, isThread);
 			LOG(("MtsLink NewMsg: addMessage result=%1")
 				.arg(newItem ? "ok" : "null"));
@@ -5894,17 +5900,146 @@ void clearPendingTempMessage(
 	}
 }
 
+namespace {
+
+struct PendingSend {
+	PeerId peerId = 0;
+	MsgId localId = 0;
+	QString chatId;
+	QString text;
+	QJsonArray blocks;
+	QJsonArray mentionsMeta;
+	QString replyToId;
+	QStringList fileIds;
+	QString parentId;
+};
+QHash<QString, PendingSend> PendingSends; // By the client id.
+
+void sendTracked(not_null<Main::Session*> session, const QString &clientId) {
+	const auto i = PendingSends.constFind(clientId);
+	const auto mts = session->account().mtsLinkSession();
+	if (i == PendingSends.constEnd() || !mts || !mts->rpc()) {
+		return;
+	} else if (!mts->rpc()->isConnected()) {
+		LOG(("MtsLink Sending: %1 waits for the connection").arg(clientId));
+		return;
+	}
+	const auto &send = i.value();
+	const auto weak = base::make_weak(session);
+	mts->sending()->sendMessage(
+		send.chatId,
+		send.text,
+		send.blocks,
+		send.mentionsMeta,
+		send.replyToId,
+		send.fileIds,
+		send.parentId,
+		clientId,
+		[=](const QJsonObject &result) {
+			const auto strong = weak.get();
+			const auto type = result.value(u"type"_q).toString();
+			if (!strong || type != u"BusinessError"_q) {
+				return;
+			}
+			// Not to be sent: the failed message (red), may be deleted.
+			const auto send = PendingSends.take(clientId);
+			LOG(("MtsLink Sending: %1 failed").arg(clientId));
+			markLocalFailed(strong, send.peerId, send.localId);
+		},
+		[=](const QString &error) {
+			// Lost with the connection: sent again after a reconnect.
+			LOG(("MtsLink Sending: %1 %2, waits").arg(clientId, error));
+		});
+}
+
+} // namespace
+
+void resendPendingSends(not_null<Main::Session*> session) {
+	for (const auto &clientId : PendingSends.keys()) {
+		const auto &send = PendingSends[clientId];
+		if (!session->data().message(send.peerId, send.localId)) {
+			PendingSends.remove(clientId); // Deleted meanwhile.
+			continue;
+		}
+		LOG(("MtsLink Sending: %1 sent again").arg(clientId));
+		sendTracked(session, clientId);
+	}
+}
+
+void markLocalSending(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		MsgId localId) {
+	if (const auto item = session->data().message(peerId, localId)) {
+		item->mtsLinkSetSending(true);
+	}
+}
+
+void markLocalFailed(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		MsgId localId) {
+	// Not replaced by a message sent back by the server.
+	if (const auto it = PendingTempMessages.find(peerId)
+		; it != PendingTempMessages.end()) {
+		it->removeOne(localId);
+	}
+	if (const auto item = session->data().message(peerId, localId)) {
+		if (!item->isSending()) {
+			item->mtsLinkSetSending(true);
+		}
+		item->sendFailed();
+	}
+}
+
+QString trackSend(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		MsgId localId,
+		const QString &chatId,
+		const QString &text,
+		const QJsonArray &blocks,
+		const QJsonArray &mentionsMeta,
+		const QString &replyToId,
+		const QStringList &fileIds,
+		const QString &parentId,
+		QString clientId) {
+	if (clientId.isEmpty()) {
+		clientId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+	}
+	PendingSends.insert(clientId, PendingSend{
+		.peerId = peerId,
+		.localId = localId,
+		.chatId = chatId,
+		.text = text,
+		.blocks = blocks,
+		.mentionsMeta = mentionsMeta,
+		.replyToId = replyToId,
+		.fileIds = fileIds,
+		.parentId = parentId,
+	});
+	markLocalSending(session, peerId, localId);
+	sendTracked(session, clientId);
+	return clientId;
+}
+
 bool replacePendingWithReal(
 		not_null<Main::Session*> session,
 		PeerId peerId,
-		const Api::MessageData &realMsg) {
+		const Api::MessageData &realMsg,
+		const QString &clientId) {
+	// The local message of this send (by the client id), or the first one.
+	const auto sent = PendingSends.take(clientId);
 	const auto it = PendingTempMessages.find(peerId);
 	if (it == PendingTempMessages.end() || it->isEmpty()) {
 		LOG(("MtsLink Pending: NOT FOUND for peerId=%1 realId='%2'")
 			.arg(peerId.value).arg(realMsg.id));
 		return false;
 	}
-	const auto tempMsgId = it->takeFirst();
+	const auto tempMsgId = (sent.localId && it->contains(sent.localId))
+		? sent.localId
+		: it->first();
+	it->removeOne(tempMsgId);
 	LOG(("MtsLink Pending: FOUND peerId=%1 tempMsgId=%2 realId='%3'")
 		.arg(peerId.value).arg(tempMsgId.bare).arg(realMsg.id));
 	if (it->isEmpty()) {
@@ -5914,6 +6049,7 @@ bool replacePendingWithReal(
 	if (!item) {
 		return false;
 	}
+	item->mtsLinkSetSending(false);
 	if (const auto media = item->media()) {
 		if (!realMsg.files.isEmpty()) {
 			const auto &f = realMsg.files.first();
@@ -9023,6 +9159,10 @@ bool sendSavedGif(
 		const auto tempDocument = strong->data().document(
 			DocumentId(uuidToBareId(tempId)));
 		addMessage(strong, msg, isThreadSend);
+		markLocalSending(
+			strong,
+			peerId,
+			MsgId(uuidToBareId(tempId) & 0x7FFFFFFFLL));
 		putToDocumentCache(tempDocument, fileDownloadUrl(tempId), bytes);
 		// The upload progress is shown, as for a sent file.
 		tempDocument->uploadingData = std::make_unique<Data::UploadState>(
@@ -9062,7 +9202,10 @@ bool sendSavedGif(
 					tempDocument,
 					fileDownloadUrl(result.id),
 					bytes);
-				mts->sending()->sendMessage(
+				trackSend(
+					strong,
+					peerId,
+					MsgId(uuidToBareId(tempId) & 0x7FFFFFFFLL),
 					chatId,
 					QString(),
 					QJsonArray(),
@@ -9074,6 +9217,12 @@ bool sendSavedGif(
 			},
 			[=](const QString &error) {
 				LOG(("MtsLink Gifs: upload failed: %1").arg(error));
+				if (const auto strong = weak.get()) {
+					markLocalFailed(
+						strong,
+						peerId,
+						MsgId(uuidToBareId(tempId) & 0x7FFFFFFFLL));
+				}
 				tempDocument->uploadingData = nullptr;
 				tempDocument->owner().requestDocumentViewRepaint(
 					tempDocument);

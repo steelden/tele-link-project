@@ -4816,7 +4816,12 @@ void ApiWrap::sendMessage(
 			MtsLink::addPendingThreadSend(sendClientId);
 		}
 
-		mts->sending()->sendMessage(
+		// The clock till the server sends it back, sent again after a
+		// reconnect if lost with the connection.
+		MtsLink::trackSend(
+			_session,
+			peer->id,
+			tempMsgId,
 			chatId,
 			content.text,
 			content.blocks,

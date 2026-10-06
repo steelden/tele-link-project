@@ -4383,6 +4383,23 @@ bool HistoryItem::hasUnpaidContent() const {
 	return false;
 }
 
+void HistoryItem::mtsLinkSetSending(bool sending) {
+	const auto was = _flags;
+	if (sending) {
+		_flags = (_flags | MessageFlag::BeingSent)
+			& ~MessageFlag::SendingFailed;
+	} else {
+		_flags &= ~(MessageFlag::BeingSent | MessageFlag::SendingFailed);
+	}
+	if (_flags != was) {
+		_history->owner().notifyItemDataChange(this);
+		_history->owner().requestItemRepaint(this);
+		_history->session().changes().historyUpdated(
+			_history,
+			Data::HistoryUpdate::Flag::ClientSideMessages);
+	}
+}
+
 void HistoryItem::sendFailed() {
 	Expects(_flags & MessageFlag::BeingSent);
 	Expects(!(_flags & MessageFlag::SendingFailed));

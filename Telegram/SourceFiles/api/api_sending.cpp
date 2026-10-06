@@ -1518,6 +1518,8 @@ void SendConfirmedFile(
 		const auto tempMsgId = MsgId(
 			MtsLink::uuidToBareId(tempId) & 0x7FFFFFFFLL);
 		MtsLink::setPendingTempMessage(peerId, tempMsgId);
+		// The clock while uploading and sending.
+		MtsLink::markLocalSending(session, peerId, tempMsgId);
 		// The chat is scrolled to the sent message (laid out first).
 		if (const auto history = session->data().historyLoaded(peerId)) {
 			session->data().sendHistoryChangeNotifications();
@@ -1561,18 +1563,22 @@ void SendConfirmedFile(
 						result.id,
 						fileContent);
 				}
-				mts->sending()->sendMessage(
+				MtsLink::trackSend(
+					session,
+					peerId,
+					tempMsgId,
 					chatId,
 					caption,
 					QJsonArray(),
 					QJsonArray(),
 					replyMsgId,
-					QStringList{ result.id });
+					QStringList{ result.id },
+					QString());
 			},
 			[=](const QString &error) {
 				LOG(("MtsLink Files: upload failed for '%1': %2")
 					.arg(file->filename, error));
-				MtsLink::clearPendingTempMessage(session, peerId);
+				MtsLink::markLocalFailed(session, peerId, tempMsgId);
 			},
 			[=](qint64 sent, qint64 total) {
 				const auto item = session->data().message(

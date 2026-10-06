@@ -30,7 +30,9 @@ public:
 		const MessageId &replyToMessageId = {},
 		const QStringList &fileIds = {},
 		const MessageId &parentId = {},
-		const QString &clientId = {});
+		const QString &clientId = {},
+		std::function<void(const QJsonObject&)> done = nullptr,
+		std::function<void(const QString&)> fail = nullptr);
 
 	void deleteMessage(
 		const ChatId &chatId,

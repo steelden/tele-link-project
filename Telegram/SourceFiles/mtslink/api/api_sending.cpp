@@ -23,7 +23,9 @@ void Sending::sendMessage(
 		const MessageId &replyToMessageId,
 		const QStringList &fileIds,
 		const MessageId &parentId,
-		const QString &clientId) {
+		const QString &clientId,
+		std::function<void(const QJsonObject&)> done,
+		std::function<void(const QString&)> fail) {
 	QJsonObject param;
 	param["clientId"] = clientId.isEmpty()
 		? QUuid::createUuid().toString(QUuid::WithoutBraces)
@@ -63,8 +65,16 @@ void Sending::sendMessage(
 	_rpc->call(
 		"Chat.SendMessageV2",
 		param,
-		[this, chatId](const QJsonObject &result) {
+		[this, chatId, done](const QJsonObject &result) {
 			Q_EMIT messageSent(chatId, result);
+			if (done) {
+				done(result);
+			}
+		},
+		[fail](const QString &error) {
+			if (fail) {
+				fail(error);
+			}
 		});
 }
 

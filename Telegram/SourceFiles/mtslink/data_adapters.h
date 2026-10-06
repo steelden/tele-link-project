@@ -207,6 +207,29 @@ void handleSchedulerEvent(
 // thread counter, or -1 if there is no row for that thread.
 [[nodiscard]] int threadEntryUnreadCount(PeerId parentPeerId, MsgId rootId);
 
+// The local messages being sent: the clock till the server sends them
+// back (by the client id), sent again after a reconnect, failed on an error.
+void markLocalSending(
+	not_null<Main::Session*> session,
+	PeerId peerId,
+	MsgId localId);
+void markLocalFailed(
+	not_null<Main::Session*> session,
+	PeerId peerId,
+	MsgId localId);
+QString trackSend(
+	not_null<Main::Session*> session,
+	PeerId peerId,
+	MsgId localId,
+	const QString &chatId,
+	const QString &text,
+	const QJsonArray &blocks,
+	const QJsonArray &mentionsMeta,
+	const QString &replyToId,
+	const QStringList &fileIds,
+	const QString &parentId,
+	QString clientId = QString());
+
 // The content of an uploaded file in the file cache of its document: the
 // sent message shows it, not downloads it back from the server.
 void rememberUploadedContent(
@@ -334,7 +357,10 @@ void clearPendingTempMessage(
 bool replacePendingWithReal(
 	not_null<Main::Session*> session,
 	PeerId peerId,
-	const Api::MessageData &realMsg);
+	const Api::MessageData &realMsg,
+	const QString &clientId = QString());
+// The local messages lost with the connection: sent again.
+void resendPendingSends(not_null<Main::Session*> session);
 
 void setOldestLoadedMessageId(PeerId peerId, const QString &mtsLinkId);
 [[nodiscard]] QString oldestLoadedMessageId(PeerId peerId);

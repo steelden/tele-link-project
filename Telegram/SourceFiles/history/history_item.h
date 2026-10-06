@@ -206,6 +206,8 @@ public:
 	void setOngoingCallLink(ClickHandlerPtr link);
 	// MTS Link: a local media (the call message) set and replaced.
 	void setMtsLinkMedia(std::unique_ptr<Data::Media> media);
+	// MTS Link: a local message is being sent (the clock) or is sent.
+	void mtsLinkSetSending(bool sending);
 	void clearOngoingCallLink();
 
 	[[nodiscard]] UserData *viaBot() const;
