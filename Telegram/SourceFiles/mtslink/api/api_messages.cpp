@@ -70,6 +70,11 @@ void Messages::load(
 			for (const auto &item : msgArray) {
 				auto msg = parseMessage(item.toObject());
 				if (msg.isDeleted) {
+					// Deleted on the server: removed locally (kept in the
+					// cache when deleted while TeleLink was closed).
+					Q_EMIT deletedMessageSeen(
+						msg.chatId.isEmpty() ? chatId : msg.chatId,
+						msg.id);
 					continue;
 				}
 				if (msg.chatId.isEmpty()) {
@@ -110,6 +115,11 @@ void Messages::loadPreview(const ChatId &chatId, int limit) {
 			for (const auto &item : msgArray) {
 				auto msg = parseMessage(item.toObject());
 				if (msg.isDeleted) {
+					// Deleted on the server: removed locally (kept in the
+					// cache when deleted while TeleLink was closed).
+					Q_EMIT deletedMessageSeen(
+						msg.chatId.isEmpty() ? chatId : msg.chatId,
+						msg.id);
 					continue;
 				}
 				if (msg.chatId.isEmpty()) {
@@ -338,6 +348,11 @@ void Messages::search(
 			for (const auto &item : msgArray) {
 				auto msg = parseMessage(item.toObject());
 				if (msg.isDeleted) {
+					// Deleted on the server: removed locally (kept in the
+					// cache when deleted while TeleLink was closed).
+					Q_EMIT deletedMessageSeen(
+						msg.chatId.isEmpty() ? chatId : msg.chatId,
+						msg.id);
 					continue;
 				}
 				if (msg.chatId.isEmpty()) {
@@ -426,6 +441,11 @@ void Messages::loadPinned(const ChatId &chatId, int limit) {
 			for (const auto &item : msgArray) {
 				auto msg = parseMessage(item.toObject());
 				if (msg.isDeleted) {
+					// Deleted on the server: removed locally (kept in the
+					// cache when deleted while TeleLink was closed).
+					Q_EMIT deletedMessageSeen(
+						msg.chatId.isEmpty() ? chatId : msg.chatId,
+						msg.id);
 					continue;
 				}
 				if (msg.chatId.isEmpty()) {
@@ -477,6 +497,11 @@ void Messages::loadThread(
 			for (const auto &item : msgArray) {
 				auto msg = parseMessage(item.toObject());
 				if (msg.isDeleted) {
+					// Deleted on the server: removed locally (kept in the
+					// cache when deleted while TeleLink was closed).
+					Q_EMIT deletedMessageSeen(
+						msg.chatId.isEmpty() ? chatId : msg.chatId,
+						msg.id);
 					continue;
 				}
 				if (msg.chatId.isEmpty()) {
@@ -517,6 +542,11 @@ void Messages::loadThreadPage(
 			for (const auto &item : value.value("messages").toArray()) {
 				auto msg = parseMessage(item.toObject());
 				if (msg.isDeleted) {
+					// Deleted on the server: removed locally (kept in the
+					// cache when deleted while TeleLink was closed).
+					Q_EMIT deletedMessageSeen(
+						msg.chatId.isEmpty() ? chatId : msg.chatId,
+						msg.id);
 					continue;
 				}
 				if (msg.chatId.isEmpty()) {
@@ -555,6 +585,11 @@ void Messages::loadAround(
 		for (const auto &item : arr) {
 			auto msg = parseMessage(item.toObject());
 			if (msg.isDeleted) {
+				// Deleted on the server: removed locally (kept in the
+				// cache when deleted while TeleLink was closed).
+				Q_EMIT deletedMessageSeen(
+					msg.chatId.isEmpty() ? chatId : msg.chatId,
+					msg.id);
 				continue;
 			}
 			if (msg.chatId.isEmpty()) {

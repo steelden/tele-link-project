@@ -178,6 +178,7 @@ public:
 	}
 
 Q_SIGNALS:
+	void deletedMessageSeen(const ChatId &chatId, const MessageId &messageId);
 	void messagesLoaded(
 		const ChatId &chatId,
 		const QList<MessageData> &messages,

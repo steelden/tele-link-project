@@ -1445,6 +1445,35 @@ void SendConfirmedFile(
 		const auto tempId = QUuid::createUuid().toString(QUuid::WithoutBraces);
 		const auto peerId = file->to.peer;
 		const auto fileSize = qint64(fileContent.size());
+		// An image sent as a file: its preview from the content (the CDN
+		// one of the local file doesn't exist, the real one comes later).
+		const auto documentPreview = [&] {
+			if ((file->type == SendMediaType::Photo && !file->forceFile)
+				|| !file->filemime.startsWith(u"image/"_q)
+				|| file->filemime == u"image/gif"_q) {
+				return QByteArray();
+			}
+			auto image = QImage::fromData(fileContent);
+			if (image.isNull()) {
+				return QByteArray();
+			}
+			constexpr auto kSide = 320;
+			if (image.width() > kSide || image.height() > kSide) {
+				image = image.scaled(
+					kSide,
+					kSide,
+					Qt::KeepAspectRatio,
+					Qt::SmoothTransformation);
+			}
+			auto result = QByteArray();
+			QBuffer buffer(&result);
+			buffer.open(QIODevice::WriteOnly);
+			image.save(&buffer, "PNG");
+			return result;
+		}();
+		if (!documentPreview.isEmpty()) {
+			MtsLink::putToImageCache(session, tempId, documentPreview);
+		}
 		{
 			MtsLink::Api::MessageData msg;
 			msg.id = tempId;
@@ -1586,6 +1615,13 @@ void SendConfirmedFile(
 		upload(
 			[=](const MtsLink::Api::UploadResult &result) {
 				clearPhotoUploading();
+				if (!documentPreview.isEmpty()) {
+					MtsLink::putToImageCache(
+						session,
+						result.id,
+						documentPreview);
+					MtsLink::rememberImageAsFile(session, result.id);
+				}
 				// Shown from the cache after the upload, not downloaded
 				// back from the server (a file with no path on the disk).
 				if (file->type != SendMediaType::Photo || file->forceFile) {

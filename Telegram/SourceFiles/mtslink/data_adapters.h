@@ -243,6 +243,18 @@ void rememberUploadedContent(
 // The local stickers (the favorites of the stickers panel): images of the
 // messages, kept with their content in the session cache.
 [[nodiscard]] bool canAddPhotoToStickers(not_null<PhotoData*> photo);
+// An image sent as a file: shown as a file (kept in the session cache).
+void rememberImageAsFile(
+	not_null<Main::Session*> session,
+	const QString &fileId);
+void restoreImagesAsFiles(not_null<Main::Session*> session);
+
+// The image content in the cache by the CDN urls of a file (the preview of
+// a photo or of a document): shown without loading from the server.
+void putToImageCache(
+	not_null<Main::Session*> session,
+	const QString &fileId,
+	const QByteArray &bytes);
 // A local sticker, or a sticker of a message (kept as a local one).
 bool toggleFavedSticker(not_null<DocumentData*> document, bool faved);
 void addPhotoToStickers(not_null<PhotoData*> photo);

@@ -540,6 +540,10 @@ void reapplyPhotoUrls(
 QHash<DocumentId, Api::FileData> GifFiles;
 // The image files by their photos: added to the local stickers.
 QHash<PhotoId, Api::FileData> PhotoFiles;
+// The images sent by TeleLink as files: MTS Link has no "as a file" (the
+// server marks any image with its size), they are shown as files here.
+QSet<QString> ImageAsFileIds;
+constexpr auto kMtsLinkImageFilesTag = uint64(0xBC0B'0000'0000'0001ULL);
 // The animated stickers of the messages (sent by TeleLink): by documents.
 QHash<DocumentId, Api::FileData> StickerFiles;
 
@@ -639,7 +643,8 @@ MTPMessageMedia buildFileMedia(
 	if (!isGif
 		&& isImageMime(file.mime)
 		&& file.width > 0
-		&& file.height > 0) {
+		&& file.height > 0
+		&& !ImageAsFileIds.contains(file.id)) {
 		return buildPhotoMedia(session, file, date);
 	}
 
@@ -2257,6 +2262,8 @@ void connectToSession(
 	LoadedDialogsList.clear();
 	DialogsApplied = false;
 	ActiveChatRestored = false;
+	// Before the messages: they are built from the cache after the list.
+	restoreImagesAsFiles(mainSession);
 	loadChatListFromCache(mainSession);
 
 	rpl::merge(
@@ -2451,6 +2458,22 @@ void connectToSession(
 				history->applyDialogTopMessage(created.back()->id);
 			}
 			saveMessagesToCache(mainSession, chatId, { newest }, profiles);
+		});
+	QObject::connect(
+		mtsSession->messages(),
+		&Api::Messages::deletedMessageSeen,
+		[mainSession](const ChatId &chatId, const MessageId &messageId) {
+			// Deleted while TeleLink was closed: still in the local cache.
+			const auto peerId = chatIdToPeerId(chatId);
+			const auto known = MtsLinkIdToMsgMap.constFind(messageId);
+			const auto msgId = (known != MtsLinkIdToMsgMap.constEnd())
+				? known->second
+				: MsgId(uuidToBareId(messageId) & 0x7FFFFFFFLL);
+			if (mainSession->data().message(peerId, msgId)) {
+				LOG(("MtsLink Messages: %1 in %2 deleted on the server"
+					).arg(messageId, chatId));
+				deleteMessage(mainSession, chatId, messageId);
+			}
 		});
 	QObject::connect(
 		mtsSession->messages(),
@@ -6396,6 +6419,13 @@ bool replacePendingWithReal(
 					ImageWithLocation{},
 					crl::time(0));
 			} else if (const auto doc = media->document()) {
+				LOG(("MtsLink Files: sent document %1 mime=%2 size=%3x%4 "
+					"thumbnail=%5"
+					).arg(f.id
+					).arg(f.mime
+					).arg(f.width
+					).arg(f.height
+					).arg(doc->hasThumbnail() ? 1 : 0));
 				doc->uploadingData = nullptr;
 				doc->setContentUrl(
 					fileDownloadBase() + f.id + u"/download"_q);
@@ -9966,6 +9996,66 @@ void importStickerPack(
 			tr::now,
 			lt_pack,
 			title));
+	});
+}
+
+namespace {
+
+[[nodiscard]] Storage::Cache::Key imageFilesCacheKey() {
+	return { kMtsLinkImageFilesTag, 0 };
+}
+
+} // namespace
+
+void rememberImageAsFile(
+		not_null<Main::Session*> session,
+		const QString &fileId) {
+	if (fileId.isEmpty() || ImageAsFileIds.contains(fileId)) {
+		return;
+	}
+	ImageAsFileIds.insert(fileId);
+	auto data = QByteArray();
+	{
+		QDataStream s(&data, QIODevice::WriteOnly);
+		s.setVersion(QDataStream::Qt_5_1);
+		s << qint32(1) << qint32(ImageAsFileIds.size());
+		for (const auto &id : std::as_const(ImageAsFileIds)) {
+			s << id;
+		}
+	}
+	LOG(("MtsLink Files: image %1 sent as a file, %2 kept"
+		).arg(fileId
+		).arg(ImageAsFileIds.size()));
+	session->data().cache().put(imageFilesCacheKey(), std::move(data));
+}
+
+void restoreImagesAsFiles(not_null<Main::Session*> session) {
+	const auto weak = base::make_weak(session);
+	session->data().cache().get(imageFilesCacheKey(), [=](
+			QByteArray &&data) {
+		crl::on_main(weak, [=, data = std::move(data)] {
+			if (data.isEmpty()) {
+				return;
+			}
+			QDataStream s(data);
+			s.setVersion(QDataStream::Qt_5_1);
+			auto version = qint32();
+			auto count = qint32();
+			s >> version >> count;
+			if (s.status() != QDataStream::Ok || version != 1 || count < 0) {
+				return;
+			}
+			for (auto i = 0; i != count; ++i) {
+				auto id = QString();
+				s >> id;
+				if (s.status() != QDataStream::Ok) {
+					break;
+				}
+				ImageAsFileIds.insert(id);
+			}
+			LOG(("MtsLink Files: %1 images sent as files restored"
+				).arg(ImageAsFileIds.size()));
+		});
 	});
 }
 
