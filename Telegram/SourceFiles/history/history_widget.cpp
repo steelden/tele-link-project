@@ -4667,9 +4667,12 @@ void HistoryWidget::newItemAdded(not_null<HistoryItem*> item) {
 
 	if (item->isSending()) {
 		synteticScrollToY(_scroll->scrollTopMax());
-	} else if (MtsLink::hasChatId(_history->peer->id)) {
-		return;
 	} else if (_scroll->scrollTop() < _scroll->scrollTopMax()) {
+		return;
+	} else if (MtsLink::hasChatId(_history->peer->id)
+		&& !markingMessagesRead()) {
+		// MTS Link: followed (shown and read) only at the bottom of the
+		// active window, kept unread below otherwise.
 		return;
 	}
 	if (item->showNotification()) {
@@ -9004,7 +9007,8 @@ void HistoryWidget::updateHistoryGeometry(
 	} else if (mtsLinkKeepBottom && !loadedDown) {
 		newScrollTop = ScrollMax;
 	} else if (wasAtBottom && !loadedDown && !_history->unreadBar()
-		&& !isMtsLink) {
+		&& (!isMtsLink || markingMessagesRead())) {
+		// MTS Link: new messages followed in the active window only.
 		newScrollTop = countAutomaticScrollTop();
 	} else {
 		newScrollTop = std::min(
@@ -9066,7 +9070,8 @@ void HistoryWidget::revealItemsCallback() {
 		_list->changeItemsRevealHeight(_itemsRevealHeight);
 
 		const auto newScrollTop = (wasAtBottom && !_history->unreadBar()
-			&& !MtsLink::hasChatId(_history->peer->id))
+			&& (!MtsLink::hasChatId(_history->peer->id)
+				|| markingMessagesRead()))
 			? countAutomaticScrollTop()
 			: _list->historyScrollTop();
 		const auto toY = std::clamp(newScrollTop, 0, _scroll->scrollTopMax());
