@@ -50,6 +50,8 @@ void connectToSession(
 [[nodiscard]] PeerId chatIdToPeerId(const QString &chatId);
 [[nodiscard]] QString peerIdToChatId(PeerId peerId);
 [[nodiscard]] bool hasChatId(PeerId peerId);
+// The own messages not read by the others yet ("isRead" of the server).
+[[nodiscard]] bool isOutboxUnread(PeerId peerId, MsgId msgId);
 void markReadRequestSent(const QString &chatId);
 [[nodiscard]] bool consumeReadRequestSent(const QString &chatId);
 [[nodiscard]] ChatType chatTypeForPeer(PeerId peerId);

@@ -1359,7 +1359,7 @@ bool RepliesList::isServerSideUnread(
 		: computeInboxReadTillFull();
 	if (MtsLink::hasChatId(_history->peer->id)) {
 		if (item->out()) {
-			return false;
+			return MtsLink::isOutboxUnread(_history->peer->id, item->id);
 		}
 		if (!_mtsLinkInboxReadDate) {
 			return true;

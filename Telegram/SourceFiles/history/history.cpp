@@ -3588,7 +3588,7 @@ bool History::isServerSideUnread(not_null<const HistoryItem*> item) const {
 
 	if (MtsLink::hasChatId(peer->id)) {
 		if (item->out()) {
-			return false;
+			return MtsLink::isOutboxUnread(peer->id, item->id);
 		}
 		if (!_inboxReadBefore || !_mtsLinkInboxReadDate) {
 			return true;

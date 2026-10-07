@@ -4296,6 +4296,88 @@ void applyThreadChildrenCount(
 	item->setReplies(std::move(repliesData));
 }
 
+namespace {
+
+// The own messages not read by the others: by the "isRead" of the server,
+// LastReadMessageUpdatedEvent (the others have read till a message) and a
+// new message of the others (the messages before it are read), as MTS Link
+// shows them; with the parent message of their thread (empty in the chat).
+QHash<PeerId, base::flat_map<MsgId, QString>> OutboxUnread;
+
+void repaintOutbox(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		MsgId msgId) {
+	const auto item = session->data().message(peerId, msgId);
+	if (!item) {
+		return;
+	}
+	session->data().requestItemRepaint(item);
+	session->changes().messageUpdated(
+		item,
+		Data::MessageUpdate::Flag::DialogRowRepaint);
+	session->changes().historyUpdated(
+		item->history(),
+		Data::HistoryUpdate::Flag::OutboxRead);
+}
+
+void setOutboxUnread(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		MsgId msgId,
+		const QString &parentId,
+		bool unread) {
+	auto &list = OutboxUnread[peerId];
+	const auto changed = unread
+		? list.emplace(msgId, parentId).second
+		: (list.remove(msgId) > 0);
+	if (changed) {
+		repaintOutbox(session, peerId, msgId);
+	}
+}
+
+// The own messages of the chat (or of the thread) till the date are read.
+void markOutboxReadTill(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		const QString &parentId,
+		TimeId date) {
+	const auto i = OutboxUnread.find(peerId);
+	if (i == OutboxUnread.end()) {
+		return;
+	}
+	auto read = std::vector<MsgId>();
+	for (const auto &[msgId, parent] : i.value()) {
+		if (parent != parentId) {
+			continue;
+		}
+		const auto item = session->data().message(peerId, msgId);
+		if (!item || item->date() <= date) {
+			read.push_back(msgId);
+		}
+	}
+	for (const auto msgId : read) {
+		i.value().remove(msgId);
+		repaintOutbox(session, peerId, msgId);
+	}
+	LOG(("MtsLink Outbox: %1 own messages read in %2 (thread '%3')"
+		).arg(read.size()
+		).arg(peerId.value
+		).arg(parentId));
+}
+
+} // namespace
+
+bool isOutboxUnread(PeerId peerId, MsgId msgId) {
+	if (peerId == favoritesPeerId()) {
+		// The server gives isRead=false for all the own messages there:
+		// nobody else reads them, read as in Telegram.
+		return false;
+	}
+	const auto i = OutboxUnread.constFind(peerId);
+	return (i != OutboxUnread.cend()) && i->contains(msgId);
+}
+
 HistoryItem *addMessage(
 		not_null<Main::Session*> session,
 		const Api::MessageData &src,
@@ -4320,6 +4402,18 @@ HistoryItem *addMessage(
 	const auto fromBareId = uuidToBareId(src.authorId);
 	const auto fromPeerId = PeerId(::UserId(fromBareId));
 	const auto date = TimeId(src.createdAt / 1000);
+
+	if (src.isRead) {
+		const auto mts = session->account().mtsLinkSession();
+		if (mts && src.authorId == mts->userId()) {
+			setOutboxUnread(
+				session,
+				chatPeerId,
+				msgId,
+				src.parentId,
+				!*src.isRead);
+		}
+	}
 
 	auto &members = ChatMembersMap[chatPeerId];
 	if (std::find(members.begin(), members.end(), fromBareId) == members.end()) {
@@ -5072,6 +5166,9 @@ void handleChatEvent(
 		}
 		msg.createdAt = parseTimestamp(m, "createdAtMs", "createdAt");
 		msg.updatedAt = parseTimestamp(m, "updatedAtMs", "updatedAt");
+		if (m.contains("isRead")) {
+			msg.isRead = m.value("isRead").toBool();
+		}
 		const auto repliedMsg = m.value("repliedMessage").toObject();
 		msg.repliedMessageId = repliedMsg.value("id").toString();
 		msg.parentId = value.value("threadId").toString();
@@ -5172,6 +5269,15 @@ void handleChatEvent(
 		} else {
 			LOG(("MtsLink NewMsg: replaced pending message"));
 		}
+		if (const auto mts = session->account().mtsLinkSession()
+			; mts && msg.authorId != mts->userId()) {
+			markOutboxReadTill(
+				session,
+				chatPeerId,
+				msg.parentId,
+				TimeId(msg.createdAt / 1000));
+		}
+
 		// A call started just now: the active call of the chat.
 		if (!isThread
 			&& msg.type == MessageType::Call
@@ -5858,6 +5964,27 @@ void handleChatEvent(
 		if (channel) {
 			scheduleChannelMembersReload(session, chatId);
 		}
+	} else if (type == "LastReadMessageUpdatedEvent") {
+		// The others have read the own messages till this one.
+		const auto messageId = value.value("messageId").toString();
+		const auto parentId = value.value("parentMessageId").toString();
+		const auto peerId = chatIdToPeerId(chatId);
+		// A sent message keeps the id of its local message.
+		const auto known = MtsLinkIdToMsgMap.constFind(messageId);
+		const auto msgId = (known != MtsLinkIdToMsgMap.constEnd())
+			? known->second
+			: MsgId(uuidToBareId(messageId) & 0x7FFFFFFFLL);
+		const auto item = messageId.isEmpty()
+			? nullptr
+			: session->data().message(peerId, msgId);
+		LOG(("MtsLink Outbox: read till %1 in %2 (thread '%3'), %4"
+			).arg(messageId
+			).arg(chatId
+			).arg(parentId
+			).arg(item ? "known" : "not loaded"));
+		if (item) {
+			markOutboxReadTill(session, peerId, parentId, item->date());
+		}
 	} else if (type == "ChannelMembersCountChanged"
 		|| type == "GroupChatMembersCountChanged") {
 		const auto channel = session->data().channelLoaded(
@@ -6257,6 +6384,23 @@ bool replacePendingWithReal(
 	item->setText(parseMentionedText(
 		realMsg.text, realMsg.markdown, realMsg.mentions, session));
 	registerMessageId(peerId, tempMsgId, realMsg.id);
+	LOG(("MtsLink Outbox: sent %1 in %2%3 isRead=%4"
+		).arg(realMsg.id
+		).arg(peerId.value
+		).arg((peerId == favoritesPeerId()) ? " (favorites)" : ""
+		).arg(!realMsg.isRead
+			? "unknown"
+			: *realMsg.isRead
+			? "true"
+			: "false"));
+	if (realMsg.isRead) {
+		setOutboxUnread(
+			session,
+			peerId,
+			tempMsgId,
+			realMsg.parentId,
+			!*realMsg.isRead);
+	}
 	session->data().requestItemTextRefresh(item);
 	item->invalidateChatListEntry();
 	return true;

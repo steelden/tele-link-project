@@ -213,6 +213,9 @@ MessageData Messages::parseMessage(const QJsonObject &obj) const {
 		.createdAt = qint64(obj.value("createdAt").toDouble()),
 		.updatedAt = qint64(obj.value("updatedAt").toDouble()),
 		.isDeleted = obj.value("isDeleted").toBool(),
+		.isRead = obj.contains("isRead")
+			? std::make_optional(obj.value("isRead").toBool())
+			: std::nullopt,
 		.repliedMessageId =
 			obj.value("repliedMessage").toObject().value("id").toString(),
 		.parentId = [&] {

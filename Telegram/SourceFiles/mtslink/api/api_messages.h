@@ -97,6 +97,8 @@ struct MessageData {
 	qint64 createdAt = 0;
 	qint64 updatedAt = 0;
 	bool isDeleted = false;
+	// Read by the others (for the author's own messages), when known.
+	std::optional<bool> isRead;
 	MessageId repliedMessageId;
 	MessageId parentId;
 	int threadChildrenCount = 0;
