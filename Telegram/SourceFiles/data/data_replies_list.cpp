@@ -677,28 +677,6 @@ void RepliesList::loadAround(MsgId id) {
 				}
 			}
 			applyMtsLinkRootUnread();
-			{
-				const auto root = _history->owner().message(
-					peerId,
-					_rootId);
-				const auto views = root
-					? root->Get<HistoryMessageViews>()
-					: nullptr;
-				LOG(("MtsLink ReadDebug: thread loaded root=%1 around=%2 "
-					"list=%3 server=%4 rootUnread=%5 readDate=%6 "
-					"readTill=%7 unread=%8"
-					).arg(_rootId.bare
-					).arg(id.bare
-					).arg(_list.size()
-					).arg(messages.size()
-					).arg(views
-						? int(views->commentsMaxId.bare
-							- views->commentsInboxReadTillId.bare)
-						: -1
-					).arg(_mtsLinkInboxReadDate
-					).arg(_inboxReadTillId.bare
-					).arg(_unreadCount.current().value_or(-1)));
-			}
 			checkReadTillEnd();
 			if (id
 				&& id != _rootId
@@ -1337,13 +1315,6 @@ void RepliesList::applyMtsLinkRootUnread() {
 		_inboxReadTillId = MsgId(1);
 		_unreadCount = unread;
 	}
-	LOG(("MtsLink ReadDebug: thread root unread root=%1 unread=%2 list=%3 "
-		"readTill=%4 readDate=%5"
-		).arg(_rootId.bare
-		).arg(unread
-		).arg(_list.size()
-		).arg(_inboxReadTillId.bare
-		).arg(_mtsLinkInboxReadDate));
 }
 
 void RepliesList::setMtsLinkInboxReadDate(TimeId date) {
@@ -1484,15 +1455,26 @@ void RepliesList::requestUnreadCount() {
 }
 
 void RepliesList::readTill(not_null<HistoryItem*> item) {
-	if (MtsLink::hasChatId(_history->peer->id)) {
-		LOG(("MtsLink ReadDebug: thread readTill root=%1 item=%2 date=%3 "
-			"readDate=%4"
-			).arg(_rootId.bare
-			).arg(item->id.bare
-			).arg(item->date()
-			).arg(_mtsLinkInboxReadDate));
-	}
 	readTill(item->id, item);
+}
+
+std::optional<int> RepliesList::computeMtsLinkUnreadAfter(
+		TimeId readDate) const {
+	if (_skippedAfter != 0) {
+		return std::nullopt; // The newest messages are not loaded.
+	}
+	auto result = 0;
+	const auto peerId = _history->peer->id;
+	for (const auto &id : _list) {
+		if (id == _rootId) {
+			continue;
+		} else if (const auto item = _history->owner().message(peerId, id)) {
+			if (!item->out() && item->date() > readDate) {
+				++result;
+			}
+		}
+	}
+	return result;
 }
 
 void RepliesList::readTill(MsgId tillId) {
@@ -1512,11 +1494,21 @@ void RepliesList::readTill(
 		return;
 	}
 	const auto oldMtsReadDate = _mtsLinkInboxReadDate;
+	if (isMtsLink
+		&& tillIdItem
+		&& tillIdItem->date() < _mtsLinkInboxReadDate) {
+		// Not back (by the date, the ids are not ordered): the read till
+		// an older message (scrolled up) made the newer ones unread on the
+		// server again.
+		return;
+	}
 	if (isMtsLink && tillIdItem) {
 		setMtsLinkInboxReadDate(tillIdItem->date());
 	}
+	// MTS Link: counted by the dates (nullopt kept the old count on the
+	// "scroll down" button, shown again when scrolled up).
 	const auto unreadCount = isMtsLink
-		? std::optional<int>(std::nullopt)
+		? computeMtsLinkUnreadAfter(_mtsLinkInboxReadDate)
 		: computeUnreadCountLocally(now);
 	const auto fast = (tillIdItem && tillIdItem->out()) || !unreadCount.has_value();
 	const auto changed = isMtsLink
@@ -1607,12 +1599,6 @@ void RepliesList::sendReadTillRequest() {
 					}
 				}
 			}
-			LOG(("MtsLink ReadDebug: thread read request root=%1 till=%2 "
-				"mtsId='%3' unread=%4"
-				).arg(_rootId.bare
-				).arg(tillId.bare
-				).arg(mtsId
-				).arg(_unreadCount.current().value_or(-1)));
 			if (!chatId.isEmpty() && !mtsId.isEmpty()) {
 				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);

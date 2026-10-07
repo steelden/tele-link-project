@@ -1271,11 +1271,6 @@ void ListWidget::showAtPosition(
 		Fn<void(bool found)> done) {
 	const auto showAtUnread = (position == Data::UnreadMessagePosition);
 
-	if (showAtUnread) {
-		LOG(("MtsLink ReadDebug: list show unread items=%1 jump=%2"
-			).arg(_items.size()
-			).arg((!_items.empty() && jumpToBottomInsteadOfUnread()) ? 1 : 0));
-	}
 	// No items yet (a thread opened before it is loaded): nothing tells
 	// that we're at the unread already, the bar is found when loaded.
 	if (showAtUnread && !_items.empty() && jumpToBottomInsteadOfUnread()) {
@@ -1293,15 +1288,6 @@ void ListWidget::showAtPosition(
 		showAroundPosition(position, [=] {
 			clearUnreadBar();
 			checkUnreadBarCreation();
-			const auto top = scrollTopForPosition(position);
-			LOG(("MtsLink ReadDebug: list unread loaded items=%1 bar=%2 "
-				"hidden=%3 focus=%4 scrollTop=%5 height=%6"
-				).arg(_items.size()
-				).arg(_bar.element ? 1 : 0
-				).arg(_bar.hidden ? 1 : 0
-				).arg(_bar.focus ? 1 : 0
-				).arg(top ? *top : -1
-				).arg(height()));
 			return showAtPositionNow(position, params, done);
 		});
 	} else if (!showAtPositionNow(position, params, done)) {
@@ -1329,13 +1315,6 @@ void ListWidget::showAtUnreadOnOpen(const Window::SectionShow &params) {
 		clearUnreadBar();
 		checkUnreadBarCreation();
 		const auto top = scrollTopForPosition(position);
-		LOG(("MtsLink ReadDebug: list unread on open items=%1 bar=%2 "
-			"hidden=%3 scrollTop=%4 height=%5"
-			).arg(_items.size()
-			).arg(_bar.element ? 1 : 0
-			).arg(_bar.hidden ? 1 : 0
-			).arg(top ? *top : -1
-			).arg(height()));
 		if (_bar.element && !_bar.hidden) {
 			// Not right at the top edge (under the top bar shadow), a part
 			// of the read messages is seen above the bar.
@@ -3047,13 +3026,6 @@ void ListWidget::checkActivation() {
 		if (_visibleBottom + _itemsRevealHeight >= bottom) {
 			const auto item = view->data();
 			if (item->isRegular()) {
-				LOG(("MtsLink ReadDebug: list activation read item=%1 "
-					"top=%2 bottom=%3 visible=%4-%5"
-					).arg(item->id.bare
-					).arg(itemTop(view)
-					).arg(bottom
-					).arg(_visibleTop
-					).arg(_visibleBottom));
 				delegate()->listMarkReadTill(item);
 				return;
 			}
@@ -3104,16 +3076,6 @@ void ListWidget::paintEvent(QPaintEvent *e) {
 			}
 		}
 		if (markingAsViewed && readTill) {
-			static auto logged = (HistoryItem*)nullptr;
-			if (logged != readTill) {
-				logged = readTill;
-				LOG(("MtsLink ReadDebug: list paint read item=%1 "
-					"visible=%2-%3 height=%4"
-					).arg(readTill->id.bare
-					).arg(_visibleTop
-					).arg(_visibleBottom
-					).arg(height()));
-			}
 			_delegate->listMarkReadTill(readTill);
 		}
 		if (!readContents.empty() && markingContentRead) {

@@ -275,10 +275,6 @@ bool sendSavedGif(
 	MsgId replyToId,
 	MsgId topicRootId);
 
-// Diagnostics: the chats and threads with something unread.
-void logUnreadSummary(
-	not_null<Main::Session*> session,
-	const QString &reason);
 
 // The local messages of the call materials in the call thread.
 [[nodiscard]] std::vector<MsgId> callMaterialMessages(

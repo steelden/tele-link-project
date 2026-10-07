@@ -97,6 +97,9 @@ private:
 
 	void subscribeToUpdates();
 	void appendClientSideMessages(MessagesSlice &slice);
+	// MTS Link: the ids are not ordered, the incoming after the date.
+	[[nodiscard]] std::optional<int> computeMtsLinkUnreadAfter(
+		TimeId readDate) const;
 	[[nodiscard]] std::optional<int> computeUnreadCountLocally(
 		MsgId afterId) const;
 

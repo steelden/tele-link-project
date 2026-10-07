@@ -4352,15 +4352,6 @@ void ChatWidget::restoreState(not_null<ChatMemento*> memento) {
 		// unread bar is taken from the root counter now.
 		_replies->applyMtsLinkRootUnread();
 	}
-	if (mtsLinkThread) {
-		LOG(("MtsLink ReadDebug: thread open root=%1 hasRoot=%2 unread=%3 "
-			"saved=%4 atEnd=%5"
-			).arg(_repliesRootId.bare
-			).arg(_repliesRoot ? 1 : 0
-			).arg(mtsLinkHasUnread ? 1 : 0
-			).arg((mtsLinkSaved && mtsLinkSaved->itemId) ? 1 : 0
-			).arg(mtsLinkShowAtEnd ? 1 : 0));
-	}
 	if (mtsLinkSaved && mtsLinkSaved->itemId) {
 		const auto savedPosition = Data::MessagePosition{
 			.fullId = mtsLinkSaved->itemId,
