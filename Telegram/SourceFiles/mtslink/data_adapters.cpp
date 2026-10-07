@@ -9580,6 +9580,87 @@ bool toggleFavedSticker(not_null<DocumentData*> document, bool faved) {
 	return true;
 }
 
+namespace {
+
+[[nodiscard]] bool nameMatches(const QString &name, const QString &query) {
+	// "my_cat-01.png" is found by "cat" and by "my cat".
+	auto words = QFileInfo(name).completeBaseName().toLower();
+	words.replace('_', ' ').replace('-', ' ');
+	for (const auto &part : query.toLower().split(' ', Qt::SkipEmptyParts)) {
+		if (!words.contains(part)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+} // namespace
+
+LocalStickersSearch searchLocalStickers(
+		not_null<Main::Session*> session,
+		const QString &query) {
+	auto result = LocalStickersSearch();
+	const auto &sets = session->data().stickers().sets();
+	auto inFoundSet = base::flat_set<DocumentId>();
+	for (const auto setId : session->data().stickers().setsOrder()) {
+		if (!LocalPackIds.contains(setId)) {
+			continue;
+		}
+		const auto i = sets.find(setId);
+		if (i != sets.end() && nameMatches(i->second->title, query)) {
+			result.sets.push_back(setId);
+			for (const auto document : i->second->stickers) {
+				inFoundSet.emplace(document->id);
+			}
+		}
+	}
+	// The stickers by their names: the favorites first, then the packs.
+	const auto add = [&](const Data::StickersPack &pack) {
+		for (const auto document : pack) {
+			const auto j = LocalStickers.constFind(document->id);
+			if (j != LocalStickers.constEnd()
+				&& !inFoundSet.contains(document->id)
+				&& !ranges::contains(result.stickers, document->id)
+				&& nameMatches(j->name, query)) {
+				result.stickers.push_back(document->id);
+			}
+		}
+	};
+	if (const auto i = sets.find(Data::Stickers::FavedSetId)
+		; i != sets.end()) {
+		add(i->second->stickers);
+	}
+	for (const auto setId : session->data().stickers().setsOrder()) {
+		if (LocalPackIds.contains(setId)) {
+			if (const auto i = sets.find(setId); i != sets.end()) {
+				add(i->second->stickers);
+			}
+		}
+	}
+	LOG(("MtsLink Stickers: search '%1', %2 packs, %3 stickers"
+		).arg(query
+		).arg(result.sets.size()
+		).arg(result.stickers.size()));
+	return result;
+}
+
+QString panelItemName(not_null<DocumentData*> document) {
+	const auto i = LocalStickers.constFind(document->id);
+	auto name = (i != LocalStickers.constEnd())
+		? i->name
+		: document->filename();
+	if (name.endsWith(QLatin1String(kWebmStickerSuffix), Qt::CaseInsensitive)) {
+		name.chop(int(strlen(kWebmStickerSuffix)));
+	}
+	return QFileInfo(name).completeBaseName();
+}
+
+bool savedGifMatches(
+		not_null<DocumentData*> document,
+		const QString &query) {
+	return nameMatches(document->filename(), query);
+}
+
 bool canAddPhotoToStickers(not_null<PhotoData*> photo) {
 	const auto i = PhotoFiles.constFind(photo->id);
 	return (i != PhotoFiles.constEnd())

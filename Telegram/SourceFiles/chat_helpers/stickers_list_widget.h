@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "chat_helpers/compose/compose_features.h"
 #include "chat_helpers/tabbed_selector.h"
+#include "ui/widgets/tooltip.h"
 #include "data/stickers/data_stickers.h"
 #include "ui/effects/animations.h"
 #include "ui/round_rect.h"
@@ -90,9 +91,16 @@ struct StickersListDescriptor {
 	uint64 excludeSetId = 0;
 };
 
-class StickersListWidget final : public TabbedSelector::Inner {
+class StickersListWidget final
+	: public TabbedSelector::Inner
+	, public Ui::AbstractTooltipShower {
 public:
 	using Mode = StickersListMode;
+
+	// Ui::AbstractTooltipShower: the name of the sticker under the cursor.
+	QString tooltipText() const override;
+	QPoint tooltipPos() const override;
+	bool tooltipWindowActive() const override;
 
 	StickersListWidget(
 		QWidget *parent,

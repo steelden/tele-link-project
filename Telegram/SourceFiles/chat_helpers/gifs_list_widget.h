@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "chat_helpers/tabbed_selector.h"
+#include "ui/widgets/tooltip.h"
 #include "base/timer.h"
 #include "inline_bots/inline_bot_layout_item.h"
 #include "layout/layout_mosaic.h"
@@ -67,8 +68,14 @@ struct GifsListDescriptor {
 
 class GifsListWidget final
 	: public TabbedSelector::Inner
-	, public InlineBots::Layout::Context {
+	, public InlineBots::Layout::Context
+	, public Ui::AbstractTooltipShower {
 public:
+	// Ui::AbstractTooltipShower: the name of the GIF under the cursor.
+	QString tooltipText() const override;
+	QPoint tooltipPos() const override;
+	bool tooltipWindowActive() const override;
+
 	GifsListWidget(
 		QWidget *parent,
 		not_null<Window::SessionController*> controller,
@@ -215,6 +222,8 @@ private:
 	mtpRequestId _searchBotRequestId = 0;
 	PeerData *_inlineQueryPeer = nullptr;
 	QString _inlineQuery, _inlineNextQuery, _inlineNextOffset;
+	// MTS Link: the saved GIFs filtered by the name (no search bot).
+	QString _localSearchQuery;
 	mtpRequestId _inlineRequestId = 0;
 
 	rpl::event_stream<FileChosen> _fileChosen;

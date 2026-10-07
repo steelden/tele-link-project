@@ -259,6 +259,23 @@ void putToImageCache(
 bool toggleFavedSticker(not_null<DocumentData*> document, bool faved);
 void addPhotoToStickers(not_null<PhotoData*> photo);
 void restoreLocalStickers(not_null<Main::Session*> session);
+// The search in the stickers panel: by the names of the local stickers and
+// the titles of the imported packs (no search on the server).
+struct LocalStickersSearch {
+	std::vector<uint64> sets;
+	std::vector<DocumentId> stickers;
+};
+[[nodiscard]] LocalStickersSearch searchLocalStickers(
+	not_null<Main::Session*> session,
+	const QString &query);
+// The name of a sticker or a GIF in the panels (the tooltip): the file
+// name without the extension, empty if none.
+[[nodiscard]] QString panelItemName(not_null<DocumentData*> document);
+
+// The search in the GIFs panel: the saved GIF matches by its file name.
+[[nodiscard]] bool savedGifMatches(
+	not_null<DocumentData*> document,
+	const QString &query);
 // A local sticker pack: a zip with images, or the images of a folder.
 void importStickerPack(
 	not_null<Main::Session*> session,

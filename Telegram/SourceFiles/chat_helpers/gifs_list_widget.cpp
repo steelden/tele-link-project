@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "chat_helpers/gifs_list_widget.h"
 
+#include "mtslink/data_adapters.h"
+#include "ui/ui_utility.h"
+
 #include "api/api_toggling_media.h" // Api::ToggleSavedGif
 #include "base/const_string.h"
 #include "base/qt/qt_key_modifiers.h"
@@ -276,6 +279,11 @@ GifsListWidget::~GifsListWidget() {
 }
 
 void GifsListWidget::cancelGifsSearch() {
+	if (!base::take(_localSearchQuery).isEmpty()) {
+		_inlineQuery = _inlineNextQuery = QString();
+		refreshSavedGifs();
+		return;
+	}
 	_search->setLoading(false);
 	if (_inlineRequestId) {
 		_api.request(_inlineRequestId).cancel();
@@ -610,7 +618,10 @@ void GifsListWidget::refreshSavedGifs() {
 		if (!saved.isEmpty()) {
 			const auto layouts = ranges::views::all(
 				saved
-			) | ranges::views::transform([&](not_null<DocumentData*> gif) {
+			) | ranges::views::filter([&](not_null<DocumentData*> gif) {
+				return _localSearchQuery.isEmpty()
+					|| MtsLink::savedGifMatches(gif, _localSearchQuery);
+			}) | ranges::views::transform([&](not_null<DocumentData*> gif) {
 				return layoutPrepareSavedGif(gif);
 			}) | ranges::views::filter([](const LayoutItem *item) {
 				return item != nullptr;
@@ -867,44 +878,11 @@ int32 GifsListWidget::showInlineRows(bool newResults) {
 }
 
 void GifsListWidget::searchForGifs(const QString &query) {
-	if (query.isEmpty()) {
-		cancelGifsSearch();
-		return;
-	}
-
-	if (_inlineQuery != query) {
-		_search->setLoading(false);
-		if (_inlineRequestId) {
-			_api.request(_inlineRequestId).cancel();
-			_inlineRequestId = 0;
-		}
-		if (_inlineCache.find(query) != _inlineCache.cend()) {
-			_inlineRequestTimer.stop();
-			_inlineQuery = _inlineNextQuery = query;
-			showInlineRows(true);
-		} else {
-			_inlineNextQuery = query;
-			_inlineRequestTimer.start(kSearchRequestDelay);
-		}
-	}
-
-	if (!_searchBot && !_searchBotRequestId) {
-		const auto username = session().serverConfig().gifSearchUsername;
-		_searchBotRequestId = _api.request(MTPcontacts_ResolveUsername(
-			MTP_flags(0),
-			MTP_string(username),
-			MTP_string()
-		)).done([=](const MTPcontacts_ResolvedPeer &result) {
-			auto &data = result.data();
-			session().data().processUsers(data.vusers());
-			session().data().processChats(data.vchats());
-			const auto peer = session().data().peerLoaded(
-				peerFromMTP(data.vpeer()));
-			if (const auto user = peer ? peer->asUser() : nullptr) {
-				_searchBot = user;
-			}
-		}).send();
-	}
+	// MTS Link: the saved GIFs by their names, no search bot.
+	_localSearchQuery = query.trimmed();
+	_inlineQuery = _inlineNextQuery = query;
+	refreshSavedGifs();
+	scrollTo(0);
 }
 
 void GifsListWidget::cancelled() {
@@ -962,6 +940,23 @@ void GifsListWidget::refreshRecent() {
 	}
 }
 
+QString GifsListWidget::tooltipText() const {
+	if (const auto item = _mosaic.maybeItemAt(_selected)) {
+		if (const auto document = item->getPreviewDocument()) {
+			return MtsLink::panelItemName(document);
+		}
+	}
+	return QString();
+}
+
+QPoint GifsListWidget::tooltipPos() const {
+	return QCursor::pos();
+}
+
+bool GifsListWidget::tooltipWindowActive() const {
+	return Ui::AppInFocus() && Ui::InFocusChain(window());
+}
+
 void GifsListWidget::updateSelected() {
 	if (_pressed >= 0 && !_previewShown) {
 		return;
@@ -982,6 +977,9 @@ void GifsListWidget::updateSelected() {
 		_selected = selected;
 		if (item) {
 			item->update();
+			Ui::Tooltip::Show(1000, this);
+		} else {
+			Ui::Tooltip::Hide();
 		}
 		if (_previewShown && _selected >= 0 && _pressed != _selected) {
 			_pressed = _selected;

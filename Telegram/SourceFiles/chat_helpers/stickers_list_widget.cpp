@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "chat_helpers/stickers_list_widget.h"
 
+#include "mtslink/data_adapters.h"
+
 #include "base/options.h"
 #include "base/timer_rpl.h"
 #include "core/application.h"
@@ -626,21 +628,12 @@ void StickersListWidget::sendSearchRequest() {
 		return;
 	}
 
-	const auto stickersCached = (_searchStickersCache.find(_searchQuery)
-		!= _searchStickersCache.cend());
-	const auto setsCached = (_searchSetsCache.find(_searchQuery)
-		!= _searchSetsCache.cend());
-	if (stickersCached && setsCached) {
-		toggleSearchLoading(false);
-		return;
-	}
-	toggleSearchLoading(true);
-	if (!stickersCached && !_searchStickersRequestId) {
-		requestSearchStickers(_searchQuery, 0, true);
-	}
-	if (!setsCached && !_searchSetsRequestId) {
-		sendSearchSetsRequest(_searchQuery);
-	}
+	// MTS Link: the local stickers and packs only (no search on the server).
+	auto found = MtsLink::searchLocalStickers(&session(), _searchQuery);
+	_searchSetsCache[_searchQuery] = std::move(found.sets);
+	_searchStickersCache[_searchQuery] = std::move(found.stickers);
+	toggleSearchLoading(false);
+	showSearchResults();
 }
 
 void StickersListWidget::sendSearchSetsRequest(const QString &query) {
@@ -3715,8 +3708,35 @@ bool StickersListWidget::stickerHasDeleteButton(const Set &set, int index) const
 	return (set.id == Data::Stickers::FavedSetId);
 }
 
+QString StickersListWidget::tooltipText() const {
+	if (const auto sticker = std::get_if<OverSticker>(&_selected)) {
+		const auto &sets = shownSets();
+		if (sticker->section >= 0 && sticker->section < sets.size()) {
+			const auto &set = sets[sticker->section];
+			if (sticker->index >= 0 && sticker->index < set.stickers.size()) {
+				return MtsLink::panelItemName(
+					set.stickers[sticker->index].document);
+			}
+		}
+	}
+	return QString();
+}
+
+QPoint StickersListWidget::tooltipPos() const {
+	return QCursor::pos();
+}
+
+bool StickersListWidget::tooltipWindowActive() const {
+	return Ui::AppInFocus() && Ui::InFocusChain(window());
+}
+
 void StickersListWidget::setSelected(OverState newSelected) {
 	if (_selected != newSelected) {
+		if (std::get_if<OverSticker>(&newSelected)) {
+			Ui::Tooltip::Show(1000, this);
+		} else {
+			Ui::Tooltip::Hide();
+		}
 		setCursor(!v::is_null(newSelected)
 			? style::cur_pointer
 			: style::cur_default);
