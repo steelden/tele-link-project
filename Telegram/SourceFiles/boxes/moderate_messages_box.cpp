@@ -1544,9 +1544,9 @@ void CreateModerateMessagesBox(
 }
 
 bool CanCreateModerateMessagesBox(const HistoryItemsList &items) {
-	const auto options = CalculateModerateOptions(items);
-	return HasModerateActions(options)
-		&& !options.participants.empty();
+	// MTS Link: no reports, bans or "delete all from the user", the simple
+	// delete box for the admins as well.
+	return false;
 }
 
 void SafeSubmitOnEnter(not_null<Ui::GenericBox*> box) {
