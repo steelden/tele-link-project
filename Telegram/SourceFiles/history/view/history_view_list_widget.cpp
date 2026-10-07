@@ -5939,6 +5939,41 @@ bool ListWidget::lastMessageEditRequestNotify() const {
 	}
 }
 
+bool ListWidget::otherMessageEditRequestNotify(
+		FullMsgId editing,
+		bool previous) const {
+	const auto now = base::unixtime::now();
+	const auto i = ranges::find(_items, editing, [](not_null<Element*> v) {
+		return v->data()->fullId();
+	});
+	if (i == end(_items)) {
+		return false;
+	}
+	const auto check = [&](not_null<Element*> view) {
+		const auto item = view->data();
+		if (item->allowsEdit(now) && !item->isUploading()) {
+			editMessageRequestNotify(
+				session().data().groups().findItemToEdit(item)->fullId());
+			return true;
+		}
+		return false;
+	};
+	if (previous) {
+		for (auto j = i; j != begin(_items);) {
+			if (check(*--j)) {
+				return true;
+			}
+		}
+	} else {
+		for (auto j = i + 1; j != end(_items); ++j) {
+			if (check(*j)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 auto ListWidget::replyToMessageRequested() const
 -> rpl::producer<ReplyToMessageRequest> {
 	return _requestedToReplyToMessage.events();

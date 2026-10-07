@@ -55,6 +55,19 @@ class Show;
 } // namespace Ui
 
 [[nodiscard]] QString PrepareMentionTag(not_null<UserData*> user);
+
+// Up / Down in an unchanged edit: on the first (last) line the cursor goes
+// to the start (end), at the start (end) the previous (next) own message
+// is to be edited.
+enum class EditArrowResult {
+	Default,
+	MovedCursor,
+	EditOther,
+};
+[[nodiscard]] EditArrowResult HandleEditArrow(
+	not_null<Ui::InputField*> field,
+	not_null<HistoryItem*> editing,
+	bool up);
 [[nodiscard]] TextWithTags PrepareEditText(not_null<HistoryItem*> item);
 [[nodiscard]] bool EditTextChanged(
 	not_null<HistoryItem*> item,

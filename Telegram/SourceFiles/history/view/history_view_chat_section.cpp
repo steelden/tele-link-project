@@ -1744,6 +1744,17 @@ void ChatWidget::setupComposeControls() {
 		_scroll->keyPressEvent(e);
 	}, lifetime());
 
+	_composeControls->editOtherMessageRequests(
+	) | rpl::on_next([=](ComposeControls::EditOtherRequest request) {
+		if (!_inner->otherMessageEditRequestNotify(
+				request.editing,
+				request.previous)
+			&& !request.previous) {
+			// After the last one: the empty field.
+			_composeControls->cancelEditMessage();
+		}
+	}, lifetime());
+
 	_composeControls->editLastMessageRequests(
 	) | rpl::on_next([=](not_null<QKeyEvent*> e) {
 		if (!_inner->lastMessageEditRequestNotify()) {

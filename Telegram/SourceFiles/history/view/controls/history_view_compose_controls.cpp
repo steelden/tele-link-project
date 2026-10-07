@@ -2139,6 +2139,11 @@ auto ComposeControls::scrollKeyEvents() const
 	return _scrollKeyEvents.events();
 }
 
+auto ComposeControls::editOtherMessageRequests() const
+-> rpl::producer<EditOtherRequest> {
+	return _editOtherMessageRequests.events();
+}
+
 auto ComposeControls::editLastMessageRequests() const
 -> rpl::producer<not_null<QKeyEvent*>> {
 	return _editLastMessageRequests.events();
@@ -3019,6 +3024,25 @@ void ComposeControls::initKeyHandler() {
 			return Result::Continue;
 		}
 		const auto k = static_cast<QKeyEvent*>(e.get());
+
+		if ((k->key() == Qt::Key_Up || k->key() == Qt::Key_Down)
+			&& !(k->modifiers() & kCommonModifiers)
+			&& isEditingMessage()
+			&& _history) {
+			// MTS Link: Up (Down) at the start (end) of an unchanged edit
+			// edits the previous (next) own message.
+			const auto up = (k->key() == Qt::Key_Up);
+			const auto id = _header->editMsgId();
+			if (const auto item = _history->owner().message(id)) {
+				switch (HandleEditArrow(_field, item, up)) {
+				case EditArrowResult::MovedCursor: return Result::Cancel;
+				case EditArrowResult::EditOther:
+					_editOtherMessageRequests.fire({ id, up });
+					return Result::Cancel;
+				case EditArrowResult::Default: break;
+				}
+			}
+		}
 
 		if ((k->modifiers() & kCommonModifiers) == Qt::ControlModifier) {
 			const auto isUp = (k->key() == Qt::Key_Up);

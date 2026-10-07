@@ -6932,6 +6932,40 @@ void HistoryWidget::insertTextAtCursor(const QString &text) {
 bool HistoryWidget::eventFilter(QObject *obj, QEvent *e) {
 	if (e->type() == QEvent::KeyPress) {
 		const auto k = static_cast<QKeyEvent*>(e);
+		if ((k->key() == Qt::Key_Up || k->key() == Qt::Key_Down)
+			&& !(k->modifiers() & kCommonModifiers)
+			&& _editMsgId
+			&& _replyEditMsg
+			&& _field
+			&& obj == _field->rawTextEdit()) {
+			// MTS Link: Up (Down) at the start (end) of an unchanged edit
+			// edits the previous (next) own message.
+			const auto up = (k->key() == Qt::Key_Up);
+			switch (HandleEditArrow(_field, _replyEditMsg, up)) {
+			case EditArrowResult::MovedCursor: return true;
+			case EditArrowResult::EditOther: {
+				const auto now = base::unixtime::now();
+				auto view = _replyEditMsg->mainView();
+				while (view && (view = (up
+						? view->previousInBlocks()
+						: view->nextInBlocks()))) {
+					const auto item = view->data();
+					if (item->allowsEdit(now) && !item->isUploading()) {
+						editMessage(
+							session().data().groups().findItemToEdit(
+								item).get(),
+							{});
+						return true;
+					}
+				}
+				if (!up) {
+					cancelEdit(); // After the last one: the empty field.
+					return true;
+				}
+			} break;
+			case EditArrowResult::Default: break;
+			}
+		}
 		if ((k->modifiers() & kCommonModifiers) == Qt::ControlModifier) {
 			if (k->key() == Qt::Key_Up) {
 #ifdef Q_OS_MAC

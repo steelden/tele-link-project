@@ -379,6 +379,28 @@ TextWithEntities StripSupportHashtag(TextWithEntities text) {
 
 } // namespace
 
+EditArrowResult HandleEditArrow(
+		not_null<Ui::InputField*> field,
+		not_null<HistoryItem*> editing,
+		bool up) {
+	if (EditTextChanged(editing, field->getTextWithTags())) {
+		return EditArrowResult::Default; // Changed: as usual.
+	}
+	auto cursor = field->textCursor();
+	if (cursor.hasSelection()) {
+		return EditArrowResult::Default;
+	} else if (up ? cursor.atStart() : cursor.atEnd()) {
+		return EditArrowResult::EditOther;
+	}
+	auto test = field->rawTextEdit()->textCursor();
+	if (test.movePosition(up ? QTextCursor::Up : QTextCursor::Down)) {
+		return EditArrowResult::Default; // Not the first (last) line.
+	}
+	cursor.movePosition(up ? QTextCursor::Start : QTextCursor::End);
+	field->setTextCursor(cursor);
+	return EditArrowResult::MovedCursor;
+}
+
 QString PrepareMentionTag(not_null<UserData*> user) {
 	return TextUtilities::kMentionTagStart
 		+ QString::number(user->id.value)

@@ -461,6 +461,11 @@ public:
 	[[nodiscard]] rpl::producer<FullMsgId> editMessageRequested() const;
 	void editMessageRequestNotify(FullMsgId item) const;
 	[[nodiscard]] bool lastMessageEditRequestNotify() const;
+	// The own message before (after) this one to edit (Up / Down in an
+	// unchanged edit), false if there is none.
+	bool otherMessageEditRequestNotify(
+		FullMsgId editing,
+		bool previous) const;
 	[[nodiscard]] auto replyToMessageRequested() const
 		-> rpl::producer<ReplyToMessageRequest>;
 	void replyToMessageRequestNotify(
