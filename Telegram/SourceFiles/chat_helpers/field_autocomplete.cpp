@@ -2036,15 +2036,11 @@ void InitFieldAutocomplete(
 	raw->mentionChosen(
 	) | rpl::on_next([=](FieldAutocomplete::MentionChosen data) {
 		const auto user = data.user;
-		const auto ctrlClick = base::IsCtrlPressed()
-			&& data.method == FieldAutocomplete::ChooseMethod::ByClick;
-		if (data.mention.isEmpty() || ctrlClick) {
-			field->insertTag(
-				user->firstName.isEmpty() ? user->name() : user->firstName,
-				PrepareMentionTag(user));
-		} else {
-			field->insertTag('@' + data.mention);
-		}
+		// MTS Link: no mentions by usernames in the text (a plain "@name"
+		// was sent), always the mention of the user, shown as "@name".
+		field->insertTag(
+			'@' + (data.mention.isEmpty() ? user->name() : data.mention),
+			PrepareMentionTag(user));
 	}, raw->lifetime());
 
 	const auto sendCommand = descriptor.sendBotCommand;
