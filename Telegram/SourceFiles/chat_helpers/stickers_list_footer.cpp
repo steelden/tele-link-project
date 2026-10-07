@@ -243,6 +243,10 @@ void StickerIcon::ensureMediaCreated() const {
 	} else if (!stickerMedia) {
 		stickerMedia = sticker->createMediaView();
 		stickerMedia->thumbnailWanted(sticker->stickerSetOrigin());
+		if (!sticker->hasThumbnail()) {
+			// A local sticker (no thumbnail): the icon from the sticker.
+			stickerMedia->automaticLoad(sticker->stickerSetOrigin(), nullptr);
+		}
 	}
 }
 
@@ -1371,8 +1375,15 @@ void StickersListFooter::paintSetIconToCache(
 		const auto origin = icon.sticker->stickerSetOrigin();
 		const auto thumb = icon.thumbnailMedia
 			? icon.thumbnailMedia->image()
-			: icon.stickerMedia
+			: !icon.stickerMedia
+			? nullptr
+			: icon.stickerMedia->thumbnail()
 			? icon.stickerMedia->thumbnail()
+			: (!icon.sticker->hasThumbnail()
+				&& icon.sticker->sticker()
+				&& icon.sticker->sticker()->isStatic())
+			// A local sticker (no thumbnail): the sticker itself, scaled.
+			? icon.stickerMedia->getStickerLarge()
 			: nullptr;
 		const auto x = (_singleWidth - icon.pixw) / 2;
 		const auto y = (st().footer - icon.pixh) / 2;

@@ -499,6 +499,9 @@ public:
 	}
 
 	void applySet(const TLStickerSet &set);
+	// MTS Link: a local set (imported pack) from the memory, no request.
+	bool applyLocalSet();
+	void finishApplySet();
 	void setOuterContainer(
 		QPointer<QWidget> container,
 		Fn<int()> boxTop);
@@ -1162,6 +1165,14 @@ StickerSetBox::Inner::Inner(
 , _previewTimer([=] { showPreview(); }) {
 	setAttribute(Qt::WA_OpaquePaintEvent);
 
+	if (applyLocalSet()) {
+		_session->downloaderTaskFinished(
+		) | rpl::on_next([=] {
+			updateItems();
+		}, lifetime());
+		setMouseTracking(true);
+		return;
+	}
 	_api.request(MTPmessages_GetStickerSet(
 		Data::InputStickerSet(_input),
 		MTP_int(0) // hash
@@ -1279,6 +1290,39 @@ void StickerSetBox::Inner::applySet(const TLStickerSet &set) {
 		_errors.fire(Error::NotFound);
 		return;
 	}
+	finishApplySet();
+}
+
+bool StickerSetBox::Inner::applyLocalSet() {
+	const auto &sets = _session->data().stickers().sets();
+	const auto it = sets.find(_setId);
+	if (it == sets.cend()
+		|| it->second->accessHash
+		|| it->second->stickers.isEmpty()) {
+		return false;
+	}
+	const auto set = it->second.get();
+	_pack = set->stickers;
+	_emoji = set->emoji;
+	_elements.clear();
+	_elements.reserve(_pack.size());
+	for (const auto document : std::as_const(_pack)) {
+		_elements.push_back({ document, document->createMediaView() });
+	}
+	_setTitle = set->title;
+	_setShortName = set->shortName;
+	_setHash = set->hash;
+	_setCount = set->count;
+	_setFlags = set->flags;
+	_setInstallDate = set->installDate;
+	_setThumbnailDocumentId = set->thumbnailDocumentId;
+	_amSetCreator = false;
+	// The box is filled when it is shown (the controls are subscribed).
+	crl::on_main(this, [=] { finishApplySet(); });
+	return true;
+}
+
+void StickerSetBox::Inner::finishApplySet() {
 	_loaded = true;
 	_perRow = isEmojiSet() ? kEmojiPerRow : kStickersPerRow;
 	_singleSize = isEmojiSet() ? st::emojiSetSize : st::stickersSize;

@@ -1013,6 +1013,11 @@ PhotoData *DocumentData::goodThumbnailPhoto() const {
 }
 
 Storage::Cache::Key DocumentData::bigFileBaseCacheKey() const {
+	if (!hasRemoteLocation() && sticker() && !_url.isEmpty()) {
+		// MTS Link: a sticker by its url (no Telegram location), the base
+		// of its rendered frames (the set icons of the animated packs).
+		return Data::UrlCacheKey(u"frames:"_q + _url);
+	}
 	return hasRemoteLocation()
 		? StorageFileLocation(
 			_dc,
