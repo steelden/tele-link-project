@@ -4378,6 +4378,21 @@ bool isOutboxUnread(PeerId peerId, MsgId msgId) {
 	return (i != OutboxUnread.cend()) && i->contains(msgId);
 }
 
+[[nodiscard]] bool mentionsUser(
+		const Api::MessageData &src,
+		const QString &userId) {
+	if (userId.isEmpty()) {
+		return false;
+	}
+	for (const auto &mention : src.mentions) {
+		if (mention.userId == userId) {
+			return true;
+		}
+	}
+	const auto tag = u"<@u:"_q + userId + '>';
+	return src.markdown.contains(tag) || src.text.contains(tag);
+}
+
 HistoryItem *addMessage(
 		not_null<Main::Session*> session,
 		const Api::MessageData &src,
@@ -4427,6 +4442,9 @@ HistoryItem *addMessage(
 		: CachedMyUserId;
 	if (!myUserId.isEmpty() && src.authorId == myUserId) {
 		flags |= MessageFlag::Outgoing;
+	} else if (mentionsUser(src, myUserId)) {
+		// Notified even in a muted chat or thread (as in Telegram).
+		flags |= MessageFlag::MentionsMe;
 	}
 
 	const auto user = session->data().user(peerToUser(fromPeerId));
@@ -5404,7 +5422,18 @@ void handleChatEvent(
 				const auto notifiable = ThreadNotifiable.value(
 					threadIt.value(),
 					true);
-				if (newItem && !isOwn && !threadIsOpen && notifiable) {
+				// Unsubscribed (LeaveFromThreadEvent): no notifications, as
+				// in MTS Link (no counter comes for it either).
+				const auto threadChannel = session->data().channelLoaded(
+					peerToChannel(threadIt.value()));
+				const auto left = !threadChannel
+					|| (threadChannel->flags() & ChannelDataFlag::Left);
+				// A mention of me is notified even then.
+				const auto mentionsMe = newItem && newItem->mentionsMe();
+				if (newItem
+					&& !isOwn
+					&& !threadIsOpen
+					&& ((notifiable && !left) || mentionsMe)) {
 					auto notification = Data::ItemNotification{
 						.item = newItem,
 						.type = Data::ItemNotificationType::Message,
