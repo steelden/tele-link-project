@@ -1527,6 +1527,9 @@ void RepliesList::readTill(
 				&_history->session(),
 				_history->peer->id,
 				_rootId);
+			MtsLink::refreshThreadsMark(
+				&_history->session(),
+				_history->peer->id);
 			auto threadUnread = 0;
 			if (tillIdItem && oldMtsReadDate < tillIdItem->date()) {
 				for (const auto &msgId : _list) {

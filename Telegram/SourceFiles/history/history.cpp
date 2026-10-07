@@ -2463,6 +2463,16 @@ void History::setUnreadMark(bool unread) {
 	}
 }
 
+void History::mtsLinkSetThreadsMark(bool unread) {
+	if (_mtsLinkThreadsMark == unread) {
+		return;
+	}
+	LOG(("MtsLink Unread: '%1' threads mark -> %2"
+		).arg(peer->name()).arg(unread ? 1 : 0));
+	_mtsLinkThreadsMark = unread;
+	updateChatListEntry();
+}
+
 void History::setFakeUnreadWhileOpened(bool enabled) {
 	if (fakeUnreadWhileOpened() == enabled) {
 		return;
@@ -2910,7 +2920,13 @@ Dialogs::BadgesState History::chatListBadgesState() const {
 }
 
 Dialogs::BadgesState History::computeBadgesState() const {
-	const auto state = computeUnreadState();
+	auto state = computeUnreadState();
+	if (_mtsLinkThreadsMark && !state.messages && !state.marks) {
+		// MTS Link: the empty badge of the chat only, the folders and the
+		// total counter don't count the threads without the subscription.
+		state.marks = 1;
+		state.marksMuted = muted() ? 1 : 0;
+	}
 	const auto result = adjustBadgesStateByFolder(
 		Dialogs::BadgesForUnread(
 			state,

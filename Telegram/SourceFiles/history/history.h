@@ -254,6 +254,12 @@ public:
 
 	void setUnreadCount(int newUnreadCount);
 	void setUnreadMark(bool unread);
+	// MTS Link: a thread without the subscription has new messages (the
+	// dot on its root): the empty badge of the chat, as the unread mark.
+	void mtsLinkSetThreadsMark(bool unread);
+	[[nodiscard]] bool mtsLinkThreadsMark() const {
+		return _mtsLinkThreadsMark;
+	}
 	void setFakeUnreadWhileOpened(bool enabled);
 	[[nodiscard]] bool fakeUnreadWhileOpened() const;
 	void setMuted(bool muted) override;
@@ -701,6 +707,7 @@ private:
 	std::optional<MsgId> _outboxReadBefore;
 	TimeId _mtsLinkInboxReadDate = 0;
 	std::optional<int> _unreadCount;
+	bool _mtsLinkThreadsMark = false;
 	int _unreadPollVotesCount = 0;
 	rpl::event_stream<int> _unreadPollVotesCountChanges;
 	std::optional<HistoryItem*> _lastMessage;

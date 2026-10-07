@@ -129,6 +129,12 @@ void addThreadEntryUnread(
 	MsgId rootId,
 	int delta,
 	TimeId date);
+// The empty badge of a chat: a thread without the subscription there has
+// new messages (the dot on its loaded root, or the new replies to a root
+// not loaded yet).
+void refreshThreadsMark(
+	not_null<Main::Session*> session,
+	PeerId chatPeerId);
 void resetThreadEntryUnread(
 	not_null<Main::Session*> session,
 	PeerId parentPeerId,

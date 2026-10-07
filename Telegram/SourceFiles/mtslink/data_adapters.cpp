@@ -17,6 +17,7 @@ based on Telegram Desktop.
 #include "main/main_domain.h"
 #include "storage/storage_account.h"
 #include "storage/file_download.h"
+#include "history/view/history_view_element.h"
 #include "data/stickers/data_stickers_set.h"
 #include <QtGui/QImageReader>
 #include <QtCore/QCollator>
@@ -2161,6 +2162,7 @@ void applyThreadsList(
 		ThreadTopicMap.insert(rootId, { thread.chatId, thread.id });
 		ThreadPeerInfoMap.insert(peerId, { parentPeerId, rootId });
 		ThreadReverseMap.insert({ parentPeerId, rootId }, peerId);
+		refreshThreadsMark(session, parentPeerId);
 
 		const auto authorUuidForMap =
 			thread.message.value("authorId").toString();
@@ -2621,6 +2623,7 @@ void connectToSession(
 			}
 			mainSession->data().sendHistoryChangeNotifications();
 			saveMessagesToCache(mainSession, chatId, messages, profiles);
+			refreshThreadsMark(mainSession, peerId);
 			if (!rawLastId.isEmpty()
 				&& oldestLoadedMessageId(peerId).isEmpty()) {
 				setOldestLoadedMessageId(peerId, rawLastId);
@@ -3634,6 +3637,7 @@ void applyThreadLeft(
 		session->data().refreshChatListEntry(Dialogs::Key(history));
 	}
 	ThreadLoadRequested.remove(threadId);
+	refreshThreadsMark(session, parentPeerId);
 }
 
 void addThreadEntryUnread(
@@ -3674,6 +3678,53 @@ int threadEntryUnreadCount(PeerId parentPeerId, MsgId rootId) {
 }
 
 // Diagnostics: all the chats and threads with something unread.
+void refreshThreadsMark(
+		not_null<Main::Session*> session,
+		PeerId chatPeerId) {
+	const auto history = session->data().historyLoaded(chatPeerId);
+	if (!history) {
+		return;
+	}
+	const auto subscribed = [&](MsgId rootId) {
+		const auto i = ThreadReverseMap.constFind({ chatPeerId, rootId });
+		if (i == ThreadReverseMap.constEnd()) {
+			return false;
+		}
+		const auto channel = session->data().channelLoaded(
+			peerToChannel(i.value()));
+		return channel && !(channel->flags() & ChannelDataFlag::Left);
+	};
+	auto unread = false;
+	for (const auto &block : history->blocks) {
+		for (const auto &view : block->messages) {
+			const auto item = view->data();
+			const auto views = item->Get<HistoryMessageViews>();
+			if (views
+				&& views->commentsMaxId > views->commentsInboxReadTillId
+				&& !subscribed(item->id)) {
+				unread = true;
+				break;
+			}
+		}
+		if (unread) {
+			break;
+		}
+	}
+	if (!unread) {
+		for (auto i = PendingThreadUnread.cbegin()
+			; i != PendingThreadUnread.cend()
+			; ++i) {
+			if (i.key().first == chatPeerId
+				&& i.value().count > 0
+				&& !subscribed(i.key().second)) {
+				unread = true;
+				break;
+			}
+		}
+	}
+	history->mtsLinkSetThreadsMark(unread);
+}
+
 void resetThreadEntryUnread(
 		not_null<Main::Session*> session,
 		PeerId parentPeerId,
@@ -4901,6 +4952,7 @@ bool addOlderMessages(
 
 	session->data().notifyHistoryChangeDelayed(history);
 	session->data().sendHistoryChangeNotifications();
+	refreshThreadsMark(session, chatPeerId);
 
 	return true;
 }
@@ -5394,6 +5446,7 @@ void handleChatEvent(
 				info.count++;
 				info.parentUuid = msg.parentId;
 			}
+			refreshThreadsMark(session, chatPeerId);
 			const auto threadIt = ThreadReverseMap.constFind(
 				{ chatPeerId, parentMsgId });
 			if (threadIt != ThreadReverseMap.constEnd()) {
@@ -5677,6 +5730,7 @@ void handleChatEvent(
 				updateCallReplies(item);
 			}
 			session->data().requestItemViewRefresh(item);
+			refreshThreadsMark(session, chatPeerId);
 		}
 	} else if (type == "MessageReactionsUpdatedEvent") {
 		const auto messageId = value.value("messageId").toString();
