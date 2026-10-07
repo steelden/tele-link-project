@@ -414,7 +414,8 @@ std::shared_ptr<ClickHandler> UiIntegration::createLinkHandler(
 bool UiIntegration::handleUrlClick(
 		const QString &url,
 		const QVariant &context) {
-	const auto local = Core::TryConvertUrlToLocal(url);
+	// MTS Link: t.me links are not opened inside (they are of Telegram).
+	const auto local = url;
 	if (Core::InternalPassportOrOAuthLink(local)) {
 		return true;
 	}
@@ -426,11 +427,15 @@ bool UiIntegration::handleUrlClick(
 		File::OpenEmailLink(url);
 		return true;
 	} else if (local.startsWith(u"tg://"_q, Qt::CaseInsensitive)) {
+		if (context.value<ClickHandlerContext>().itemId) {
+			// MTS Link: tg:// in a message is a link of Telegram, opened
+			// by the system (Telegram), only our own links are handled.
+			return false;
+		}
 		Core::App().openLocalUrl(local, context);
 		return true;
 	} else if (local.startsWith(u"tonsite://"_q, Qt::CaseInsensitive)) {
-		Core::App().iv().showTonSite(local, context);
-		return true;
+		return false;
 	} else if (local.startsWith(u"internal:"_q, Qt::CaseInsensitive)) {
 		Core::App().openInternalUrl(local, context);
 		return true;

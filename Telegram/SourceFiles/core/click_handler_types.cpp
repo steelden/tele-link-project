@@ -270,7 +270,7 @@ void HiddenUrlClickHandler::Open(QString url, QVariant context) {
 			!external.isEmpty()) {
 		url = external;
 	}
-	url = Core::TryConvertUrlToLocal(url);
+	// MTS Link: t.me links are not converted to tg:// (of Telegram).
 	if (Core::InternalPassportOrOAuthLink(url)) {
 		return;
 	}

@@ -481,9 +481,7 @@ void Application::run() {
 }
 
 void Application::autoRegisterUrlScheme() {
-	if (!OptionSkipUrlSchemeRegister.value()) {
-		InvokeQueued(this, [] { RegisterUrlScheme(); });
-	}
+	// MTS Link: tg:// and tonsite:// are links of Telegram, not ours.
 }
 
 void Application::showAccount(not_null<Main::Account*> account) {
@@ -1217,12 +1215,10 @@ void Application::checkStartUrls() {
 		cRefStartUrls() = ranges::views::all(
 			cRefStartUrls()
 		) | ranges::views::filter([&](const QUrl &url) {
-			if (url.scheme() == u"tonsite"_q) {
-				iv().showTonSite(url.toString(), {});
+			// MTS Link: the links of Telegram are not handled.
+			if (url.scheme() == u"tg"_q || url.scheme() == u"tonsite"_q) {
+				LOG(("MtsLink: start url '%1' ignored").arg(url.scheme()));
 				return false;
-			} else if (_lastActivePrimaryWindow) {
-				const auto local = TryConvertUrlToLocal(url.toString());
-				return !openLocalUrl(local, {});
 			}
 			return true;
 		}) | ranges::to<QList<QUrl>>;
@@ -2039,31 +2035,7 @@ void Application::startShortcuts() {
 }
 
 void Application::RegisterUrlScheme() {
-	const auto arguments = Launcher::Instance().customWorkingDir()
-		? u"-workdir \"%1\""_q.arg(cWorkingDir())
-		: QString();
-
-	base::Platform::RegisterUrlScheme(base::Platform::UrlSchemeDescriptor{
-		.executable = Platform::ExecutablePathForShortcuts(),
-		.arguments = arguments,
-		.protocol = u"tg"_q,
-		.protocolName = u"TeleLink"_q,
-		.shortAppName = u"telelink"_q,
-		.longAppName = QCoreApplication::applicationName(),
-		.displayAppName = AppName.utf16(),
-		.displayAppDescription = AppName.utf16(),
-	});
-
-	base::Platform::RegisterUrlScheme(base::Platform::UrlSchemeDescriptor{
-		.executable = Platform::ExecutablePathForShortcuts(),
-		.arguments = arguments,
-		.protocol = u"tonsite"_q,
-		.protocolName = u"TonSite Link"_q,
-		.shortAppName = u"telelink"_q,
-		.longAppName = QCoreApplication::applicationName(),
-		.displayAppName = AppName.utf16(),
-		.displayAppDescription = AppName.utf16(),
-	});
+	// MTS Link: tg:// and tonsite:// are links of Telegram, not ours.
 }
 
 bool IsAppLaunched() {
