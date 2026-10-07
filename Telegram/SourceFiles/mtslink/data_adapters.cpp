@@ -111,6 +111,15 @@ QHash<uint64, QString> UserBareIdToUuidMap;
 QHash<PeerId, std::vector<uint64>> ChatMembersMap;
 QHash<PeerId, QVector<MsgId>> PendingTempMessages;
 QHash<QString, QPair<PeerId, MsgId>> MtsLinkIdToMsgMap;
+
+// The local id of a message by its MTS Link id: a sent message keeps the
+// id of its local message (a thread to it had no root otherwise).
+[[nodiscard]] MsgId localMsgId(const QString &mtsLinkId) {
+	const auto i = MtsLinkIdToMsgMap.constFind(mtsLinkId);
+	return (i != MtsLinkIdToMsgMap.constEnd())
+		? i->second
+		: MsgId(uuidToBareId(mtsLinkId) & 0x7FFFFFFFLL);
+}
 QSet<QString> PinnedMessagesLoadedChats;
 QSet<QString> ChatInfoLoadedChats;
 QSet<QString> PendingThreadClientIds;
@@ -1993,8 +2002,7 @@ void applyThreadsList(
 			history->setUnreadCount(thread.unreadChildrenCount);
 		}
 
-		const auto rootId = MsgId(
-			uuidToBareId(thread.id) & 0x7FFFFFFFLL);
+		const auto rootId = localMsgId(thread.id);
 
 		const auto msgText = thread.message.value("text").toString();
 		// No "type" in the thread message, a call has the call metadata.
@@ -2175,7 +2183,7 @@ void handleTypingEvent(
 		}
 	} else if (type == u"ThreadTypingEvent"_q) {
 		const auto threadId = value.value("threadId").toString();
-		const auto rootId = MsgId(uuidToBareId(threadId) & 0x7FFFFFFFLL);
+		const auto rootId = localMsgId(threadId);
 		const auto topic = ThreadTopicMap.constFind(rootId);
 		const auto known = MtsLinkIdToMsgMap.constFind(threadId);
 		// Subscribed threads or any loaded root message.
@@ -3564,7 +3572,7 @@ void applyThreadNotifiable(
 		const QString &threadId,
 		bool notifiable) {
 	const auto parentPeerId = chatIdToPeerId(chatId);
-	const auto rootId = MsgId(uuidToBareId(threadId) & 0x7FFFFFFFLL);
+	const auto rootId = localMsgId(threadId);
 	const auto it = ThreadReverseMap.constFind({ parentPeerId, rootId });
 	if (it != ThreadReverseMap.constEnd()) {
 		applyThreadNotifiable(session, it.value(), notifiable);
@@ -3576,7 +3584,7 @@ void applyThreadLeft(
 		const QString &chatId,
 		const QString &threadId) {
 	const auto parentPeerId = chatIdToPeerId(chatId);
-	const auto rootId = MsgId(uuidToBareId(threadId) & 0x7FFFFFFFLL);
+	const auto rootId = localMsgId(threadId);
 	const auto it = ThreadReverseMap.constFind({ parentPeerId, rootId });
 	if (it == ThreadReverseMap.constEnd()) {
 		return;
@@ -4495,8 +4503,7 @@ HistoryItem *addMessage(
 		fields.flags |= MessageFlag::HasReplyInfo;
 	}
 	if (!src.parentId.isEmpty()) {
-		const auto parentBareId = uuidToBareId(src.parentId);
-		const auto parentMsgId = MsgId(parentBareId & 0x7FFFFFFFLL);
+		const auto parentMsgId = localMsgId(src.parentId);
 		if (fields.replyTo.messageId.msg == 0) {
 			fields.replyTo.messageId = FullMsgId(chatPeerId, parentMsgId);
 		}
@@ -4561,8 +4568,7 @@ HistoryItem *addMessage(
 			existing->invalidateChatListEntry();
 		}
 		if (!src.parentId.isEmpty()) {
-			const auto parentBareId = uuidToBareId(src.parentId);
-			const auto parentMsgId = MsgId(parentBareId & 0x7FFFFFFFLL);
+			const auto parentMsgId = localMsgId(src.parentId);
 			existing->ensureReplyComponent();
 			existing->setReplyFields(
 				existing->replyToTop() ? existing->replyToTop() : parentMsgId,
@@ -4941,8 +4947,7 @@ void handleNotificationEvent(
 			const auto readBareId = uuidToBareId(lastReadMsgId);
 			const auto readMsgId = MsgId(readBareId & 0x7FFFFFFFLL);
 			if (!threadId.isEmpty()) {
-				const auto threadBareId = uuidToBareId(threadId);
-				const auto rootMsgId = MsgId(threadBareId & 0x7FFFFFFFLL);
+				const auto rootMsgId = localMsgId(threadId);
 				if (auto cached = cachedRepliesList(peerId, rootMsgId)) {
 					cached->setInboxReadTill(readMsgId, std::nullopt);
 				}
@@ -5379,8 +5384,7 @@ void handleChatEvent(
 			}
 		}
 		if (isThread) {
-			const auto parentBareId = uuidToBareId(msg.parentId);
-			const auto parentMsgId = MsgId(parentBareId & 0x7FFFFFFFLL);
+			const auto parentMsgId = localMsgId(msg.parentId);
 			const auto parent = session->data().message(
 				chatPeerId, parentMsgId);
 			const auto threadIsOpen = isThreadOpen(chatPeerId, parentMsgId);
@@ -5582,7 +5586,7 @@ void handleChatEvent(
 		// the chat itself: MTS Link shows it in the "Threads" folder only.
 		if (const auto parentId = value.value("parentId").toString()
 			; !parentId.isEmpty()) {
-			const auto rootId = MsgId(uuidToBareId(parentId) & 0x7FFFFFFFLL);
+			const auto rootId = localMsgId(parentId);
 			const auto entry = threadEntryHistory(session, peerId, rootId);
 			const auto count = value.value("unreadMessageCount").toInt();
 			LOG(("MtsLink Unread: thread event root=%1 entry='%2' count=%3"
