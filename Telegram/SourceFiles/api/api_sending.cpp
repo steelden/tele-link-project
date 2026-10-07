@@ -1517,6 +1517,9 @@ void SendConfirmedFile(
 							ImageWithLocation{},
 							ImageWithLocation{},
 							crl::time(0));
+						// The upload progress on the image.
+						photo->uploadingData
+							= std::make_unique<Data::UploadState>(fileSize);
 					} else if (const auto doc = media->document()) {
 						doc->uploadingData
 							= std::make_unique<Data::UploadState>(
@@ -1572,8 +1575,17 @@ void SendConfirmedFile(
 					std::move(progress));
 			}
 		};
+		const auto clearPhotoUploading = [=] {
+			const auto item = session->data().message(peerId, tempMsgId);
+			const auto media = item ? item->media() : nullptr;
+			if (const auto photo = media ? media->photo() : nullptr) {
+				photo->uploadingData = nullptr;
+				session->data().requestPhotoViewRepaint(photo);
+			}
+		};
 		upload(
 			[=](const MtsLink::Api::UploadResult &result) {
+				clearPhotoUploading();
 				// Shown from the cache after the upload, not downloaded
 				// back from the server (a file with no path on the disk).
 				if (file->type != SendMediaType::Photo || file->forceFile) {
@@ -1599,6 +1611,7 @@ void SendConfirmedFile(
 			[=](const QString &error) {
 				LOG(("MtsLink Files: upload failed for '%1': %2")
 					.arg(file->filename, error));
+				clearPhotoUploading();
 				MtsLink::markLocalFailed(session, peerId, tempMsgId);
 			},
 			[=](qint64 sent, qint64 total) {
@@ -1607,6 +1620,13 @@ void SendConfirmedFile(
 				if (!item) return;
 				const auto media = item->media();
 				if (!media) return;
+				if (const auto photo = media->photo()) {
+					if (photo->uploadingData) {
+						photo->uploadingData->offset = sent;
+						session->data().requestPhotoViewRepaint(photo);
+					}
+					return;
+				}
 				const auto doc = media->document();
 				if (!doc || !doc->uploadingData) return;
 				doc->uploadingData->offset = sent;
