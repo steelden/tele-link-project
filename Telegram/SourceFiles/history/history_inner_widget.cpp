@@ -2226,6 +2226,10 @@ void HistoryInner::mousePressEvent(QMouseEvent *e) {
 		e->accept();
 		return; // ignore mouse press, that was hiding context menu
 	}
+	if (MtsLink::hasChatId(_history->peer->id)) {
+		// The unread bar stays till another chat is opened or a click.
+		_widget->mtsLinkClearUnreadBar();
+	}
 	if (_overlayHost) {
 		_overlayHost->handleClickOutside(e->pos());
 	}

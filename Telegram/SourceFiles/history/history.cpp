@@ -3923,6 +3923,12 @@ void History::setInboxReadTill(MsgId upTo) {
 	if (_inboxReadBefore) {
 		if (MtsLink::hasChatId(peer->id)) {
 			*_inboxReadBefore = upTo + 1;
+			// The unread is by the date: read locally right away (the new
+			// message in the open chat was unread till the server answer:
+			// notified, counted and not followed).
+			if (const auto item = owner().message(peer->id, upTo)) {
+				accumulate_max(_mtsLinkInboxReadDate, item->date());
+			}
 		} else {
 			tryMarkForumIntervalRead(*_inboxReadBefore, upTo + 1);
 			tryMarkMonoforumIntervalRead(*_inboxReadBefore, upTo + 1);

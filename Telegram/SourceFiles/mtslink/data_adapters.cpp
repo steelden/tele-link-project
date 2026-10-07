@@ -5379,7 +5379,17 @@ void handleChatEvent(
 				const auto channel = session->data().channelLoaded(
 					peerToChannel(chatPeerId));
 				const auto skipUnread = isThread;
-				if (!skipUnread && history->unreadCountKnown()) {
+				// Read already (the open chat at the bottom of the active
+				// window): not counted, an unread bar stopped following it.
+				const auto readAlready = newItem && !newItem->unread(history);
+				LOG(("MtsLink Follow: new %1 in '%2' unread=%3 notify=%4"
+					).arg(msg.id
+					).arg(history->peer->name()
+					).arg(readAlready ? 0 : 1
+					).arg((newItem && newItem->showNotification()) ? 1 : 0));
+				if (!skipUnread
+					&& !readAlready
+					&& history->unreadCountKnown()) {
 					history->setUnreadCount(
 						history->unreadCount() + 1);
 				}
@@ -5469,9 +5479,15 @@ void handleChatEvent(
 					|| (threadChannel->flags() & ChannelDataFlag::Left);
 				// A mention of me is notified even then.
 				const auto mentionsMe = newItem && newItem->mentionsMe();
+				// The open thread of an inactive window is notified too.
+				const auto windowActive = ranges::any_of(
+					session->windows(),
+					[](not_null<Window::SessionController*> window) {
+						return window->widget()->markingAsRead();
+					});
 				if (newItem
 					&& !isOwn
-					&& !threadIsOpen
+					&& (!threadIsOpen || !windowActive)
 					&& ((notifiable && !left) || mentionsMe)) {
 					auto notification = Data::ItemNotification{
 						.item = newItem,

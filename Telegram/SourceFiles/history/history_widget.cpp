@@ -4627,6 +4627,14 @@ void HistoryWidget::destroyUnreadBar() {
 	if (_migrated) _migrated->destroyUnreadBar();
 }
 
+void HistoryWidget::mtsLinkClearUnreadBar() {
+	if (!_history || !_history->unreadBar()) {
+		return;
+	}
+	destroyUnreadBar();
+	updateHistoryGeometry(false, false, { ScrollChangeNoJumpToBottom, 0 });
+}
+
 void HistoryWidget::destroyUnreadBarOnClose() {
 	if (!_history || !_historyInited) {
 		return;
@@ -4665,14 +4673,39 @@ void HistoryWidget::newItemAdded(not_null<HistoryItem*> item) {
 	// - on second we get wrong markingMessagesRead() and read both.
 	session().data().sendHistoryChangeNotifications();
 
+	if (MtsLink::hasChatId(_history->peer->id) && !item->out()) {
+		LOG(("MtsLink Follow: widget new item scroll=%1/%2 marking=%3 "
+			"bar=%4"
+			).arg(_scroll->scrollTop()
+			).arg(_scroll->scrollTopMax()
+			).arg(markingMessagesRead() ? 1 : 0
+			).arg(_history->unreadBar() ? 1 : 0));
+	}
 	if (item->isSending()) {
 		synteticScrollToY(_scroll->scrollTopMax());
 	} else if (_scroll->scrollTop() < _scroll->scrollTopMax()) {
 		return;
 	} else if (MtsLink::hasChatId(_history->peer->id)
 		&& !markingMessagesRead()) {
-		// MTS Link: followed (shown and read) only at the bottom of the
-		// active window, kept unread below otherwise.
+		// MTS Link: the inactive window at the bottom shows the message
+		// unread, with the unread bar above it. The unread count is set
+		// after this (by the adapter), the bar is created then.
+		if (!item->out()) {
+			const auto history = _history;
+			crl::on_main(this, [=] {
+				if (_history != history
+					|| _history->unreadBar()
+					|| markingMessagesRead()) {
+					return;
+				}
+				const auto atBottom = (_scroll->scrollTop()
+					>= _scroll->scrollTopMax());
+				createUnreadBarAndResize();
+				if (atBottom) {
+					synteticScrollToY(_scroll->scrollTopMax());
+				}
+			});
+		}
 		return;
 	}
 	if (item->showNotification()) {
@@ -9006,9 +9039,13 @@ void HistoryWidget::updateHistoryGeometry(
 		_scrollToAnimation.stop();
 	} else if (mtsLinkKeepBottom && !loadedDown) {
 		newScrollTop = ScrollMax;
-	} else if (wasAtBottom && !loadedDown && !_history->unreadBar()
-		&& (!isMtsLink || markingMessagesRead())) {
-		// MTS Link: new messages followed in the active window only.
+	} else if (isMtsLink && wasAtBottom && !loadedDown) {
+		// MTS Link: at the bottom new messages are always shown, the
+		// active window reads them, the inactive one adds the unread bar.
+		newScrollTop = _history->unreadBar()
+			? ScrollMax
+			: countAutomaticScrollTop();
+	} else if (wasAtBottom && !loadedDown && !_history->unreadBar()) {
 		newScrollTop = countAutomaticScrollTop();
 	} else {
 		newScrollTop = std::min(
@@ -9069,9 +9106,10 @@ void HistoryWidget::revealItemsCallback() {
 		_itemsRevealHeight = height;
 		_list->changeItemsRevealHeight(_itemsRevealHeight);
 
-		const auto newScrollTop = (wasAtBottom && !_history->unreadBar()
-			&& (!MtsLink::hasChatId(_history->peer->id)
-				|| markingMessagesRead()))
+		const auto mtsLink = MtsLink::hasChatId(_history->peer->id);
+		const auto newScrollTop = (wasAtBottom && mtsLink)
+			? (_history->unreadBar() ? ScrollMax : countAutomaticScrollTop())
+			: (wasAtBottom && !_history->unreadBar())
 			? countAutomaticScrollTop()
 			: _list->historyScrollTop();
 		const auto toY = std::clamp(newScrollTop, 0, _scroll->scrollTopMax());

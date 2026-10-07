@@ -147,6 +147,9 @@ class HistoryWidget final
 	, private HistoryView::CornerButtonsDelegate {
 public:
 	using FieldHistoryAction = Ui::InputField::HistoryAction;
+
+	// MTS Link: a click in the messages removes the unread bar.
+	void mtsLinkClearUnreadBar();
 	using RecordLock = HistoryView::Controls::RecordLock;
 	using VoiceRecordBar = HistoryView::Controls::VoiceRecordBar;
 	using ForwardPanel = HistoryView::Controls::ForwardPanel;
