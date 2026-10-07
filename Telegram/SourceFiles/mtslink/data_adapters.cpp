@@ -2005,6 +2005,15 @@ void applyThreadsList(
 		const auto rootId = localMsgId(thread.id);
 
 		const auto msgText = thread.message.value("text").toString();
+		// A sticker, a GIF or a file without a text: the media in the
+		// preview (it was empty).
+		const auto rootFiles = thread.message.value("files").toArray();
+		const auto rootMedia = rootFiles.isEmpty()
+			? MTP_messageMediaEmpty()
+			: buildFileMedia(
+				session,
+				Api::ParseFileData(rootFiles.first().toObject()),
+				date);
 		// No "type" in the thread message, a call has the call metadata.
 		if (thread.message.value("metadata").toObject().value(
 				"type").toString() == u"CallMetadata"_q) {
@@ -2061,7 +2070,7 @@ void applyThreadsList(
 					call));
 				item->invalidateChatListEntry();
 			}
-		} else if (!msgText.isEmpty()) {
+		} else if (!msgText.isEmpty() || !rootFiles.isEmpty()) {
 			const auto authorUuid =
 				thread.message.value("authorId").toString();
 			PeerId fromId;
@@ -2110,7 +2119,7 @@ void applyThreadsList(
 						.date = date,
 					},
 					std::move(text),
-					MTP_messageMediaEmpty());
+					rootMedia);
 			}
 		}
 		const auto parentPeerId = chatIdToPeerId(thread.chatId);
@@ -6280,20 +6289,29 @@ bool replacePendingWithReal(
 	// The local message of this send (by the client id), or the first one.
 	const auto sent = PendingSends.take(clientId);
 	const auto it = PendingTempMessages.find(peerId);
-	if (it == PendingTempMessages.end() || it->isEmpty()) {
+	const auto inList = (it != PendingTempMessages.end()) && !it->isEmpty();
+	auto tempMsgId = MsgId();
+	if (sent.localId
+		&& sent.peerId == peerId
+		&& session->data().message(peerId, sent.localId)) {
+		// By the client id: the sends to a thread are not in the list (the
+		// GIF / file sent to a thread kept its upload progress forever).
+		tempMsgId = sent.localId;
+	} else if (inList) {
+		tempMsgId = it->first();
+	} else {
 		LOG(("MtsLink Pending: NOT FOUND for peerId=%1 realId='%2'")
 			.arg(peerId.value).arg(realMsg.id));
 		return false;
 	}
-	const auto tempMsgId = (sent.localId && it->contains(sent.localId))
-		? sent.localId
-		: it->first();
-	it->removeOne(tempMsgId);
+	if (inList) {
+		it->removeOne(tempMsgId);
+		if (it->isEmpty()) {
+			PendingTempMessages.erase(it);
+		}
+	}
 	LOG(("MtsLink Pending: FOUND peerId=%1 tempMsgId=%2 realId='%3'")
 		.arg(peerId.value).arg(tempMsgId.bare).arg(realMsg.id));
-	if (it->isEmpty()) {
-		PendingTempMessages.erase(it);
-	}
 	const auto item = session->data().message(peerId, tempMsgId);
 	if (!item) {
 		return false;
@@ -10282,6 +10300,10 @@ bool sendSavedGif(
 				if (!mts) {
 					return;
 				}
+				// The upload is over: no progress, the message is "sending"
+				// (the clock) till the server sends it back.
+				tempDocument->uploadingData = nullptr;
+				tempDocument->owner().requestDocumentViewRepaint(tempDocument);
 				// The real file is in the cache as well (the local message
 				// gets its url).
 				putToDocumentCache(

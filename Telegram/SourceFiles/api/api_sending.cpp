@@ -1604,12 +1604,17 @@ void SendConfirmedFile(
 					std::move(progress));
 			}
 		};
+		// The upload is over: no progress, the message is "sending" (the
+		// clock) till the server sends it back.
 		const auto clearPhotoUploading = [=] {
 			const auto item = session->data().message(peerId, tempMsgId);
 			const auto media = item ? item->media() : nullptr;
 			if (const auto photo = media ? media->photo() : nullptr) {
 				photo->uploadingData = nullptr;
 				session->data().requestPhotoViewRepaint(photo);
+			} else if (const auto doc = media ? media->document() : nullptr) {
+				doc->uploadingData = nullptr;
+				session->data().requestDocumentViewRepaint(doc);
 			}
 		};
 		upload(
