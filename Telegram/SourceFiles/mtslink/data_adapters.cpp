@@ -573,6 +573,28 @@ constexpr auto kAnimatedStickerSide = 512;
 		Qt::CaseInsensitive);
 }
 
+// A static sticker sent by TeleLink: "<name>.sticker.png" (.jpg, .webp),
+// shown as a sticker (other clients show the image).
+[[nodiscard]] bool isImageStickerFile(const QString &name) {
+	const auto lower = name.toLower();
+	return lower.endsWith(u".sticker.png"_q)
+		|| lower.endsWith(u".sticker.jpg"_q)
+		|| lower.endsWith(u".sticker.jpeg"_q)
+		|| lower.endsWith(u".sticker.webp"_q);
+}
+
+// The name of a sticker image to send: with ".sticker" before the ext.
+[[nodiscard]] QString imageStickerFileName(const QString &name) {
+	if (isImageStickerFile(name)) {
+		return name;
+	}
+	const auto info = QFileInfo(name);
+	const auto suffix = info.suffix().isEmpty()
+		? u"png"_q
+		: info.suffix();
+	return info.completeBaseName() + u".sticker."_q + suffix;
+}
+
 [[nodiscard]] QVector<MTPDocumentAttribute> stickerAttributes(
 		const QString &name,
 		int width,
@@ -653,7 +675,8 @@ MTPMessageMedia buildFileMedia(
 		&& isImageMime(file.mime)
 		&& file.width > 0
 		&& file.height > 0
-		&& !ImageAsFileIds.contains(file.id)) {
+		&& !ImageAsFileIds.contains(file.id)
+		&& !isImageStickerFile(file.name)) {
 		return buildPhotoMedia(session, file, date);
 	}
 
@@ -661,9 +684,16 @@ MTPMessageMedia buildFileMedia(
 
 	const auto isTgs = isTgsStickerFile(file.name, file.mime);
 	const auto isWebmSticker = !isTgs && isWebmStickerFile(file.name);
-	if (isTgs || isWebmSticker) {
+	const auto isImageSticker = !isTgs
+		&& !isWebmSticker
+		&& isImageStickerFile(file.name);
+	if (isTgs || isWebmSticker || isImageSticker) {
 		// An animated sticker: the mime type of Telegram, not of the server.
-		const auto mime = isTgs ? QString(kTgsMime) : u"video/webm"_q;
+		const auto mime = isTgs
+			? QString(kTgsMime)
+			: isWebmSticker
+			? u"video/webm"_q
+			: file.mime;
 		const auto attrs = stickerAttributes(
 			file.name,
 			isTgs ? 0 : file.width,
@@ -9317,6 +9347,65 @@ QSet<uint64> LocalPackIds;
 constexpr auto kMaxPackStickers = 120;
 constexpr auto kPackStickerSide = 512;
 
+// A static sticker as in Telegram: the longer side 512 at most (shown at
+// ~256 anyway), PNG with the transparency, JPEG without, smaller ones kept.
+// False if it is not an image.
+[[nodiscard]] bool normalizeStickerImage(
+		QByteArray &bytes,
+		QString &name,
+		QString &mime,
+		int &width,
+		int &height) {
+	QBuffer buffer(&bytes);
+	buffer.open(QIODevice::ReadOnly);
+	QImageReader reader(&buffer);
+	const auto format = reader.format().toLower();
+	auto frame = reader.read();
+	buffer.close();
+	if (frame.isNull()) {
+		return false;
+	}
+	const auto known = (format == "png")
+		|| (format == "jpeg")
+		|| (format == "jpg");
+	const auto big = (frame.width() > kPackStickerSide)
+		|| (frame.height() > kPackStickerSide);
+	if (known && !big) {
+		mime = (format == "png") ? u"image/png"_q : u"image/jpeg"_q;
+		width = frame.width();
+		height = frame.height();
+		return true;
+	}
+	if (big) {
+		frame = frame.scaled(
+			kPackStickerSide,
+			kPackStickerSide,
+			Qt::KeepAspectRatio,
+			Qt::SmoothTransformation);
+	}
+	const auto alpha = frame.hasAlphaChannel();
+	auto result = QByteArray();
+	QBuffer out(&result);
+	out.open(QIODevice::WriteOnly);
+	frame.save(&out, alpha ? "PNG" : "JPEG", alpha ? -1 : 90);
+	out.close();
+	LOG(("MtsLink Stickers: %1 %2 (%3 bytes) -> %4x%5 %6 (%7 bytes)"
+		).arg(name
+		).arg(QString::fromLatin1(format)
+		).arg(bytes.size()
+		).arg(frame.width()
+		).arg(frame.height()
+		).arg(alpha ? u"png"_q : u"jpeg"_q
+		).arg(result.size()));
+	bytes = result;
+	mime = alpha ? u"image/png"_q : u"image/jpeg"_q;
+	name = QFileInfo(name).completeBaseName()
+		+ (alpha ? u".png"_q : u".jpg"_q);
+	width = frame.width();
+	height = frame.height();
+	return true;
+}
+
 [[nodiscard]] Storage::Cache::Key stickersCacheKey() {
 	return { kMtsLinkStickersTag, 0 };
 }
@@ -9537,6 +9626,21 @@ void applyLocalPack(
 
 } // namespace
 
+// Diagnostics: the format and the transparency of an image.
+[[nodiscard]] QString describeImage(const QByteArray &bytes) {
+	auto copy = bytes;
+	QBuffer buffer(&copy);
+	buffer.open(QIODevice::ReadOnly);
+	QImageReader reader(&buffer);
+	const auto format = QString::fromLatin1(reader.format());
+	const auto image = reader.read();
+	return u"format=%1 size=%2x%3 alpha=%4"_q
+		.arg(format.isEmpty() ? u"?"_q : format)
+		.arg(image.width())
+		.arg(image.height())
+		.arg(image.hasAlphaChannel() ? 1 : 0);
+}
+
 // The content of an image by its file: the urls of buildPhotoMedia.
 void putToImageCache(
 		not_null<Main::Session*> session,
@@ -9582,8 +9686,8 @@ bool toggleFavedSticker(not_null<DocumentData*> document, bool faved) {
 			.key = file.id,
 			.name = file.name,
 			.mime = file.mime,
-			.width = kAnimatedStickerSide,
-			.height = kAnimatedStickerSide,
+			.width = (file.width > 0) ? file.width : kAnimatedStickerSide,
+			.height = (file.height > 0) ? file.height : kAnimatedStickerSide,
 		};
 		const auto local = makeLocalSticker(strong, sticker, bytes.size());
 		strong->data().cache().put(
@@ -9681,8 +9785,10 @@ bool savedGifMatches(
 
 bool canAddPhotoToStickers(not_null<PhotoData*> photo) {
 	const auto i = PhotoFiles.constFind(photo->id);
+	// Bigger images are scaled down to the sticker size when added.
+	constexpr auto kMaxSourceSize = 10 * 1024 * 1024;
 	return (i != PhotoFiles.constEnd())
-		&& (i->size <= Storage::kMaxStickerBytesSize)
+		&& (i->size <= kMaxSourceSize)
 		&& !LocalStickers.contains(stickerDocumentId(i->id));
 }
 
@@ -9700,19 +9806,34 @@ void addPhotoToStickers(not_null<PhotoData*> photo) {
 			LOG(("MtsLink Stickers: no content of %1").arg(file.id));
 			return;
 		}
-		const auto sticker = LocalSticker{
+		auto content = bytes;
+		auto sticker = LocalSticker{
 			.key = file.id,
 			.name = file.name,
 			.mime = file.mime,
 			.width = file.width,
 			.height = file.height,
 		};
-		const auto document = makeLocalSticker(strong, sticker, bytes.size());
-		strong->data().cache().put(stickerBytesCacheKey(file.id), QByteArray(bytes));
-		putToDocumentCache(document, stickerUrl(file.id), bytes);
-		LOG(("MtsLink Stickers: added %1 (%2 bytes)"
+		if (!normalizeStickerImage(
+				content,
+				sticker.name,
+				sticker.mime,
+				sticker.width,
+				sticker.height)) {
+			LOG(("MtsLink Stickers: not an image %1").arg(file.id));
+			return;
+		}
+		const auto document = makeLocalSticker(
+			strong,
+			sticker,
+			content.size());
+		strong->data().cache().put(stickerBytesCacheKey(file.id), QByteArray(content));
+		putToDocumentCache(document, stickerUrl(file.id), content);
+		LOG(("MtsLink Stickers: added %1 (%2 bytes, mime %3, %4)"
 			).arg(file.id
-			).arg(bytes.size()));
+			).arg(content.size()
+			).arg(sticker.mime
+			).arg(describeImage(content)));
 		strong->data().stickers().mtsLinkSetFaved(document, true);
 	});
 }
@@ -9880,49 +10001,20 @@ struct ImportedImage {
 			.height = kAnimatedStickerSide,
 		};
 	}
-	QBuffer buffer(&image.bytes);
-	buffer.open(QIODevice::ReadOnly);
-	QImageReader reader(&buffer);
-	const auto format = reader.format().toLower();
-	auto frame = reader.read();
-	buffer.close();
-	if (frame.isNull()) {
+	auto name = image.name;
+	auto mime = QString();
+	auto width = 0;
+	auto height = 0;
+	if (!normalizeStickerImage(image.bytes, name, mime, width, height)) {
 		LOG(("MtsLink Stickers: not an image %1").arg(image.name));
 		return std::nullopt;
-	}
-	auto mime = (format == "png")
-		? u"image/png"_q
-		: (format == "jpeg" || format == "jpg")
-		? u"image/jpeg"_q
-		: QString();
-	const auto big = (image.bytes.size() > Storage::kMaxStickerBytesSize)
-		|| (frame.width() > 2560)
-		|| (frame.height() > 2560);
-	auto name = image.name;
-	if (mime.isEmpty() || big) {
-		if (frame.width() > kPackStickerSide
-			|| frame.height() > kPackStickerSide) {
-			frame = frame.scaled(
-				kPackStickerSide,
-				kPackStickerSide,
-				Qt::KeepAspectRatio,
-				Qt::SmoothTransformation);
-		}
-		auto png = QByteArray();
-		QBuffer out(&png);
-		out.open(QIODevice::WriteOnly);
-		frame.save(&out, "PNG");
-		out.close();
-		image.bytes = png;
-		mime = u"image/png"_q;
-		name = QFileInfo(name).completeBaseName() + u".png"_q;
 	}
 	return LocalSticker{
 		.key = QUuid::createUuid().toString(QUuid::WithoutBraces),
 		.name = name,
 		.mime = mime,
-		.width = frame.width(),
-		.height = frame.height(),
+		.width = width,
+		.height = height,
 	};
 }
 
@@ -10169,7 +10261,6 @@ bool sendSavedGif(
 	const auto peerId = history->peer->id;
 	const auto chatId = peerIdToChatId(peerId);
 	const auto isSticker = (sticker != LocalStickers.constEnd());
-	const auto isImageSticker = isSticker && isImageMime(sticker->mime);
 	if ((i == GifFiles.constEnd() && !isSticker) || !mts || chatId.isEmpty()) {
 		LOG(("MtsLink Gifs: no file for the GIF %1").arg(document->id));
 		return false;
@@ -10183,7 +10274,9 @@ bool sendSavedGif(
 	const auto file = isSticker
 		? Api::FileData{
 			.id = sticker->key,
-			.name = sticker->name,
+			.name = isImageMime(sticker->mime)
+				? imageStickerFileName(sticker->name)
+				: sticker->name,
 			.mime = sticker->mime,
 			.width = sticker->width,
 			.height = sticker->height,
@@ -10231,11 +10324,6 @@ bool sendSavedGif(
 		// shown: not loaded by its temporary (not existing) url.
 		const auto tempDocument = strong->data().document(
 			DocumentId(uuidToBareId(tempId)));
-		if (isImageSticker) {
-			// The image of the local message (and of the real one later)
-			// is shown from the content, not loaded from the CDN.
-			putToImageCache(strong, tempId, bytes);
-		}
 		addMessage(strong, msg, isThreadSend);
 		markLocalSending(
 			strong,
@@ -10245,14 +10333,6 @@ bool sendSavedGif(
 		// The upload progress is shown, as for a sent file.
 		tempDocument->uploadingData = std::make_unique<Data::UploadState>(
 			bytes.size());
-		// A sticker is an image: the upload progress is on its photo.
-		const auto tempPhoto = isImageSticker
-			? strong->data().photo(PhotoId(uuidToBareId(tempId))).get()
-			: nullptr;
-		if (tempPhoto) {
-			tempPhoto->uploadingData = std::make_unique<Data::UploadState>(
-				bytes.size());
-		}
 		if (isThreadSend) {
 			addPendingThreadSend(clientId);
 		} else {
@@ -10266,9 +10346,11 @@ bool sendSavedGif(
 				history,
 				Data::HistoryUpdate::Flag::MessageSent);
 		}
-		LOG(("MtsLink Gifs: uploading '%1' (%2 bytes) to %3"
+		LOG(("MtsLink Gifs: uploading '%1' (%2 bytes, mime %3, %4) to %5"
 			).arg(file.name
 			).arg(bytes.size()
+			).arg(file.mime
+			).arg(describeImage(bytes)
 			).arg(chatId));
 		const auto localId = MsgId(uuidToBareId(tempId) & 0x7FFFFFFFLL);
 		const auto upload = std::make_shared<Fn<void()>>();
@@ -10310,13 +10392,6 @@ bool sendSavedGif(
 					tempDocument,
 					fileDownloadUrl(result.id),
 					bytes);
-				if (isImageSticker) {
-					putToImageCache(strong, result.id, bytes);
-				}
-				if (tempPhoto) {
-					tempPhoto->uploadingData = nullptr;
-					tempPhoto->owner().requestPhotoViewRepaint(tempPhoto);
-				}
 				trackSend(
 					strong,
 					peerId,
@@ -10351,22 +10426,12 @@ bool sendSavedGif(
 				tempDocument->uploadingData = nullptr;
 				tempDocument->owner().requestDocumentViewRepaint(
 					tempDocument);
-				if (tempPhoto) {
-					tempPhoto->uploadingData = nullptr;
-					tempPhoto->owner().requestPhotoViewRepaint(tempPhoto);
-				}
 			},
 			[=](qint64 sent, qint64 total) {
 				if (const auto uploading = tempDocument->uploadingData.get()) {
 					uploading->offset = sent;
 					tempDocument->owner().requestDocumentViewRepaint(
 						tempDocument);
-				}
-				if (const auto uploading = tempPhoto
-						? tempPhoto->uploadingData.get()
-						: nullptr) {
-					uploading->offset = sent;
-					tempPhoto->owner().requestPhotoViewRepaint(tempPhoto);
 				}
 			});
 		};
