@@ -2041,10 +2041,8 @@ void SetupChatBackground(
 		tile->toggle(shown(), anim::type::instant);
 	}, tile->lifetime());
 
-	adaptive->toggleOn(controller->adaptive().chatLayoutValue(
-	) | rpl::map([](Window::Adaptive::ChatLayout layout) {
-		return (layout == Window::Adaptive::ChatLayout::Wide);
-	}));
+	// Always shown: hidden in a narrow chat it couldn't be turned off.
+	adaptive->toggle(true, anim::type::instant);
 
 	adaptive->entity()->checkedChanges(
 	) | rpl::on_next([=](bool checked) {

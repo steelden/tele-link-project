@@ -37,7 +37,7 @@ columnMinimalWidthMain: 380px;
 columnMinimalWidthThird: 292px;
 columnMaximalWidthThird: 392px;
 
-adaptiveChatWideWidth: 880px;
+adaptiveChatWideWidth: 560px; // MTS Link: just wider than the wide column (542px).
 
 notifyBorder: windowShadowFgFallback;
 notifyBorderWidth: 1px;
