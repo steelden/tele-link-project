@@ -1994,6 +1994,20 @@ void Session::requestDocumentViewRepaint(
 	}
 }
 
+void Session::requestStickerViewsRefresh() {
+	auto items = std::vector<not_null<HistoryItem*>>();
+	for (const auto &[document, list] : _documentItems) {
+		if (document->sticker()) {
+			for (const auto &item : list) {
+				items.push_back(item);
+			}
+		}
+	}
+	for (const auto &item : items) {
+		requestItemViewRefresh(item);
+	}
+}
+
 void Session::requestPollViewRepaint(not_null<const PollData*> poll) {
 	if (const auto i = _pollViews.find(poll); i != _pollViews.end()) {
 		for (const auto &view : i->second) {

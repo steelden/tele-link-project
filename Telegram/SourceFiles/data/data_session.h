@@ -651,6 +651,8 @@ public:
 	void notifyDocumentLayoutChanged(
 		not_null<const DocumentData*> document);
 	void requestDocumentViewRepaint(not_null<const DocumentData*> document);
+	// MTS Link: the sticker size setting changed, all of them laid out.
+	void requestStickerViewsRefresh();
 	void markMediaRead(not_null<const DocumentData*> document);
 	void requestPollViewRepaint(not_null<const PollData*> poll);
 	void requestTodoListViewRepaint(not_null<const TodoListData*> todolist);

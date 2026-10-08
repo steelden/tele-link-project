@@ -6511,6 +6511,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_materials_record_open" = "Click to watch";
 "lng_mtslink_add_to_stickers" = "Add to stickers";
 "lng_mtslink_remove_from_stickers" = "Remove from stickers";
+"lng_mtslink_sticker_size" = "Sticker size";
+"lng_mtslink_sticker_size_default" = "{size} px (default)";
 "lng_mtslink_import_stickers" = "Import pack";
 "lng_mtslink_import_stickers_title" = "Choose a zip with stickers or sticker images";
 "lng_mtslink_import_stickers_done" = "Sticker pack «{pack}» added";

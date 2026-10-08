@@ -68,6 +68,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "data/data_session.h"
+#include "base/options.h"
+#include "ui/boxes/single_choice_box.h"
 #include "data/data_cloud_themes.h"
 #include "data/data_file_origin.h"
 #include "data/data_message_reactions.h"
@@ -1765,6 +1767,52 @@ void SetupMessages(
 	}, inner->lifetime());
 
 	Ui::AddSkip(inner);
+
+	// MTS Link: the size of the stickers in the chats (the "sticker-size"
+	// option of Telegram, 0 is the default size).
+	{
+		constexpr auto kDefault = 224;
+		static const auto kSizes = std::vector<int>{ 96, 128, 160, 192, 224 };
+		auto &option = base::options::lookup<int>("sticker-size");
+		const auto current = std::make_shared<rpl::variable<int>>(
+			(option.value() > 0) ? option.value() : kDefault);
+		const auto text = [](int size) {
+			return (size == kDefault)
+				? tr::lng_mtslink_sticker_size_default(
+					tr::now,
+					lt_size,
+					QString::number(size))
+				: (QString::number(size) + u" px"_q);
+		};
+		const auto button = AddButtonWithLabel(
+			container,
+			tr::lng_mtslink_sticker_size(),
+			current->value() | rpl::map(text),
+			st::settingsButton,
+			{ &st::menuIconStickers });
+		button->addClickHandler([=] {
+			auto options = std::vector<QString>();
+			for (const auto size : kSizes) {
+				options.push_back(text(size));
+			}
+			const auto selected = int(ranges::find(kSizes, current->current())
+				- begin(kSizes));
+			controller->show(Box(SingleChoiceBox, SingleChoiceBoxArgs{
+				.title = tr::lng_mtslink_sticker_size(),
+				.options = options,
+				.initialSelection = (selected < int(kSizes.size()))
+					? selected
+					: int(kSizes.size()) - 1,
+				.callback = [=](int index) {
+					const auto size = kSizes[index];
+					*current = size;
+					base::options::lookup<int>("sticker-size").set(
+						(size == kDefault) ? 0 : size);
+					controller->session().data().requestStickerViewsRefresh();
+				},
+			}));
+		});
+	}
 }
 
 void SetupArchive(
