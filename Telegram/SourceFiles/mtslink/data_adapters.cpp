@@ -23,6 +23,7 @@ based on Telegram Desktop.
 #include <QtCore/QCollator>
 #include "base/zlib_help.h"
 #include "data/data_session.h"
+#include "data/data_peer_values.h"
 #include "data/data_channel.h"
 #include "data/data_chat_participant_status.h"
 #include "data/data_chat_filters.h"
@@ -1790,10 +1791,6 @@ void requestCallMaterials(
 						});
 				}
 			}
-			LOG(("MtsLink Call: materials of %1 summary=%2 record=%3"
-				).arg(eventId
-				).arg(state.summary ? 1 : 0
-				).arg(state.record ? 1 : 0));
 			const auto old = state.date
 				&& (base::unixtime::now() - state.date > 3600);
 			if ((state.summary && state.record) || (old && !state.polling)) {
@@ -1896,12 +1893,6 @@ void ensureCallMaterials(
 			(record ? state.record : state.summary) = true;
 			state.messages.push_back(msg);
 			showCallMaterial(strong, eventId, std::move(msg));
-		}
-		if (!messages.isEmpty() || done) {
-			LOG(("MtsLink Call: materials of %1 from the cache: %2, done=%3"
-				).arg(eventId
-				).arg(messages.size()
-				).arg(done ? 1 : 0));
 		}
 		requestCallMaterialsIfNeeded(strong, eventId);
 	});
@@ -2189,8 +2180,6 @@ void applyThreadsList(
 			Dialogs::Key(history));
 	}
 
-	LOG(("MtsLink: applied %1 threads as chats")
-		.arg(threads.size()));
 }
 
 QList<Api::ChannelData> PendingChannelsList;
@@ -2721,7 +2710,6 @@ void connectToSession(
 					const auto userId = value.value("userId").toString();
 					const auto prof = value.value("profile").toObject();
 					if (!userId.isEmpty() && !prof.isEmpty()) {
-						LOG(("MtsLink Profile: changed for %1").arg(userId));
 						applyUserData(mainSession, Api::MemberProfile{
 							.userId = userId,
 							.organizationId = value.value(
@@ -2864,6 +2852,12 @@ void connectToSession(
 				const QList<Api::MemberProfile> &members) {
 			MembersLoadedAt.insert(chatId, crl::now());
 			const auto peerId = chatIdToPeerId(chatId);
+			// The presence of each member was requested (Member.GetMember):
+			// 200 requests for a big group, the server rate limit. Only for
+			// the dialogs, the others come with MemberOnline/MemberOffline
+			// and with an opened profile.
+			const auto requestPresence = (chatTypeForPeer(peerId)
+				== ChatType::Dialog);
 			auto &stored = ChatMembersMap[peerId];
 			stored.clear();
 			stored.reserve(members.size());
@@ -2872,7 +2866,8 @@ void connectToSession(
 				const auto bareId = uuidToBareId(m.userId);
 				stored.push_back(bareId);
 				const auto userPeerId = PeerId(::UserId(bareId));
-				if (!PresenceKnownUsers.contains(userPeerId)
+				if (requestPresence
+					&& !PresenceKnownUsers.contains(userPeerId)
 					&& !PresenceRequestedUsers.contains(userPeerId)) {
 					PresenceRequestedUsers.insert(userPeerId);
 					mtsSession->users()->loadPresence(
@@ -2906,11 +2901,6 @@ void connectToSession(
 						rolesLog.push_back(m.userId + u"=Admin"_q);
 					}
 				}
-				LOG(("MtsLink Members: %1 loaded %2, megagroup=%3, admins: %4"
-					).arg(chatId
-					).arg(members.size()
-					).arg(channel->isMegagroup() ? 1 : 0
-					).arg(rolesLog.join(u", "_q)));
 				ChannelOwners.remove(channel->id);
 				auto &roles = ChatMembersRoles[channel->id];
 				roles.clear();
@@ -3055,10 +3045,6 @@ void connectToSession(
 					missing.insert(authorId);
 				}
 			}
-			LOG(("MtsLink Thread: list %1 threads, %2 profiles, %3 missing"
-				).arg(threads.size()
-				).arg(profiles.size()
-				).arg(missing.size()));
 			applyThreadsList(mainSession, threads);
 			for (const auto &authorId : missing) {
 				if (!UserProfileRequested.contains(authorId)) {
@@ -3809,9 +3795,6 @@ void applyDialogData(
 		UserBareIdToUuidMap.insert(bareId, src.interlocutorId);
 	} else {
 		peerId = chatIdToPeerId(src.id, ChatType::Dialog);
-		LOG(("MtsLink Dialog: %1 has no interlocutor, peer %2 by the chat"
-			).arg(src.id
-			).arg(peerId.value));
 	}
 	const auto userId = peerToUser(peerId);
 	const auto user = session->data().user(userId);
@@ -4424,10 +4407,6 @@ void markOutboxReadTill(
 		i.value().remove(msgId);
 		repaintOutbox(session, peerId, msgId);
 	}
-	LOG(("MtsLink Outbox: %1 own messages read in %2 (thread '%3')"
-		).arg(read.size()
-		).arg(peerId.value
-		).arg(parentId));
 }
 
 } // namespace
@@ -5329,14 +5308,8 @@ void handleChatEvent(
 		const auto isThread = !msg.parentId.isEmpty();
 		const auto msgBareId = uuidToBareId(msg.id);
 		const auto msgIdVal = MsgId(msgBareId & 0x7FFFFFFFLL);
-		LOG(("MtsLink NewMsg: id=%1 msgId=%2 isThread=%3 isThreadReply=%4 "
-			"parentId=%5 text=%6")
-			.arg(msg.id).arg(qint64(msgIdVal.bare))
-			.arg(isThread).arg(isThreadReply)
-			.arg(msg.parentId).arg(msg.text.left(50)));
 		HistoryItem *newItem = nullptr;
 		if (isThreadReply) {
-			LOG(("MtsLink NewMsg: treating as thread reply"));
 			replacePendingWithReal(session, chatPeerId, msg, clientId);
 		} else if (!replacePendingWithReal(
 				session,
@@ -5344,10 +5317,6 @@ void handleChatEvent(
 				msg,
 				clientId)) {
 			newItem = addMessage(session, msg, isThread);
-			LOG(("MtsLink NewMsg: addMessage result=%1")
-				.arg(newItem ? "ok" : "null"));
-		} else {
-			LOG(("MtsLink NewMsg: replaced pending message"));
 		}
 		if (const auto mts = session->account().mtsLinkSession()
 			; mts && msg.authorId != mts->userId()) {
@@ -5382,11 +5351,6 @@ void handleChatEvent(
 				// Read already (the open chat at the bottom of the active
 				// window): not counted, an unread bar stopped following it.
 				const auto readAlready = newItem && !newItem->unread(history);
-				LOG(("MtsLink Follow: new %1 in '%2' unread=%3 notify=%4"
-					).arg(msg.id
-					).arg(history->peer->name()
-					).arg(readAlready ? 0 : 1
-					).arg((newItem && newItem->showNotification()) ? 1 : 0));
 				if (!skipUnread
 					&& !readAlready
 					&& history->unreadCountKnown()) {
@@ -5497,13 +5461,10 @@ void handleChatEvent(
 						notification);
 					Core::App().notifications().schedule(notification);
 				}
-			} else if (mts
-				&& mts->threads()
-				&& !ThreadLoadRequested.contains(msg.parentId)) {
-				// A thread missing from the list: subscribed just now.
-				ThreadLoadRequested.insert(msg.parentId);
-				mts->threads()->loadThread(msg.parentId);
 			}
+			// A thread missing from the list is a thread without the
+			// subscription (Chat.GetMyThreadV2 answered thread_not_found),
+			// a new subscription comes with JoinToThreadEvent.
 			const auto history = session->data().history(chatPeerId);
 			const auto last = history->lastMessage();
 			if (last) {
@@ -5616,10 +5577,6 @@ void handleChatEvent(
 			const auto rootId = localMsgId(parentId);
 			const auto entry = threadEntryHistory(session, peerId, rootId);
 			const auto count = value.value("unreadMessageCount").toInt();
-			LOG(("MtsLink Unread: thread event root=%1 entry='%2' count=%3"
-				).arg(rootId.bare
-				).arg(entry ? entry->peer->name() : u"-"_q
-				).arg(count));
 			if (entry) {
 				entry->setUnreadCount(count);
 				session->data().refreshChatListEntry(Dialogs::Key(entry));
@@ -5648,13 +5605,7 @@ void handleChatEvent(
 			return;
 		}
 		const auto count = value.value("unreadMessageCount").toInt();
-		const auto localCount = history->unreadCount();
 		const auto wasReadRequest = consumeReadRequestSent(eventChatId);
-		LOG(("MtsLink Unread: event '%1' count=%2 local=%3 ownRead=%4"
-			).arg(history->peer->name()
-			).arg(count
-			).arg(localCount
-			).arg(wasReadRequest ? 1 : 0));
 		// The server counter is the exact one: a chat read in another
 		// client comes here only (the thread counters have "parentId").
 		history->setUnreadCount(count);
@@ -6048,11 +5999,6 @@ void handleChatEvent(
 		const auto item = messageId.isEmpty()
 			? nullptr
 			: session->data().message(peerId, msgId);
-		LOG(("MtsLink Outbox: read till %1 in %2 (thread '%3'), %4"
-			).arg(messageId
-			).arg(chatId
-			).arg(parentId
-			).arg(item ? "known" : "not loaded"));
 		if (item) {
 			markOutboxReadTill(session, peerId, parentId, item->date());
 		}
@@ -6211,8 +6157,6 @@ void registerMessageId(PeerId peerId, MsgId msgId, const QString &mtsLinkId) {
 }
 
 void setPendingTempMessage(PeerId peerId, MsgId msgId) {
-	LOG(("MtsLink Pending: SET peerId=%1 tempMsgId=%2")
-		.arg(peerId.value).arg(msgId.bare));
 	PendingTempMessages[peerId].push_back(msgId);
 }
 
@@ -6400,8 +6344,6 @@ bool replacePendingWithReal(
 	} else if (inList) {
 		tempMsgId = it->first();
 	} else {
-		LOG(("MtsLink Pending: NOT FOUND for peerId=%1 realId='%2'")
-			.arg(peerId.value).arg(realMsg.id));
 		return false;
 	}
 	if (inList) {
@@ -6410,8 +6352,6 @@ bool replacePendingWithReal(
 			PendingTempMessages.erase(it);
 		}
 	}
-	LOG(("MtsLink Pending: FOUND peerId=%1 tempMsgId=%2 realId='%3'")
-		.arg(peerId.value).arg(tempMsgId.bare).arg(realMsg.id));
 	const auto item = session->data().message(peerId, tempMsgId);
 	if (!item) {
 		return false;
@@ -6471,15 +6411,6 @@ bool replacePendingWithReal(
 	item->setText(parseMentionedText(
 		realMsg.text, realMsg.markdown, realMsg.mentions, session));
 	registerMessageId(peerId, tempMsgId, realMsg.id);
-	LOG(("MtsLink Outbox: sent %1 in %2%3 isRead=%4"
-		).arg(realMsg.id
-		).arg(peerId.value
-		).arg((peerId == favoritesPeerId()) ? " (favorites)" : ""
-		).arg(!realMsg.isRead
-			? "unknown"
-			: *realMsg.isRead
-			? "true"
-			: "false"));
 	if (realMsg.isRead) {
 		setOutboxUnread(
 			session,
@@ -9084,13 +9015,22 @@ QHash<MsgId, ScheduledInfo> ScheduledById; // By the remote id.
 
 } // namespace
 
+// The chats where the scheduled messages can't be got (read only, not a
+// member: ERR_USER_CANNOT_GET_SCHEDULED_MESSAGE_FROM_CHAT_OR_THREAD).
+QSet<QString> NoScheduledChats;
+
 void requestScheduledMessages(
 		not_null<Main::Session*> session,
 		PeerId peerId,
 		Fn<void(QVector<MTPMessage>)> done) {
 	const auto mts = session->account().mtsLinkSession();
 	const auto chatId = peerIdToChatId(peerId);
-	if (!mts || !mts->rpc() || chatId.isEmpty()) {
+	const auto peer = session->data().peerLoaded(peerId);
+	if (!mts
+		|| !mts->rpc()
+		|| chatId.isEmpty()
+		|| NoScheduledChats.contains(chatId)
+		|| (peer && !Data::CanSendAnything(peer))) {
 		done({});
 		return;
 	}
@@ -9108,6 +9048,9 @@ void requestScheduledMessages(
 			const auto strong = weak.get();
 			if (!strong) {
 				return;
+			}
+			if (result.value(u"type"_q).toString() == u"BusinessError"_q) {
+				NoScheduledChats.insert(chatId);
 			}
 			auto list = QVector<MTPMessage>();
 			const auto messages = result.value(u"value"_q).toObject().value(
@@ -9135,9 +9078,6 @@ void requestScheduledMessages(
 				});
 				list.push_back(ScheduledToMTP(strong, peerId, remoteId, obj));
 			}
-			LOG(("MtsLink Scheduled: %1 messages in %2"
-				).arg(list.size()
-				).arg(chatId));
 			done(std::move(list));
 		});
 }
@@ -9157,10 +9097,6 @@ void createScheduledMessage(
 	for (const auto &id : fileIds) {
 		files.push_back(id);
 	}
-	LOG(("MtsLink Scheduled: create in %1 at %2 files=%3"
-		).arg(chatId
-		).arg(date
-		).arg(fileIds.size()));
 	mts->rpc()->call(
 		u"MessageScheduler.CreateMessageScheduled"_q,
 		QJsonObject{
@@ -9247,7 +9183,6 @@ void handleSchedulerEvent(
 	const auto chatId = value.value(u"chatId"_q).toString(
 		value.value(u"messageScheduled"_q).toObject().value(
 			u"chatId"_q).toString());
-	LOG(("MtsLink Scheduled: %1 in %2").arg(type, chatId));
 	if (chatId.isEmpty()) {
 		return;
 	}

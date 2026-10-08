@@ -3054,25 +3054,11 @@ void HistoryWidget::showHistory(
 	controller()->sendingAnimation().clear();
 	_topToast.hide(anim::type::instant);
 	_hiddenSenderTooltip.hide();
-	if (_history && MtsLink::hasChatId(peerId)) {
-		LOG(("MtsLink showHistory: curPeer=%1 targetPeer=%2 way=%3 "
-			"showAt=%4 isThread=%5")
-			.arg(_peer ? _peer->id.value : 0)
-			.arg(peerId.value)
-			.arg(int(params.way))
-			.arg(showAtMsgId.bare)
-			.arg(MtsLink::isThreadPeer(_peer->id)));
-	}
 	if (_history) {
 		const auto isThreadOfTarget = (_peer->id != peerId)
 			&& params.way != Window::SectionShow::Way::Backward
 			&& MtsLink::isThreadPeer(_peer->id)
 			&& MtsLink::threadParentInfo(_peer->id).first == peerId;
-		if (MtsLink::isThreadPeer(_peer->id) && _peer->id != peerId) {
-			LOG(("MtsLink showHistory: from thread peer=%1 to=%2 way=%3 isThreadOfTarget=%4")
-				.arg(_peer->id.value).arg(peerId.value)
-				.arg(int(params.way)).arg(isThreadOfTarget));
-		}
 		if (_peer->id == peerId || isThreadOfTarget) {
 			updateForwarding();
 
@@ -4673,14 +4659,6 @@ void HistoryWidget::newItemAdded(not_null<HistoryItem*> item) {
 	// - on second we get wrong markingMessagesRead() and read both.
 	session().data().sendHistoryChangeNotifications();
 
-	if (MtsLink::hasChatId(_history->peer->id) && !item->out()) {
-		LOG(("MtsLink Follow: widget new item scroll=%1/%2 marking=%3 "
-			"bar=%4"
-			).arg(_scroll->scrollTop()
-			).arg(_scroll->scrollTopMax()
-			).arg(markingMessagesRead() ? 1 : 0
-			).arg(_history->unreadBar() ? 1 : 0));
-	}
 	if (item->isSending()) {
 		synteticScrollToY(_scroll->scrollTopMax());
 	} else if (_scroll->scrollTop() < _scroll->scrollTopMax()) {

@@ -2404,12 +2404,6 @@ void History::setUnreadCount(int newUnreadCount) {
 	if (_unreadCount == newUnreadCount) {
 		return;
 	}
-	if (_unreadCount && MtsLink::hasChatId(peer->id)) {
-		LOG(("MtsLink Unread: '%1' count %2 -> %3"
-			).arg(peer->name()
-			).arg(*_unreadCount
-			).arg(newUnreadCount));
-	}
 	const auto notifier = unreadStateChangeNotifier(useMyUnreadInParent());
 	_unreadCount = newUnreadCount;
 
@@ -2451,10 +2445,6 @@ void History::setUnreadMark(bool unread) {
 	if (unreadMark() == unread) {
 		return;
 	}
-	if (MtsLink::hasChatId(peer->id)) {
-		LOG(("MtsLink Unread: '%1' mark -> %2"
-			).arg(peer->name()).arg(unread ? 1 : 0));
-	}
 	const auto notifier = unreadStateChangeNotifier(
 		useMyUnreadInParent() && !unreadCount());
 	Thread::setUnreadMarkFlag(unread);
@@ -2467,8 +2457,6 @@ void History::mtsLinkSetThreadsMark(bool unread) {
 	if (_mtsLinkThreadsMark == unread) {
 		return;
 	}
-	LOG(("MtsLink Unread: '%1' threads mark -> %2"
-		).arg(peer->name()).arg(unread ? 1 : 0));
 	_mtsLinkThreadsMark = unread;
 	updateChatListEntry();
 }
@@ -3175,16 +3163,6 @@ bool History::isReadyFor(MsgId msgId) {
 }
 
 void History::getReadyFor(MsgId msgId) {
-	if (MtsLink::hasChatId(peer->id)) {
-		const auto ready = isReadyFor(msgId);
-		LOG(("MtsLink Perf: getReadyFor peerId=%1 msgId=%2 "
-			"isReady=%3 blocks=%4 empty=%5")
-			.arg(peer->id.value)
-			.arg(msgId.bare)
-			.arg(Logs::b(ready))
-			.arg(int(blocks.size()))
-			.arg(Logs::b(isEmpty())));
-	}
 	if (msgId < 0 && -msgId < ServerMaxMsgId && peer->migrateFrom()) {
 		const auto migrated = owner().history(peer->migrateFrom()->id);
 		migrated->getReadyFor(-msgId);

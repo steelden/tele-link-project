@@ -1405,14 +1405,6 @@ void ListWidget::checkUnreadBarCreation(bool markLastAsRead) {
 	}
 	_bar = std::move(data.bar);
 	_barText = std::move(data.text);
-	LOG(("MtsLink Follow: unread bar created, markLastAsRead=%1 "
-		"atNewestEdge=%2 marking=%3 scrollInited=%4 items=%5 hidden=%6"
-		).arg(markLastAsRead ? 1 : 0
-		).arg(atNewestEdge() ? 1 : 0
-		).arg(markingMessagesRead() ? 1 : 0
-		).arg(_scrollInited ? 1 : 0
-		).arg(_items.size()
-		).arg(_bar.hidden ? 1 : 0));
 	if (!_bar.hidden) {
 		_bar.element->createUnreadBar(_barText.value());
 		const auto i = ranges::find(_items, not_null{ _bar.element });

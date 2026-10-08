@@ -434,8 +434,6 @@ CallWindow::CallWindow(
 		_layout->addWidget(widget);
 	}
 	_webview->setMessageHandler([=](const QJsonDocument &message) {
-		LOG(("MtsLink Call: page %1").arg(
-			QString::fromUtf8(message.toJson(QJsonDocument::Compact))));
 	});
 	_webview->init(InitScript(language, video));
 	_webview->setNavigationStartHandler([=](QString url, bool newWindow) {

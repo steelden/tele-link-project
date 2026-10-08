@@ -738,7 +738,13 @@ void Histories::sendReadRequest(not_null<History*> history, State &state) {
 				&& MtsLink::isNewerMessageId(newest, mtsId)) {
 				mtsId = newest;
 			}
-			if (!chatId.isEmpty() && !mtsId.isEmpty()) {
+			// A message being sent has a local id (not on the server: "not
+			// found"), the server reads the chat with it itself.
+			const auto tillItem = session().data().message(
+				history->peer,
+				tillId);
+			const auto sending = tillItem && tillItem->isSending();
+			if (!chatId.isEmpty() && !mtsId.isEmpty() && !sending) {
 				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);
 			}

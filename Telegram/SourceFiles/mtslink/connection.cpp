@@ -255,7 +255,8 @@ void Connection::sendMessages(const QJsonArray &messages) {
 void Connection::flushSendQueue() {
 	// The server answers "rateLimitIsReached" and drops requests above
 	// ~50 messages per second (seen on the first login: 84 sent, 34 lost).
-	constexpr auto kMaxPerSecond = 40;
+	// 40 per second got "rateLimitIsReached" too (opening a big group).
+	constexpr auto kMaxPerSecond = 25;
 	constexpr auto kWindow = crl::time(1000);
 	while (!_sendQueue.empty()) {
 		const auto now = crl::now();

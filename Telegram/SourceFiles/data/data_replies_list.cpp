@@ -1602,13 +1602,17 @@ void RepliesList::sendReadTillRequest() {
 					}
 				}
 			}
-			if (!chatId.isEmpty() && !mtsId.isEmpty()) {
+			// A message being sent has a local id (not on the server).
+			const auto tillItem = _history->owner().message(
+				_history->peer->id,
+				tillId);
+			const auto sending = tillItem && tillItem->isSending();
+			if (!chatId.isEmpty() && !mtsId.isEmpty() && !sending) {
 				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);
 			}
-			if (const auto item = _history->owner().message(
-					_history->peer->id, tillId)) {
-				setMtsLinkInboxReadDate(item->date());
+			if (tillItem) {
+				setMtsLinkInboxReadDate(tillItem->date());
 			}
 		}
 		return;
