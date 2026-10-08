@@ -5368,7 +5368,10 @@ void handleChatEvent(
 				}
 				// Someone calls: the incoming call window, in channels only
 				// the notification opens the window to join the call.
-				const auto broadcast = channel && channel->isBroadcast();
+				// A channel of MTS Link (writable channels are megagroups
+				// here): no ringing, the notification and the call bar only.
+				const auto broadcast = (channel && channel->isBroadcast())
+					|| (chatTypeForPeer(chatPeerId) == ChatType::Channel);
 				if (newItem
 					&& !isThread
 					&& msg.type == MessageType::Call
