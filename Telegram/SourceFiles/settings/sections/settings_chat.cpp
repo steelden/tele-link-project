@@ -1829,16 +1829,6 @@ void SetupArchive(
 	)->addClickHandler([=] {
 		showOther(ShortcutsId());
 	});
-
-	PreloadArchiveSettings(&controller->session());
-	AddButtonWithIcon(
-		container,
-		tr::lng_context_archive_settings(),
-		st::settingsButton,
-		{ &st::menuIconArchive }
-	)->addClickHandler([=] {
-		controller->show(Box(Settings::ArchiveSettingsBox, controller));
-	});
 }
 
 void SetupExport(
@@ -2317,9 +2307,6 @@ void SetupChatListQuickAction(
 			addRadio(Type::Mute, tr::lng_settings_quick_dialog_action_mute);
 			addRadio(Type::Pin, tr::lng_settings_quick_dialog_action_pin);
 			addRadio(Type::Read, tr::lng_settings_quick_dialog_action_read);
-			addRadio(
-				Type::Archive,
-				tr::lng_settings_quick_dialog_action_archive);
 			addRadio(
 				Type::Delete,
 				tr::lng_settings_quick_dialog_action_delete);

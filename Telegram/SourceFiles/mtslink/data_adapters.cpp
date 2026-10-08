@@ -17,6 +17,8 @@ based on Telegram Desktop.
 #include "main/main_domain.h"
 #include "storage/storage_account.h"
 #include "storage/file_download.h"
+#include "core/core_settings.h"
+#include "dialogs/ui/dialogs_quick_action.h"
 #include "history/view/history_view_element.h"
 #include "data/stickers/data_stickers_set.h"
 #include <QtGui/QImageReader>
@@ -3157,6 +3159,15 @@ void connectToSession(
 	requestProfileFields(mainSession);
 	restoreSavedGifs(mainSession);
 	restoreLocalStickers(mainSession);
+	// No archiving in MTS Link: the swipe "Archive" is disabled.
+	{
+		using Action = Dialogs::Ui::QuickDialogAction;
+		auto &settings = Core::App().settings();
+		if (settings.quickDialogAction() == Action::Archive) {
+			settings.setQuickDialogAction(Action::Disabled);
+			Core::App().saveSettingsDelayed();
+		}
+	}
 	// The default notification settings are kept locally.
 	restoreDefaultNotify(mainSession);
 }
@@ -4597,6 +4608,21 @@ HistoryItem *addMessage(
 			const auto mtp = buildMtpReactions(src.reactions);
 			if (mtp) {
 				existing->updateReactions(&*mtp);
+			}
+		} else if (!existing->reactions().empty()) {
+			// All the reactions removed (missed the event).
+			existing->updateReactions(nullptr);
+		}
+		if (src.type == MessageType::Text && !existing->isSending()) {
+			// Edited (missed the event): the text of the server.
+			auto text = parseMentionedText(
+				src.text,
+				src.markdown,
+				src.mentions,
+				session);
+			if (existing->originalText() != text) {
+				existing->setText(std::move(text));
+				session->data().requestItemTextRefresh(existing);
 			}
 		}
 		applyThreadChildrenCount(existing, chatPeerId, msgId, src);
@@ -6113,6 +6139,21 @@ void handleChatEvent(
 			applyCallItem(session, item, callMeta);
 			session->data().requestItemViewRefresh(item);
 		}
+	}
+}
+
+void refreshChat(not_null<Main::Session*> session, PeerId peerId) {
+	const auto mts = session->account().mtsLinkSession();
+	const auto chatId = peerIdToChatId(peerId);
+	if (!mts || chatId.isEmpty()) {
+		return;
+	}
+	LOG(("MtsLink: refresh of %1 requested").arg(chatId));
+	mts->messages()->load(chatId);
+	mts->messages()->reloadPinned(chatId);
+	mts->channels()->loadChatInfo(chatId);
+	if (chatTypeForPeer(peerId) != ChatType::Dialog) {
+		mts->users()->loadChatMembers(chatId);
 	}
 }
 

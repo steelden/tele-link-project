@@ -855,7 +855,14 @@ void Filler::addToggleArchive() {
 	}
 	const auto peer = _peer;
 	const auto history = _request.key.history();
-	if (!CanArchive(history, peer)) {
+	// MTS Link: no archiving, "Refresh" (the messages requested again) in
+	// its place, "Unarchive" only for a chat in the archive already.
+	if (history && MtsLink::hasChatId(peer->id)) {
+		_addAction(tr::lng_mtslink_refresh_chat(tr::now), [=] {
+			MtsLink::refreshChat(&peer->session(), peer->id);
+		}, &st::menuIconRestore);
+	}
+	if (!CanArchive(history, peer) || !IsArchived(history)) {
 		return;
 	}
 	const auto isArchived = [=] {

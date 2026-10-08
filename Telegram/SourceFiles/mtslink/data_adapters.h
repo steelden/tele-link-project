@@ -348,6 +348,10 @@ void handleChatEvent(
 	const QString &dst,
 	const QJsonObject &param);
 
+// The chat menu "Refresh": the newest messages (their texts, reactions),
+// the pinned ones and the chat info are requested again.
+void refreshChat(not_null<Main::Session*> session, PeerId peerId);
+
 void deleteMessage(
 	not_null<Main::Session*> session,
 	const ChatId &chatId,
