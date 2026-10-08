@@ -5140,13 +5140,29 @@ void HistoryWidget::loadMessages() {
 				mts->messages(),
 				&MtsLink::Api::Messages::olderMessagesLoaded,
 				this,
-				[this, conn](
+				[this, conn, requestedChatId = chatId, peerId](
 						const MtsLink::ChatId &chatId,
 						const QList<MtsLink::Api::MessageData> &messages,
 						const QList<MtsLink::Api::MemberProfile> &profiles,
 						const QString &rawLastId,
 						int rawCount) {
+					// The answer for any chat comes here (the newer messages
+					// loaded after a reconnect too): only the requested one.
+					if (chatId != requestedChatId) {
+						return;
+					}
 					QObject::disconnect(*conn);
+					const auto shown = _list
+						&& _history
+						&& (_history->peer->id == peerId);
+					if (!shown) {
+						// The chat was closed or changed meanwhile (the list
+						// was used destroyed: a crash), added to its history.
+						MtsLink::addOlderMessages(
+							&session(), chatId, messages, profiles,
+							rawLastId, rawCount);
+						return;
+					}
 					_list->preparePrependAnchor();
 					const auto done = MtsLink::addOlderMessages(
 						&session(), chatId, messages, profiles,
@@ -5370,8 +5386,13 @@ void HistoryWidget::delayedShowAt(
 						MtsLink::addMessage(
 							&session(), src, false, &items);
 					}
+					// The requested chat (the open one may be another now).
 					if (!items.empty()) {
-						_history->addCreatedOlderSlice(items);
+						session().data().history(peerId)->addCreatedOlderSlice(
+							items);
+					}
+					if (!_history || _history->peer->id != peerId) {
+						return;
 					}
 					_delayedShowAtMsgId = -1;
 					if (_historyInited && _history->peer->id == peerId) {

@@ -592,11 +592,16 @@ void RepliesList::loadAround(MsgId id) {
 		const auto conn = std::make_shared<QMetaObject::Connection>();
 		*conn = QObject::connect(msgs,
 			&MtsLink::Api::Messages::threadMessagesLoaded,
-			[this, conn, id, session, peerId, parentId](
+			[this, weak = base::make_weak(this), conn, id, session, peerId, parentId](
 				const QString &loadedChatId,
 				const QString &loadedParentId,
 				const QList<MtsLink::Api::MessageData> &messages,
 				const QList<MtsLink::Api::MemberProfile> &profiles) {
+			if (!weak) {
+				// The thread was unloaded before the answer.
+				QObject::disconnect(*conn);
+				return;
+			}
 			if (loadedParentId != parentId) return;
 			QObject::disconnect(*conn);
 			_loadingAround = std::nullopt;
@@ -771,11 +776,16 @@ void RepliesList::loadBefore() {
 		const auto conn = std::make_shared<QMetaObject::Connection>();
 		*conn = QObject::connect(msgs,
 			&MtsLink::Api::Messages::threadMessagesLoaded,
-			[this, conn, session, peerId, parentId, lastMsgId](
+			[this, weak = base::make_weak(this), conn, session, peerId, parentId, lastMsgId](
 				const QString &loadedChatId,
 				const QString &loadedParentId,
 				const QList<MtsLink::Api::MessageData> &messages,
 				const QList<MtsLink::Api::MemberProfile> &profiles) {
+			if (!weak) {
+				// The thread was unloaded before the answer.
+				QObject::disconnect(*conn);
+				return;
+			}
 			if (loadedParentId != parentId) return;
 			QObject::disconnect(*conn);
 			_loadingAround = std::nullopt;
