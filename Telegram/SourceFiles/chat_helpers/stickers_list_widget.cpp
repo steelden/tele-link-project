@@ -2668,10 +2668,10 @@ base::unique_qptr<Ui::PopupMenu> StickersListWidget::fillContextMenu(
 	const auto isFaved = document->owner().stickers().isFaved(document);
 	menu->addAction(
 		(isFaved
-			? tr::lng_faved_stickers_remove
-			: tr::lng_faved_stickers_add)(tr::now),
+			? tr::lng_mtslink_remove_from_stickers
+			: tr::lng_mtslink_add_to_stickers)(tr::now),
 		toggleFavedSticker,
-		isFaved ? &icons->menuUnfave : &icons->menuFave);
+		isFaved ? &icons->menuRecentRemove : &icons->menuStickerSet);
 
 	if (_features.openStickerSets) {
 		menu->addAction(tr::lng_context_pack_info(tr::now), [=, id = set.id] {

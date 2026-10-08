@@ -3645,9 +3645,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 						}
 						if (!sending) {
 							const auto isFaved = session->data().stickers().isFaved(document);
-							_menu->addAction(isFaved ? tr::lng_faved_stickers_remove(tr::now) : tr::lng_faved_stickers_add(tr::now), [=] {
+							_menu->addAction(isFaved ? tr::lng_mtslink_remove_from_stickers(tr::now) : tr::lng_mtslink_add_to_stickers(tr::now), [=] {
 								Api::ToggleFavedSticker(controller->uiShow(), document, itemId);
-							}, isFaved ? &st::menuIconUnfave : &st::menuIconFave);
+							}, isFaved ? &st::menuIconRemove : &st::menuIconStickers);
 						}
 						if (!hasCopyMediaRestriction(item)) {
 							_menu->addAction(tr::lng_context_save_image(tr::now), base::fn_delayed(st::defaultDropdownMenu.menu.ripple.hideDuration, this, [=] {

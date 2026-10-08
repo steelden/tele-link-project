@@ -488,10 +488,10 @@ void AddDocumentActions(
 		const auto isFaved = document->owner().stickers().isFaved(document);
 		menu->addAction(
 			(isFaved
-				? tr::lng_faved_stickers_remove(tr::now)
-				: tr::lng_faved_stickers_add(tr::now)),
+				? tr::lng_mtslink_remove_from_stickers(tr::now)
+				: tr::lng_mtslink_add_to_stickers(tr::now)),
 			[=] { ToggleFavedSticker(controller, document, contextId); },
-			isFaved ? &st::menuIconUnfave : &st::menuIconFave);
+			isFaved ? &st::menuIconRemove : &st::menuIconStickers);
 	}
 	if (!document->filepath(true).isEmpty()) {
 		menu->addAction(

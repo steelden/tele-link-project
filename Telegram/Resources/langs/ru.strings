@@ -7083,6 +7083,7 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_materials_record_text" = "Запись встречи";
 "lng_mtslink_materials_record_open" = "Нажмите, чтобы посмотреть";
 "lng_mtslink_add_to_stickers" = "Добавить в стикеры";
+"lng_mtslink_remove_from_stickers" = "Убрать из стикеров";
 "lng_mtslink_import_stickers" = "Импорт набора";
 "lng_mtslink_import_stickers_title" = "Выберите zip со стикерами или картинки стикеров";
 "lng_mtslink_import_stickers_done" = "Набор стикеров «{pack}» добавлен";
