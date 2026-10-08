@@ -993,6 +993,15 @@ TextWithEntities parseMentionedText(
 			nameMap[m.userId] = m.name;
 		}
 	}
+	if (source.contains(u"<@u:"_q)) {
+		auto names = QStringList();
+		for (const auto &m : mentions) {
+			names.push_back(m.userId.left(8) + '=' + m.name);
+		}
+		LOG(("MtsLink Mention: parse '%1' mentions=[%2]"
+			).arg(source.left(120)
+			).arg(names.join(u", "_q)));
+	}
 
 	const bool hasMentions = source.contains(u"<@u:"_q);
 	const bool hasMarkdownChars = source.contains('*')
@@ -1102,10 +1111,17 @@ TextWithEntities parseMentionedText(
 	while (pos < len) {
 		if (isTripleBacktick(pos)) {
 			if (inPre) {
+				// The newline before the closing ``` is not in the block
+				// (as in Telegram): a block at the very end of the message
+				// lost its entity with the trimmed last newline.
+				auto preLength = result.size() - preStart;
+				if (preLength > 0 && result.endsWith('\n')) {
+					--preLength;
+				}
 				entities.push_back(EntityInText(
 					EntityType::Pre,
 					preStart,
-					result.size() - preStart,
+					preLength,
 					preLang));
 				preStart = -1;
 				preLang.clear();
