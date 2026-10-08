@@ -126,6 +126,9 @@ public:
 	void loadPreview(const ChatId &chatId, int limit);
 
 	[[nodiscard]] bool isLoading(const ChatId &chatId) const;
+	// The newest messages were loaded at least once in this session (a
+	// failed or timed out request is repeated when the chat is opened).
+	[[nodiscard]] bool loadedOnce(const ChatId &chatId) const;
 	void retryFailedLoads();
 
 	void search(
@@ -228,6 +231,7 @@ private:
 	// counts a deleted newest message as unread until it is read.
 	QHash<ChatId, MessageId> _newestRawIds;
 	QSet<ChatId> _failedChats;
+	QSet<ChatId> _loadedOnceChats;
 	QSet<ChatId> _loadingPinnedChats;
 };
 

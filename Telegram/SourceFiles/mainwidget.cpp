@@ -1699,10 +1699,12 @@ void MainWidget::showHistory(
 	if (peerId && MtsLink::hasChatId(peerId)) {
 		const auto chatId = MtsLink::peerIdToChatId(peerId);
 		if (const auto mts = _controller->session().account().mtsLinkSession()) {
-			static QSet<QString> refreshedThisSession;
-			if (!refreshedThisSession.contains(chatId)
+			// Refreshed once per session: till it succeeds (a failed or
+			// timed out request is repeated on the next open).
+			if (!mts->messages()->loadedOnce(chatId)
+				&& !mts->messages()->isLoading(chatId)
 				&& mts->rpc()->isConnected()) {
-				refreshedThisSession.insert(chatId);
+				LOG(("MtsLink Messages: refresh %1 on open").arg(chatId));
 				mts->messages()->load(chatId);
 			}
 		}
