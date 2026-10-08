@@ -73,6 +73,8 @@ public:
 	// MTS Link: the first page of the thread (after its root), the list
 	// gets a gap below it, the newer pages are loaded by loadAfter().
 	void mtsLinkLoadFromStart(Fn<void()> done);
+	// MTS Link "Refresh": the newest messages of the thread loaded again.
+	void mtsLinkRefresh();
 
 	void requestUnreadCount();
 

@@ -1218,6 +1218,11 @@ void RepliesList::mtsLinkApplyPage(
 	});
 }
 
+void RepliesList::mtsLinkRefresh() {
+	_loadingAround = std::nullopt;
+	loadAround(0);
+}
+
 void RepliesList::mtsLinkLoadFromStart(Fn<void()> done) {
 	if (_skippedBefore == 0) {
 		if (done) {

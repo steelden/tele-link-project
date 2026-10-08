@@ -351,6 +351,12 @@ void handleChatEvent(
 // The chat menu "Refresh": the newest messages (their texts, reactions),
 // the pinned ones and the chat info are requested again.
 void refreshChat(not_null<Main::Session*> session, PeerId peerId);
+// The thread menu "Refresh": the thread (its counter, preview) and its
+// newest messages if it is loaded.
+void refreshThread(
+	not_null<Main::Session*> session,
+	PeerId parentPeerId,
+	MsgId rootId);
 
 void deleteMessage(
 	not_null<Main::Session*> session,

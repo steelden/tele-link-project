@@ -1978,6 +1978,10 @@ void Filler::fillContextMenuActions() {
 				params.mtsLinkOpenChat = true;
 				controller->showPeerHistory(parentPeerId, params, rootId);
 			}, &st::menuIconShowInChat);
+			const auto session = &_peer->session();
+			_addAction(tr::lng_mtslink_refresh_chat(tr::now), [=] {
+				MtsLink::refreshThread(session, parentPeerId, rootId);
+			}, &st::menuIconRestore);
 			MtsLink::fillThreadSubscriptionActions(
 				&_peer->session(),
 				parentPeerId,

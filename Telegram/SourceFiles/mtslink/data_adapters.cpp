@@ -6157,6 +6157,22 @@ void refreshChat(not_null<Main::Session*> session, PeerId peerId) {
 	}
 }
 
+void refreshThread(
+		not_null<Main::Session*> session,
+		PeerId parentPeerId,
+		MsgId rootId) {
+	const auto mts = session->account().mtsLinkSession();
+	const auto threadId = msgIdToMtsLinkId(parentPeerId, rootId);
+	if (!mts || !mts->threads() || threadId.isEmpty()) {
+		return;
+	}
+	LOG(("MtsLink: refresh of the thread %1 requested").arg(threadId));
+	mts->threads()->loadThread(threadId);
+	if (const auto list = cachedRepliesList(parentPeerId, rootId)) {
+		list->mtsLinkRefresh();
+	}
+}
+
 void deleteMessage(
 		not_null<Main::Session*> session,
 		const ChatId &chatId,
