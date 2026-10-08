@@ -495,6 +495,9 @@ Fn<void(bool found)> CornerButtons::doneJumpFrom(
 			}
 		}
 		if (!found && !ignoreMessageNotFound) {
+			LOG(("MtsLink Jump: not found %1 in %2"
+				).arg(targetId.msg.bare
+				).arg(targetId.peer.value));
 			Ui::Toast::Show(
 				_parent.get(),
 				tr::lng_message_not_found(tr::now));

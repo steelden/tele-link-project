@@ -582,6 +582,11 @@ void RepliesList::loadAround(MsgId id) {
 
 	const auto peerId = _history->peer->id;
 	if (MtsLink::hasChatId(peerId)) {
+		LOG(("MtsLink Thread: %1 loaded from the server around %2, %3 in "
+			"memory"
+			).arg(_rootId.bare
+			).arg(id.bare
+			).arg(_list.size()));
 		_loadingAround = id;
 		const auto chatId = MtsLink::peerIdToChatId(peerId);
 		const auto parentId = MtsLink::msgIdToMtsLinkId(peerId, _rootId);
@@ -606,97 +611,35 @@ void RepliesList::loadAround(MsgId id) {
 			QObject::disconnect(*conn);
 			_loadingAround = std::nullopt;
 
-			if (!_mtsLinkInboxReadDate) {
-				_mtsLinkInboxReadDate = _history->mtsLinkInboxReadDate();
-			}
-
-			for (const auto &p : profiles) {
-				MtsLink::applyUserData(session, p);
-			}
-
+			_mtsLinkServerLoaded = true;
 			if (!id) {
-				_skippedAfter = 0;
-			} else {
-				_skippedAfter = std::nullopt;
+				MtsLink::saveThreadToCache(
+					session,
+					loadedChatId,
+					parentId,
+					messages,
+					profiles);
 			}
-			_skippedBefore = std::nullopt;
-			_list.clear();
-
-			// The call materials are local, not in the server answer: a call
-			// without a chat has only them in its thread.
-			const auto locals = MtsLink::callMaterialMessages(
-				peerId,
-				_rootId);
-			if (messages.isEmpty() && locals.empty()) {
-				_fullCount = _skippedBefore = _skippedAfter = 0;
-			} else {
-				_loadingHistorical = true;
-				for (int i = messages.size() - 1; i >= 0; --i) {
-					const auto item = MtsLink::addMessage(
-						session, messages[i], true);
-					if (item) {
-						_list.push_back(item->id);
-					}
-				}
-				_loadingHistorical = false;
-				for (const auto &local : locals) {
-					if (!ranges::contains(_list, local)) {
-						_list.push_back(local);
-					}
-				}
-				auto &owner = _history->owner();
-				for (const auto &msgId : _list) {
-					if (const auto item = owner.message(peerId, msgId)) {
-						if (item->replyToTop() != _rootId) {
-							item->ensureReplyComponent();
-							item->setReplyFields(
-								item->replyToTop() ? item->replyToTop() : _rootId,
-								_rootId,
-								false);
-						}
-						item->updateDependencyItem();
-					}
-				}
-				ranges::sort(_list, [&](MsgId a, MsgId b) {
-					const auto ia = owner.message(peerId, a);
-					const auto ib = owner.message(peerId, b);
-					if (!ia || !ib) return a > b;
-					if (ia->date() != ib->date()) {
-						return ia->date() > ib->date();
-					}
-					return a > b;
-				});
-				_skippedBefore = (messages.size() >= 50) ? 1 : 0;
-				_skippedAfter = 0;
-				if (const auto root = _history->owner().message(peerId, _rootId)) {
-					const auto apiCount = root->repliesCount();
-					if (apiCount > 0) {
-						_fullCount = apiCount;
-					} else if (_skippedBefore == 0) {
-						_fullCount = int(_list.size());
-					}
-				} else {
-					if (_skippedBefore == 0) {
-						_fullCount = int(_list.size());
-					}
-				}
-			}
-			applyMtsLinkRootUnread();
-			checkReadTillEnd();
-			if (id
-				&& id != _rootId
-				&& !ranges::contains(_list, id)
-				&& _skippedBefore.value_or(0) != 0) {
-				LOG(("MtsLink Thread: target %1 is older, loading pages"
-					).arg(id.bare));
-				_mtsLinkSeekId = id;
-				_mtsLinkSeekPages = 0;
-			}
-			_listChanges.fire({});
-			if (_mtsLinkSeekId && !_list.empty()) {
-				loadBefore();
-			}
+			mtsLinkApplyAround(id, messages, profiles);
 		});
+		if (!id && _list.empty() && !_mtsLinkCacheTried) {
+			// Shown from the cache at once, replaced by the server answer.
+			_mtsLinkCacheTried = true;
+			MtsLink::loadThreadFromCache(session, chatId, parentId, [=,
+					weak = base::make_weak(this)](
+					QList<MtsLink::Api::MessageData> messages,
+					QList<MtsLink::Api::MemberProfile> profiles) {
+				if (!weak || _mtsLinkServerLoaded || !_list.empty()) {
+					return;
+				}
+				LOG(("MtsLink Thread: %1 shown from the cache, %2 messages"
+					).arg(_rootId.bare
+					).arg(messages.size()));
+				const auto loading = _loadingAround;
+				mtsLinkApplyAround(0, messages, profiles);
+				_loadingAround = loading;
+			});
+		}
 		msgs->loadThread(chatId, parentId);
 		return;
 	}
@@ -749,6 +692,104 @@ void RepliesList::loadAround(MsgId id) {
 		_history,
 		Histories::RequestType::History,
 		send);
+}
+
+void RepliesList::mtsLinkApplyAround(
+		MsgId id,
+		const QList<MtsLink::Api::MessageData> &messages,
+		const QList<MtsLink::Api::MemberProfile> &profiles) {
+	const auto session = &_history->session();
+	const auto peerId = _history->peer->id;
+	if (!_mtsLinkInboxReadDate) {
+		_mtsLinkInboxReadDate = _history->mtsLinkInboxReadDate();
+	}
+
+	for (const auto &p : profiles) {
+		MtsLink::applyUserData(session, p);
+	}
+
+	if (!id) {
+		_skippedAfter = 0;
+	} else {
+		_skippedAfter = std::nullopt;
+	}
+	_skippedBefore = std::nullopt;
+	_list.clear();
+
+	// The call materials are local, not in the server answer: a call
+	// without a chat has only them in its thread.
+	const auto locals = MtsLink::callMaterialMessages(
+		peerId,
+		_rootId);
+	if (messages.isEmpty() && locals.empty()) {
+		_fullCount = _skippedBefore = _skippedAfter = 0;
+	} else {
+		_loadingHistorical = true;
+		for (int i = messages.size() - 1; i >= 0; --i) {
+			const auto item = MtsLink::addMessage(
+				session, messages[i], true);
+			if (item) {
+				_list.push_back(item->id);
+			}
+		}
+		_loadingHistorical = false;
+		for (const auto &local : locals) {
+			if (!ranges::contains(_list, local)) {
+				_list.push_back(local);
+			}
+		}
+		auto &owner = _history->owner();
+		for (const auto &msgId : _list) {
+			if (const auto item = owner.message(peerId, msgId)) {
+				if (item->replyToTop() != _rootId) {
+					item->ensureReplyComponent();
+					item->setReplyFields(
+						item->replyToTop() ? item->replyToTop() : _rootId,
+						_rootId,
+						false);
+				}
+				item->updateDependencyItem();
+			}
+		}
+		ranges::sort(_list, [&](MsgId a, MsgId b) {
+			const auto ia = owner.message(peerId, a);
+			const auto ib = owner.message(peerId, b);
+			if (!ia || !ib) return a > b;
+			if (ia->date() != ib->date()) {
+				return ia->date() > ib->date();
+			}
+			return a > b;
+		});
+		_skippedBefore = (messages.size() >= 50) ? 1 : 0;
+		_skippedAfter = 0;
+		if (const auto root = _history->owner().message(peerId, _rootId)) {
+			const auto apiCount = root->repliesCount();
+			if (apiCount > 0) {
+				_fullCount = apiCount;
+			} else if (_skippedBefore == 0) {
+				_fullCount = int(_list.size());
+			}
+		} else {
+			if (_skippedBefore == 0) {
+				_fullCount = int(_list.size());
+			}
+		}
+	}
+	applyMtsLinkRootUnread();
+	checkReadTillEnd();
+	if (id
+		&& id != _rootId
+		&& !ranges::contains(_list, id)
+		&& _skippedBefore.value_or(0) != 0) {
+		LOG(("MtsLink Thread: target %1 is older, loading pages"
+			).arg(id.bare));
+		_mtsLinkSeekId = id;
+		_mtsLinkSeekPages = 0;
+	}
+	_listChanges.fire({});
+	if (_mtsLinkSeekId && !_list.empty()) {
+		loadBefore();
+	}
 }
 
 void RepliesList::loadBefore() {

@@ -118,6 +118,11 @@ private:
 		not_null<MessagesSlice*> slice);
 	bool processMessagesIsEmpty(const MTPmessages_Messages &result);
 	void loadAround(MsgId id);
+	// MTS Link: a page around the message (0 - the newest one) applied.
+	void mtsLinkApplyAround(
+		MsgId id,
+		const QList<MtsLink::Api::MessageData> &messages,
+		const QList<MtsLink::Api::MemberProfile> &profiles);
 	void loadBefore();
 	void loadAfter();
 
@@ -140,6 +145,9 @@ private:
 	rpl::event_stream<> _listChanges;
 	rpl::event_stream<> _instantChanges;
 	std::optional<MsgId> _loadingAround;
+	// MTS Link: the server answered (the cached page isn't applied then).
+	bool _mtsLinkServerLoaded = false;
+	bool _mtsLinkCacheTried = false;
 	// MTS Link loads threads from the newest only: older pages are loaded
 	// until the jump target is found.
 	MsgId _mtsLinkSeekId = 0;

@@ -103,6 +103,7 @@ based on Telegram Desktop.
 namespace MtsLink {
 
 constexpr auto kMtsLinkMsgCacheTag = uint64(0xBC01'0000'0000'0000ULL);
+constexpr auto kMtsLinkThreadCacheTag = uint64(0xBC0D'0000'0000'0000ULL);
 
 namespace {
 
@@ -6669,12 +6670,6 @@ void fetchThreadLastRead(
 		[session, peerId, rootId](const QJsonObject &result) {
 			const auto obj = result.value("value").toObject();
 			const auto lastReadId = obj.value("id").toString();
-			if (result.value("type").toString() == u"BusinessError"_q) {
-				LOG(("MtsLink: GetLastReadChildMessage root=%1 error: %2"
-					).arg(rootId.bare
-					).arg(QString::fromUtf8(QJsonDocument(result).toJson(
-						QJsonDocument::Compact))));
-			}
 			if (lastReadId.isEmpty()) {
 				return;
 			}
@@ -6900,6 +6895,58 @@ std::optional<CachedMessages> deserializeMessages(const QByteArray &data) {
 	}
 	return result;
 }
+
+[[nodiscard]] Storage::Cache::Key threadCacheKey(
+		const QString &chatId,
+		const QString &parentId) {
+	const auto hash = QCryptographicHash::hash(
+		(chatId + ':' + parentId).toUtf8(),
+		QCryptographicHash::Md5);
+	uint64 low = 0;
+	memcpy(&low, hash.constData(), sizeof(low));
+	return { kMtsLinkThreadCacheTag, low };
+}
+
+} // namespace
+
+void saveThreadToCache(
+		not_null<Main::Session*> session,
+		const QString &chatId,
+		const QString &parentId,
+		const QList<Api::MessageData> &messages,
+		const QList<Api::MemberProfile> &profiles) {
+	if (chatId.isEmpty() || parentId.isEmpty()) {
+		return;
+	}
+	session->data().cache().put(
+		threadCacheKey(chatId, parentId),
+		serializeMessages(messages, profiles));
+}
+
+void loadThreadFromCache(
+		not_null<Main::Session*> session,
+		const QString &chatId,
+		const QString &parentId,
+		Fn<void(
+			QList<Api::MessageData> messages,
+			QList<Api::MemberProfile> profiles)> done) {
+	if (chatId.isEmpty() || parentId.isEmpty()) {
+		return;
+	}
+	const auto weak = base::make_weak(session);
+	session->data().cache().get(threadCacheKey(chatId, parentId), [=](
+			QByteArray &&data) {
+		crl::on_main(weak, [=, data = std::move(data)] {
+			if (const auto cached = deserializeMessages(data)) {
+				if (!cached->messages.isEmpty()) {
+					done(cached->messages, cached->profiles);
+				}
+			}
+		});
+	});
+}
+
+namespace {
 
 constexpr auto kMtsLinkChatListTag = uint64(0xBC02'0000'0000'0000ULL);
 

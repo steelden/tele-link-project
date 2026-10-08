@@ -351,6 +351,22 @@ void handleChatEvent(
 // The chat menu "Refresh": the newest messages (their texts, reactions),
 // the pinned ones and the chat info are requested again.
 void refreshChat(not_null<Main::Session*> session, PeerId peerId);
+
+// The newest messages of a thread in the session cache (as the chats):
+// shown on the first open, before the server answer.
+void saveThreadToCache(
+	not_null<Main::Session*> session,
+	const QString &chatId,
+	const QString &parentId,
+	const QList<Api::MessageData> &messages,
+	const QList<Api::MemberProfile> &profiles);
+void loadThreadFromCache(
+	not_null<Main::Session*> session,
+	const QString &chatId,
+	const QString &parentId,
+	Fn<void(
+		QList<Api::MessageData> messages,
+		QList<Api::MemberProfile> profiles)> done);
 // The thread menu "Refresh": the thread (its counter, preview) and its
 // newest messages if it is loaded.
 void refreshThread(

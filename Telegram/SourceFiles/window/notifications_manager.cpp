@@ -1412,6 +1412,18 @@ Window::SessionController *Manager::openNotificationMessage(
 	const auto mtsLinkThreadRoot = (item && MtsLink::hasChatId(history->peer->id))
 		? MtsLink::threadRootFor(history->peer->id, item->id)
 		: MsgId();
+	if (MtsLink::hasChatId(history->peer->id)) {
+		LOG(("MtsLink Notify: open %1 item=%2 found=%3 root=%4 threadPeer=%5"
+			).arg(history->peer->id.value
+			).arg(messageId.bare
+			).arg(item ? 1 : 0
+			).arg(mtsLinkThreadRoot.bare
+			).arg(mtsLinkThreadRoot
+				? MtsLink::threadPeerFor(
+					history->peer->id,
+					mtsLinkThreadRoot).value
+				: 0));
+	}
 	if (window && mtsLinkThreadRoot) {
 		window->widget()->showFromTray();
 		using Flag = Data::ChatFilter::Flag;
