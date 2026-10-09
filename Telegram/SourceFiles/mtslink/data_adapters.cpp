@@ -1999,6 +1999,54 @@ void applyThreadNotifiable(
 	const QString &threadId,
 	bool notifiable);
 
+namespace {
+
+// The threads shown from the disk cache before the list from the server.
+bool ThreadsListFromServer = false;
+QHash<QString, QString> CachedThreads; // threadId -> chatId
+QSet<PeerId> CachedThreadUnread;
+
+constexpr auto kMtsLinkThreadsListTag = uint64(0xBC0E'0000'0000'0000ULL);
+
+void saveThreadsListToCache(
+		not_null<Main::Session*> session,
+		const QJsonObject &value) {
+	auto data = QJsonDocument(value).toJson(QJsonDocument::Compact);
+	LOG(("MtsLink Threads: list saved to the cache, %1 bytes."
+		).arg(data.size()));
+	session->data().cache().put(
+		{ kMtsLinkThreadsListTag, 0 },
+		std::move(data));
+}
+
+void loadThreadsListFromCache(not_null<Main::Session*> session) {
+	ThreadsListFromServer = false;
+	CachedThreads.clear();
+	CachedThreadUnread.clear();
+	const auto weak = base::make_weak(session);
+	session->data().cache().get(
+			{ kMtsLinkThreadsListTag, 0 },
+			[=](QByteArray &&data) {
+		crl::on_main(weak, [=, data = std::move(data)] {
+			if (ThreadsListFromServer) {
+				LOG(("MtsLink Threads: cache skipped, the server list."));
+				return;
+			}
+			const auto value = QJsonDocument::fromJson(data).object();
+			const auto mts = weak->account().mtsLinkSession();
+			if (value.isEmpty() || !mts) {
+				LOG(("MtsLink Threads: no list in the cache."));
+				return;
+			}
+			LOG(("MtsLink Threads: list from the cache, %1 threads."
+				).arg(value.value("items").toArray().size()));
+			mts->threads()->applyCachedList(value);
+		});
+	});
+}
+
+} // namespace
+
 void applyThreadsList(
 		not_null<Main::Session*> session,
 		const QList<Api::ThreadData> &threads) {
@@ -2039,8 +2087,12 @@ void applyThreadsList(
 			: base::unixtime::now();
 		history->setChatListTimeId(date);
 
-		if (thread.unreadChildrenCount > 0) {
+		if (thread.unreadChildrenCount > 0
+			|| CachedThreadUnread.remove(peerId)) {
 			history->setUnreadCount(thread.unreadChildrenCount);
+		}
+		if (!ThreadsListFromServer && thread.unreadChildrenCount > 0) {
+			CachedThreadUnread.insert(peerId);
 		}
 
 		const auto rootId = localMsgId(thread.id);
@@ -2361,6 +2413,28 @@ void connectToSession(
 		mtsSession->messages(),
 		[mainSession, mtsSession] {
 			mtsSession->messages()->retryFailedLoads();
+			// The chat shown before the connection (restored at the start)
+			// was not refreshed on opening: refreshed now.
+			const auto window = Core::App().activePrimaryWindow();
+			const auto controller = window
+				? window->sessionController()
+				: nullptr;
+			const auto peer = (controller
+				&& &controller->session() == mainSession.get())
+				? controller->activeChatCurrent().peer()
+				: nullptr;
+			if (peer && hasChatId(peer->id)) {
+				const auto chatId = peerIdToChatId(peer->id);
+				const auto messages = mtsSession->messages();
+				const auto refresh = !messages->loadedOnce(chatId)
+					&& !messages->isLoading(chatId);
+				LOG(("MtsLink Messages: shown %1 on connect, refresh=%2"
+					).arg(chatId
+					).arg(refresh ? 1 : 0));
+				if (refresh) {
+					messages->load(chatId);
+				}
+			}
 			saveCachedUserId(mtsSession->userId());
 			// The messages lost with the connection are sent again.
 			resendPendingSends(mainSession);
@@ -2592,6 +2666,11 @@ void connectToSession(
 					break;
 				}
 			}
+			LOG(("MtsLink Messages: %1 newer of %2 for %3, cached=%4"
+				).arg(newerItems.size()
+				).arg(messages.size()
+				).arg(chatId
+				).arg(hasCachedMessages ? 1 : 0));
 			if (!newerItems.empty()) {
 				const auto history =
 					mainSession->data().history(peerId);
@@ -3038,10 +3117,7 @@ void connectToSession(
 			}
 		});
 
-	QObject::connect(
-		mtsSession->threads(),
-		&Api::Threads::threadsLoaded,
-		[mainSession, mtsSession](
+	const auto onThreadsLoaded = [mainSession, mtsSession](
 				const QList<Api::ThreadData> &threads,
 				const QList<Api::MemberProfile> &profiles) {
 			for (const auto &profile : profiles) {
@@ -3064,7 +3140,21 @@ void connectToSession(
 					missing.insert(authorId);
 				}
 			}
+			LOG(("MtsLink Threads: list received, %1 threads."
+				).arg(threads.size()));
 			applyThreadsList(mainSession, threads);
+			{
+				using Flag = Data::ChatFilter::Flag;
+				auto &filters = mainSession->data().chatsFilters();
+				for (const auto &filter : filters.list()) {
+					if (filter.flags() & Flag::Threads) {
+						const auto list = filters.chatsList(filter.id());
+						LOG(("MtsLink Threads: folder %1 has %2 chats."
+							).arg(filter.id()
+							).arg(list->indexed()->size()));
+					}
+				}
+			}
 			for (const auto &authorId : missing) {
 				if (!UserProfileRequested.contains(authorId)) {
 					UserProfileRequested.insert(authorId);
@@ -3073,7 +3163,56 @@ void connectToSession(
 						mtsSession->organizationId());
 				}
 			}
+		};
+	QObject::connect(
+		mtsSession->threads(),
+		&Api::Threads::threadsLoaded,
+		[=](
+				const QList<Api::ThreadData> &threads,
+				const QList<Api::MemberProfile> &profiles) {
+			onThreadsLoaded(threads, profiles);
+			if (ThreadsListFromServer) {
+				return;
+			}
+			// The first full list from the server: the threads shown
+			// from the cache and left since then are removed.
+			ThreadsListFromServer = true;
+			auto received = QSet<QString>();
+			for (const auto &thread : threads) {
+				received.insert(thread.id);
+			}
+			auto left = 0;
+			for (auto i = CachedThreads.cbegin()
+				; i != CachedThreads.cend()
+				; ++i) {
+				if (!received.contains(i.key())) {
+					applyThreadLeft(mainSession, i.value(), i.key());
+					++left;
+				}
+			}
+			CachedThreads.clear();
+			if (left) {
+				LOG(("MtsLink Threads: %1 cached threads left.").arg(left));
+			}
 		});
+	QObject::connect(
+		mtsSession->threads(),
+		&Api::Threads::cachedThreadsLoaded,
+		[=](
+				const QList<Api::ThreadData> &threads,
+				const QList<Api::MemberProfile> &profiles) {
+			for (const auto &thread : threads) {
+				CachedThreads.insert(thread.id, thread.chatId);
+			}
+			onThreadsLoaded(threads, profiles);
+		});
+	QObject::connect(
+		mtsSession->threads(),
+		&Api::Threads::myThreadsReceived,
+		[mainSession](const QJsonObject &value) {
+			saveThreadsListToCache(mainSession, value);
+		});
+	loadThreadsListFromCache(mainSession);
 	QObject::connect(
 		mtsSession->threads(),
 		&Api::Threads::threadJoined,
@@ -7043,20 +7182,39 @@ Storage::Cache::Key filtersCacheKey() {
 	return { kMtsLinkFiltersTag, 0 };
 }
 
+// The renamed folders: the titles by the languages (a title given in one
+// language is not shown in another one, the default title is shown there).
+struct FolderTitles {
+	QHash<QString, QString> byLanguage;
+	QString last; // Of a folder created by the user: shown without one.
+};
+QHash<FilterId, FolderTitles> FolderTitlesById;
+
+[[nodiscard]] QString currentLanguageId() {
+	return Lang::GetInstance().id();
+}
+
 QByteArray serializeFilters(
 		const std::vector<Data::ChatFilter> &filters) {
 	QByteArray result;
 	QDataStream s(&result, QIODevice::WriteOnly);
 	s.setVersion(QDataStream::Qt_5_1);
 
-	s << qint32(1); // format version
+	s << qint32(2); // format version
 	s << qint32(int(filters.size()));
 	for (const auto &f : filters) {
+		const auto titles = FolderTitlesById.value(f.id());
 		s << qint32(f.id())
-			<< f.titleText().text
+			<< titles.last
 			<< f.iconEmoji()
 			<< qint32(f.colorIndex().value_or(-1))
-			<< quint16(f.flags().value());
+			<< quint16(f.flags().value())
+			<< qint32(titles.byLanguage.size());
+		for (auto i = titles.byLanguage.cbegin()
+			; i != titles.byLanguage.cend()
+			; ++i) {
+			s << i.key() << i.value();
+		}
 	}
 	return result;
 }
@@ -7067,6 +7225,7 @@ struct CachedFilter {
 	QString iconEmoji;
 	std::optional<uint8> colorIndex;
 	Data::ChatFilter::Flags flags;
+	QHash<QString, QString> titles;
 };
 
 std::optional<std::vector<CachedFilter>> deserializeFilters(
@@ -7079,7 +7238,7 @@ std::optional<std::vector<CachedFilter>> deserializeFilters(
 
 	qint32 version = 0;
 	s >> version;
-	if (version != 1) {
+	if (version != 1 && version != 2) {
 		return std::nullopt;
 	}
 
@@ -7096,6 +7255,16 @@ std::optional<std::vector<CachedFilter>> deserializeFilters(
 		qint32 id = 0, colorIdx = 0;
 		quint16 flags = 0;
 		s >> id >> f.title >> f.iconEmoji >> colorIdx >> flags;
+		if (version == 2) {
+			auto titles = qint32();
+			s >> titles;
+			for (auto j = 0; j < titles; ++j) {
+				auto language = QString();
+				auto title = QString();
+				s >> language >> title;
+				f.titles.insert(language, title);
+			}
+		}
 		if (s.status() != QDataStream::Ok) {
 			return std::nullopt;
 		}
@@ -7233,43 +7402,81 @@ void loadChatListFromCache(
 	});
 }
 
-// Default folders keep the title of the language they were created with,
-// a not renamed one is shown in the current language.
+// The default title of a default folder in the current language, empty
+// for a folder created by the user.
 [[nodiscard]] QString defaultFolderTitle(
 		FilterId id,
-		Data::ChatFilter::Flags flags,
-		const QString &title) {
+		Data::ChatFilter::Flags flags) {
 	using Flag = Data::ChatFilter::Flag;
 	struct Default {
 		FilterId id = 0;
 		Flag flag = Flag();
-		QStringList known;
 		QString current;
 	};
 	const auto defaults = std::array<Default, 5>{ {
-		{ 1, Flag::NoRead, { u"Unread"_q, u"Новые"_q, u"Непрочитанные"_q },
-			tr::lng_filters_name_unread(tr::now) },
-		{ 2, Flag::Contacts, { u"People"_q, u"Люди"_q, u"Личные"_q },
-			tr::lng_filters_name_people(tr::now) },
-		{ 3, Flag::Groups, { u"Groups"_q, u"Группы"_q },
-			tr::lng_filters_type_groups(tr::now) },
-		{ 4, Flag::Channels, { u"Channels"_q, u"Каналы"_q },
-			tr::lng_filters_type_channels(tr::now) },
-		{ 5, Flag::Threads, { u"Threads"_q, u"Обсуждения"_q, u"Треды"_q },
-			tr::lng_threads_folder(tr::now) },
+		{ 1, Flag::NoRead, tr::lng_filters_name_unread(tr::now) },
+		{ 2, Flag::Contacts, tr::lng_filters_name_people(tr::now) },
+		{ 3, Flag::Groups, tr::lng_filters_type_groups(tr::now) },
+		{ 4, Flag::Channels, tr::lng_filters_type_channels(tr::now) },
+		{ 5, Flag::Threads, tr::lng_threads_folder(tr::now) },
 	} };
 	for (const auto &entry : defaults) {
-		if (entry.id == id
-			&& (flags & entry.flag)
-			&& entry.known.contains(title)) {
+		if (entry.id == id && (flags & entry.flag)) {
 			return entry.current;
 		}
 	}
-	return title;
+	return QString();
+}
+
+// The old (version 1) titles of the default folders in any language.
+[[nodiscard]] bool knownDefaultFolderTitle(const QString &title) {
+	static const auto known = QStringList{
+		u"Unread"_q, u"Новые"_q, u"Непрочитанные"_q,
+		u"People"_q, u"Люди"_q, u"Личные"_q,
+		u"Groups"_q, u"Группы"_q,
+		u"Channels"_q, u"Каналы"_q,
+		u"Threads"_q, u"Обсуждения"_q, u"Треды"_q,
+	};
+	return known.contains(title);
+}
+
+[[nodiscard]] QString folderTitleToShow(
+		FilterId id,
+		Data::ChatFilter::Flags flags) {
+	const auto titles = FolderTitlesById.value(id);
+	const auto own = titles.byLanguage.value(currentLanguageId());
+	if (!own.isEmpty()) {
+		return own;
+	}
+	const auto standard = defaultFolderTitle(id, flags);
+	return standard.isEmpty() ? titles.last : standard;
 }
 
 void saveFiltersToCache(not_null<Main::Session*> session) {
 	const auto &filters = session->data().chatsFilters().list();
+	const auto language = currentLanguageId();
+	auto log = QStringList();
+	for (const auto &f : filters) {
+		if (!f.id()) {
+			continue;
+		}
+		auto &titles = FolderTitlesById[f.id()];
+		const auto title = f.titleText().text;
+		const auto standard = defaultFolderTitle(f.id(), f.flags());
+		if (title.isEmpty() || title == standard) {
+			titles.byLanguage.remove(language); // Not renamed here.
+		} else {
+			titles.byLanguage.insert(language, title);
+		}
+		if (standard.isEmpty()) {
+			titles.last = title;
+		}
+		log.push_back(u"%1='%2' flags=%3"_q
+			.arg(f.id())
+			.arg(title)
+			.arg(f.flags().value()));
+	}
+	LOG(("MtsLink Folders: saved (%1) %2").arg(language, log.join(u", "_q)));
 	auto data = serializeFilters(filters);
 	session->data().cache().put(filtersCacheKey(), std::move(data));
 }
@@ -7287,13 +7494,43 @@ void loadFiltersFromCache(
 			}
 			const auto strong = weak.get();
 			auto &chatFilters = strong->data().chatsFilters();
-			for (const auto &f : *cached) {
+			auto log = QStringList();
+			using Flag = Data::ChatFilter::Flag;
+			const auto hasThreads = ranges::any_of(*cached, [](
+					const CachedFilter &f) {
+				return (f.flags & Flag::Threads) != 0;
+			});
+			for (auto f : *cached) {
 				if (!f.id) {
 					continue;
 				}
+				auto &titles = FolderTitlesById[f.id];
+				titles.byLanguage = f.titles;
+				titles.last = f.title;
+				if (f.id == FilterId(5) && !hasThreads) {
+					// Lost by the settings applied through the MTP format,
+					// the titles were saved for any language then.
+					LOG(("MtsLink Folders: the threads flag restored."));
+					f.flags |= Flag::Threads;
+					titles.byLanguage.clear();
+				}
+				if (f.titles.isEmpty()
+					&& !f.title.isEmpty()
+					&& !knownDefaultFolderTitle(f.title)
+					&& !defaultFolderTitle(f.id, f.flags).isEmpty()) {
+					// The version 1: a renamed default folder (the language
+					// it was renamed in is not known, the current one).
+					titles.byLanguage.insert(currentLanguageId(), f.title);
+				}
+				const auto title = folderTitleToShow(f.id, f.flags);
+				log.push_back(u"%1='%2' flags=%3 titles=%4"_q
+					.arg(f.id)
+					.arg(title)
+					.arg(f.flags.value())
+					.arg(titles.byLanguage.size()));
 				chatFilters.set(Data::ChatFilter(
 					f.id,
-					{ { defaultFolderTitle(f.id, f.flags, f.title) } },
+					{ { title } },
 					f.iconEmoji,
 					f.colorIndex,
 					f.flags,
@@ -7305,6 +7542,8 @@ void loadFiltersFromCache(
 				order.push_back(f.id);
 			}
 			chatFilters.saveOrder(order);
+			LOG(("MtsLink Folders: loaded (%1) %2"
+				).arg(currentLanguageId(), log.join(u", "_q)));
 			done(true);
 		});
 	});

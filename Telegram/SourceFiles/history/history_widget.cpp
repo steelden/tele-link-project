@@ -5132,7 +5132,8 @@ void HistoryWidget::loadMessages() {
 			return;
 		}
 		if (const auto mts = _history->session().account().mtsLinkSession()) {
-			if (mts->messages()->isLoading(chatId)) {
+			if (mts->messages()->isLoading(chatId)
+				|| mts->messages()->isLoadingOlder(chatId)) {
 				return;
 			}
 			auto conn = std::make_shared<QMetaObject::Connection>();

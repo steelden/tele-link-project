@@ -28,14 +28,15 @@ void Messages::load(
 	}
 
 	const auto isOlder = !fromMessageId.isEmpty();
-	_loadingChats.insert(chatId);
+	const auto loading = isOlder ? &_loadingOlderChats : &_loadingChats;
+	loading->insert(chatId);
 	const auto timer = QPointer<QTimer>(new QTimer(this));
 	timer->setSingleShot(true);
 	timer->start(10000);
 	QObject::connect(timer, &QTimer::timeout, this, [=] {
 		// No answer: repeated with the reconnect or the next open.
 		LOG(("MtsLink Messages: load of %1 timed out").arg(chatId));
-		_loadingChats.remove(chatId);
+		loading->remove(chatId);
 		if (!isOlder) {
 			_failedChats.insert(chatId);
 		}
@@ -50,9 +51,10 @@ void Messages::load(
 	_rpc->call(
 		"Chat.GetMessagesV2",
 		param,
-		[this, chatId, isOlder, finishTimer](const QJsonObject &result) {
+		[this, chatId, isOlder, loading, finishTimer](
+				const QJsonObject &result) {
 			finishTimer();
-			_loadingChats.remove(chatId);
+			loading->remove(chatId);
 			if (!isOlder && result.value("type").toString() != u"BusinessError"_q) {
 				_loadedOnceChats.insert(chatId);
 				_failedChats.remove(chatId);
@@ -106,11 +108,13 @@ void Messages::load(
 					chatId, messages, profiles, rawLastId, rawCount);
 			}
 		},
-		[this, chatId, finishTimer](const QString &error) {
+		[this, chatId, isOlder, loading, finishTimer](const QString &error) {
 			finishTimer();
 			LOG(("MtsLink Messages: load of %1 failed: %2").arg(chatId, error));
-			_loadingChats.remove(chatId);
-			_failedChats.insert(chatId);
+			loading->remove(chatId);
+			if (!isOlder) {
+				_failedChats.insert(chatId);
+			}
 		});
 }
 
@@ -659,6 +663,10 @@ void Messages::loadAround(
 
 bool Messages::isLoading(const ChatId &chatId) const {
 	return _loadingChats.contains(chatId);
+}
+
+bool Messages::isLoadingOlder(const ChatId &chatId) const {
+	return _loadingOlderChats.contains(chatId);
 }
 
 bool Messages::loadedOnce(const ChatId &chatId) const {

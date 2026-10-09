@@ -125,7 +125,10 @@ public:
 
 	void loadPreview(const ChatId &chatId, int limit);
 
+	// The newest messages are loading (not the older ones: the refresh
+	// on opening a chat was skipped while its history was loading).
 	[[nodiscard]] bool isLoading(const ChatId &chatId) const;
+	[[nodiscard]] bool isLoadingOlder(const ChatId &chatId) const;
 	// The newest messages were loaded at least once in this session (a
 	// failed or timed out request is repeated when the chat is opened).
 	[[nodiscard]] bool loadedOnce(const ChatId &chatId) const;
@@ -227,6 +230,7 @@ private:
 
 	Rpc *_rpc = nullptr;
 	QSet<ChatId> _loadingChats;
+	QSet<ChatId> _loadingOlderChats;
 	// The newest message of the chat including deleted ones: the server
 	// counts a deleted newest message as unread until it is read.
 	QHash<ChatId, MessageId> _newestRawIds;

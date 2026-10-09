@@ -36,6 +36,8 @@ public:
 	explicit Threads(Rpc *rpc, QObject *parent = nullptr);
 
 	void loadMyThreads(int limit = 100, int offset = 0);
+	// The list saved from the last "myThreadsReceived" (the disk cache).
+	void applyCachedList(const QJsonObject &value);
 	void loadThread(const MessageId &threadId);
 	void setThreadNotifications(
 		const ChatId &chatId,
@@ -56,9 +58,14 @@ Q_SIGNALS:
 		const MessageId &threadId,
 		bool isNotifiable);
 	void unreadCounterLoaded(int count);
+	void myThreadsReceived(const QJsonObject &value);
+	void cachedThreadsLoaded(
+		const QList<ThreadData> &threads,
+		const QList<MemberProfile> &profiles);
 
 private:
 	[[nodiscard]] ThreadData parseThread(const QJsonObject &obj) const;
+	void applyList(const QJsonObject &value, bool cached);
 	[[nodiscard]] ChatType parseChatType(const QString &type) const;
 
 	Rpc *_rpc = nullptr;

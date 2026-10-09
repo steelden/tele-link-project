@@ -441,25 +441,6 @@ not_null<Ui::VerticalLayout*> SetupFoldersList(
 		const auto row = find(button);
 		if (row->removed || row->removePeersRequestId > 0) {
 			return;
-		} else if (row->filter.chatlist() && !row->removePeersRequestId) {
-			row->removePeersRequestId = session->api().request(
-				MTPchatlists_GetLeaveChatlistSuggestions(
-					MTP_inputChatlistDialogFilter(
-						MTP_int(row->filter.id())))
-			).done(crl::guard(button, [=](const MTPVector<MTPPeer> &result) {
-				const auto row = find(button);
-				row->removePeersRequestId = -1;
-				row->suggestRemovePeers = ranges::views::all(
-					result.v
-				) | ranges::views::transform([=](const MTPPeer &peer) {
-					return session->data().peer(peerFromMTP(peer));
-				}) | ranges::to_vector;
-				markForRemoval(button);
-			})).fail(crl::guard(button, [=] {
-				const auto row = find(button);
-				row->removePeersRequestId = -1;
-				markForRemoval(button);
-			})).send();
 		} else {
 			markForRemoval(button);
 		}
@@ -631,10 +612,11 @@ not_null<Ui::VerticalLayout*> SetupFoldersList(
 		auto updated = Data::ChatFilter();
 
 		auto order = std::vector<FilterId>();
-		auto updates = std::vector<MTPUpdate>();
-		auto addRequests = std::vector<MTPmessages_UpdateDialogFilter>();
-		auto removeRequests = std::vector<MTPmessages_UpdateDialogFilter>();
-		auto removeChatlistRequests = std::vector<MTPchatlists_LeaveChatlist>();
+		// The folders are applied as they are, without the MTP format
+		// (it loses the flags it has no fields for: the "Threads" type).
+		auto changes = std::vector<std::pair<
+			FilterId,
+			std::optional<Data::ChatFilter>>>();
 
 		const auto &realFilters = session->data().chatsFilters();
 		const auto &list = realFilters.list();
@@ -660,42 +642,14 @@ not_null<Ui::VerticalLayout*> SetupFoldersList(
 					updated = row.filter;
 				}
 			}
-			const auto tl = removed
-				? MTPDialogFilter()
-				: row.filter.tl(newId);
-			const auto removeChatlistWithChats = removed
-				&& row.filter.chatlist()
-				&& !row.removePeers.empty();
-			if (removeChatlistWithChats) {
-				auto inputs = ranges::views::all(
-					row.removePeers
-				) | ranges::views::transform([](not_null<PeerData*> peer) {
-					return MTPInputPeer(peer->input());
-				}) | ranges::to<QVector<MTPInputPeer>>();
-				removeChatlistRequests.push_back(
-					MTPchatlists_LeaveChatlist(
-						MTP_inputChatlistDialogFilter(MTP_int(newId)),
-						MTP_vector<MTPInputPeer>(std::move(inputs))));
-			} else {
-				const auto request = MTPmessages_UpdateDialogFilter(
-					MTP_flags(removed
-						? MTPmessages_UpdateDialogFilter::Flag(0)
-						: MTPmessages_UpdateDialogFilter::Flag::f_filter),
-					MTP_int(newId),
-					tl);
-				if (removed) {
-					removeRequests.push_back(request);
-				} else {
-					addRequests.push_back(request);
-					order.push_back(newId);
-				}
+			if (!removed) {
+				order.push_back(newId);
 			}
-			updates.push_back(MTP_updateDialogFilter(
-				MTP_flags(removed
-					? MTPDupdateDialogFilter::Flag(0)
-					: MTPDupdateDialogFilter::Flag::f_filter),
-				MTP_int(newId),
-				tl));
+			changes.emplace_back(
+				newId,
+				removed
+					? std::optional<Data::ChatFilter>()
+					: std::make_optional(row.filter));
 		}
 		if (!ranges::contains(order, FilterId(0))) {
 			auto position = 0;
@@ -721,77 +675,29 @@ not_null<Ui::VerticalLayout*> SetupFoldersList(
 				}
 			}
 		}
-		if (session->account().mtsLinkSession()) {
-			crl::on_main(session, [
-				session,
-				next,
-				updated,
-				order = std::move(order),
-				updates = std::move(updates)
-			] {
-				const auto filters = &session->data().chatsFilters();
-				for (const auto &update : updates) {
-					filters->apply(update);
+		crl::on_main(session, [
+			session,
+			next,
+			updated,
+			order = std::move(order),
+			changes = std::move(changes)
+		] {
+			const auto filters = &session->data().chatsFilters();
+			for (const auto &[id, filter] : changes) {
+				if (filter) {
+					filters->set(*filter);
+				} else {
+					filters->remove(id);
 				}
-				if (!order.empty()) {
-					filters->saveOrder(order);
-				}
-				if (next) {
-					Assert(updated.id() != 0);
-					next(updated);
-				}
-			});
-		} else {
-			crl::on_main(session, [
-				session,
-				next,
-				updated,
-				order = std::move(order),
-				updates = std::move(updates),
-				addRequests = std::move(addRequests),
-				removeRequests = std::move(removeRequests),
-				removeChatlistRequests = std::move(removeChatlistRequests)
-			] {
-				const auto api = &session->api();
-				const auto filters = &session->data().chatsFilters();
-				const auto ids = std::make_shared<
-					base::flat_set<mtpRequestId>
-				>();
-				const auto checkFinished = [=] {
-					if (ids->empty() && next) {
-						Assert(updated.id() != 0);
-						next(updated);
-					}
-				};
-				for (const auto &update : updates) {
-					filters->apply(update);
-				}
-				auto previousId = mtpRequestId(0);
-				const auto sendRequests = [&](const auto &requests) {
-					for (auto &request : requests) {
-						previousId = api->request(
-							std::move(request)
-						).done([=](const auto &result, mtpRequestId id) {
-							if constexpr (std::is_same_v<
-									std::decay_t<decltype(result)>,
-									MTPUpdates>) {
-								session->api().applyUpdates(result);
-							}
-							ids->remove(id);
-							checkFinished();
-						}).afterRequest(previousId).send();
-						ids->emplace(previousId);
-					}
-				};
-				sendRequests(removeRequests);
-				sendRequests(removeChatlistRequests);
-				sendRequests(addRequests);
-				if (!order.empty() && !addRequests.empty()) {
-					filters->saveOrder(order, previousId);
-				}
-				checkFinished();
-			});
-		}
+			}
+			if (!order.empty()) {
+				filters->saveOrder(order);
+			}
+			if (next) {
+				Assert(updated.id() != 0);
+				next(updated);
+			}
+		});
 	};
 
 	return wrap;
@@ -1258,10 +1164,6 @@ rpl::producer<QString> Folders::title() {
 }
 
 void Folders::setupContent() {
-	if (!controller()->session().account().mtsLinkSession()) {
-		controller()->session().data().chatsFilters().requestSuggested();
-	}
-
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
 	const auto state = _state;
 

@@ -21,19 +21,32 @@ void Threads::loadMyThreads(int limit, int offset) {
 		},
 		[this](const QJsonObject &result) {
 			const auto value = result.value("value").toObject();
-			const auto list = value.value("items").toArray();
-			QList<ThreadData> threads;
-			threads.reserve(list.size());
-			for (const auto &item : list) {
-				threads.push_back(parseThread(item.toObject()));
-			}
-			// Authors of the parent messages.
-			QList<MemberProfile> profiles;
-			for (const auto &item : value.value("memberProfiles").toArray()) {
-				profiles.push_back(ParseMemberProfile(item.toObject()));
-			}
-			Q_EMIT threadsLoaded(threads, profiles);
+			Q_EMIT myThreadsReceived(value);
+			applyList(value, false);
 		});
+}
+
+void Threads::applyCachedList(const QJsonObject &value) {
+	applyList(value, true);
+}
+
+void Threads::applyList(const QJsonObject &value, bool cached) {
+	const auto list = value.value("items").toArray();
+	QList<ThreadData> threads;
+	threads.reserve(list.size());
+	for (const auto &item : list) {
+		threads.push_back(parseThread(item.toObject()));
+	}
+	// Authors of the parent messages.
+	QList<MemberProfile> profiles;
+	for (const auto &item : value.value("memberProfiles").toArray()) {
+		profiles.push_back(ParseMemberProfile(item.toObject()));
+	}
+	if (cached) {
+		Q_EMIT cachedThreadsLoaded(threads, profiles);
+	} else {
+		Q_EMIT threadsLoaded(threads, profiles);
+	}
 }
 
 void Threads::loadThread(const MessageId &threadId) {

@@ -285,6 +285,7 @@ void Session::loadChatLists() {
 
 	_channels->loadMyChannels();
 	_channels->loadMyDialogsAndGroupChats();
+	LOG(("MtsLink Threads: requesting the list."));
 	_threads->loadMyThreads();
 	_threads->getUnreadCounter(_organizationId);
 }
