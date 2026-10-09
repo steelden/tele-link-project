@@ -7221,13 +7221,49 @@ QHash<FilterId, FolderTitles> FolderTitlesById;
 	return Lang::GetInstance().id();
 }
 
+// The chats of a folder: the uuid and the type of each (the peer id is
+// built from them).
+struct CachedFolderChat {
+	QString chatId;
+	ChatType type = ChatType::Channel;
+};
+
+template <typename Histories>
+void serializeFolderChats(QDataStream &s, const Histories &histories) {
+	auto chats = std::vector<CachedFolderChat>();
+	for (const auto &history : histories) {
+		const auto chatId = peerIdToChatId(history->peer->id);
+		if (!chatId.isEmpty()) {
+			chats.push_back({ chatId, chatTypeForPeer(history->peer->id) });
+		}
+	}
+	s << qint32(chats.size());
+	for (const auto &chat : chats) {
+		s << chat.chatId << qint32(chat.type);
+	}
+}
+
+[[nodiscard]] std::vector<CachedFolderChat> deserializeFolderChats(
+		QDataStream &s) {
+	auto count = qint32();
+	s >> count;
+	auto result = std::vector<CachedFolderChat>();
+	for (auto i = 0; i < count && s.status() == QDataStream::Ok; ++i) {
+		auto chatId = QString();
+		auto type = qint32();
+		s >> chatId >> type;
+		result.push_back({ chatId, ChatType(type) });
+	}
+	return result;
+}
+
 QByteArray serializeFilters(
 		const std::vector<Data::ChatFilter> &filters) {
 	QByteArray result;
 	QDataStream s(&result, QIODevice::WriteOnly);
 	s.setVersion(QDataStream::Qt_5_1);
 
-	s << qint32(2); // format version
+	s << qint32(3); // format version
 	s << qint32(int(filters.size()));
 	for (const auto &f : filters) {
 		const auto titles = FolderTitlesById.value(f.id());
@@ -7242,6 +7278,10 @@ QByteArray serializeFilters(
 			; ++i) {
 			s << i.key() << i.value();
 		}
+		// Version 3: the chats added, pinned and excluded.
+		serializeFolderChats(s, f.always());
+		serializeFolderChats(s, f.pinned());
+		serializeFolderChats(s, f.never());
 	}
 	return result;
 }
@@ -7253,6 +7293,9 @@ struct CachedFilter {
 	std::optional<uint8> colorIndex;
 	Data::ChatFilter::Flags flags;
 	QHash<QString, QString> titles;
+	std::vector<CachedFolderChat> always;
+	std::vector<CachedFolderChat> pinned;
+	std::vector<CachedFolderChat> never;
 };
 
 std::optional<std::vector<CachedFilter>> deserializeFilters(
@@ -7265,7 +7308,7 @@ std::optional<std::vector<CachedFilter>> deserializeFilters(
 
 	qint32 version = 0;
 	s >> version;
-	if (version != 1 && version != 2) {
+	if (version < 1 || version > 3) {
 		return std::nullopt;
 	}
 
@@ -7282,7 +7325,7 @@ std::optional<std::vector<CachedFilter>> deserializeFilters(
 		qint32 id = 0, colorIdx = 0;
 		quint16 flags = 0;
 		s >> id >> f.title >> f.iconEmoji >> colorIdx >> flags;
-		if (version == 2) {
+		if (version >= 2) {
 			auto titles = qint32();
 			s >> titles;
 			for (auto j = 0; j < titles; ++j) {
@@ -7291,6 +7334,11 @@ std::optional<std::vector<CachedFilter>> deserializeFilters(
 				s >> language >> title;
 				f.titles.insert(language, title);
 			}
+		}
+		if (version >= 3) {
+			f.always = deserializeFolderChats(s);
+			f.pinned = deserializeFolderChats(s);
+			f.never = deserializeFolderChats(s);
 		}
 		if (s.status() != QDataStream::Ok) {
 			return std::nullopt;
@@ -7550,18 +7598,40 @@ void loadFiltersFromCache(
 					titles.byLanguage.insert(currentLanguageId(), f.title);
 				}
 				const auto title = folderTitleToShow(f.id, f.flags);
-				log.push_back(u"%1='%2' flags=%3 titles=%4"_q
+				const auto history = [&](const CachedFolderChat &chat) {
+					return strong->data().history(
+						chatIdToPeerId(chat.chatId, chat.type));
+				};
+				auto always = base::flat_set<not_null<History*>>();
+				for (const auto &chat : f.always) {
+					always.emplace(history(chat));
+				}
+				auto pinned = std::vector<not_null<History*>>();
+				for (const auto &chat : f.pinned) {
+					pinned.push_back(history(chat));
+					always.emplace(pinned.back());
+				}
+				auto never = base::flat_set<not_null<History*>>();
+				for (const auto &chat : f.never) {
+					never.emplace(history(chat));
+				}
+				log.push_back(u"%1='%2' flags=%3 titles=%4 chats=%5/%6/%7"_q
 					.arg(f.id)
 					.arg(title)
 					.arg(f.flags.value())
-					.arg(titles.byLanguage.size()));
+					.arg(titles.byLanguage.size())
+					.arg(always.size())
+					.arg(pinned.size())
+					.arg(never.size()));
 				chatFilters.set(Data::ChatFilter(
 					f.id,
 					{ { title } },
 					f.iconEmoji,
 					f.colorIndex,
 					f.flags,
-					{}, {}, {}));
+					std::move(always),
+					std::move(pinned),
+					std::move(never)));
 			}
 			auto order = std::vector<FilterId>();
 			order.reserve(cached->size());
@@ -7614,6 +7684,12 @@ void setTokenRefreshCallback(std::function<void()> callback) {
 }
 
 void requestTokenRefresh() {
+	if (QThread::currentThread() != QCoreApplication::instance()->thread()) {
+		// From the web file loader thread (a CDN 403): the auth objects
+		// live in the main thread, creating them here crashed TeleLink.
+		crl::on_main([] { requestTokenRefresh(); });
+		return;
+	}
 	if (TokenRefreshInProgress) {
 		return;
 	}
