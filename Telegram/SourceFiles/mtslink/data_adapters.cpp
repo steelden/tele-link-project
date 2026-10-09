@@ -993,16 +993,6 @@ TextWithEntities parseMentionedText(
 			nameMap[m.userId] = m.name;
 		}
 	}
-	if (source.contains(u"<@u:"_q)) {
-		auto names = QStringList();
-		for (const auto &m : mentions) {
-			names.push_back(m.userId.left(8) + '=' + m.name);
-		}
-		LOG(("MtsLink Mention: parse '%1' mentions=[%2]"
-			).arg(source.left(120)
-			).arg(names.join(u", "_q)));
-	}
-
 	const bool hasMentions = source.contains(u"<@u:"_q);
 	const bool hasMarkdownChars = source.contains('*')
 		|| source.contains('~')
@@ -1439,6 +1429,58 @@ TextWithEntities parseMentionedText(
 
 namespace {
 
+[[nodiscard]] bool hasUnknownBlocks(const QJsonArray &blocks) {
+	static const auto known = QStringList{
+		u"LineBreak"_q,
+		u"TextElement"_q,
+		u"MentionElement"_q,
+		u"LinkElement"_q,
+		u"CodeBlock"_q,
+		u"EmojiElement"_q,
+	};
+	for (const auto &b : blocks) {
+		const auto obj = b.toObject();
+		if (!known.contains(obj.value(u"type"_q).toString())) {
+			return true;
+		}
+		const auto elements = obj.value(u"value"_q).toObject().value(
+			u"elements"_q).toArray();
+		if (hasUnknownBlocks(elements)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+} // namespace
+
+void logUnknownBlocks(const QJsonObject &message, const QString &where) {
+	const auto blocks = message.value(u"blocks"_q).toArray();
+	if (!hasUnknownBlocks(blocks)) {
+		return;
+	}
+	LOG(("MtsLink Blocks: unknown in %1 message %2: text='%3' "
+		"markdown='%4' blocks=%5"
+		).arg(where
+		).arg(message.value(u"id"_q).toString(
+			message.value(u"messageId"_q).toString())
+		).arg(message.value(u"text"_q).toString()
+		).arg(message.value(u"markdown"_q).toString()
+		).arg(QString::fromUtf8(
+			QJsonDocument(blocks).toJson(QJsonDocument::Compact))));
+}
+
+namespace {
+
+[[nodiscard]] bool hasCodeBlock(const QJsonArray &blocks) {
+	for (const auto &b : blocks) {
+		if (b.toObject().value(u"type"_q).toString() == u"CodeBlock"_q) {
+			return true;
+		}
+	}
+	return false;
+}
+
 QString markdownFromBlocks(const QJsonArray &blocks) {
 	QString md;
 	for (const auto &b : blocks) {
@@ -1448,6 +1490,19 @@ QString markdownFromBlocks(const QJsonArray &blocks) {
 
 		if (type == u"LineBreak"_q) {
 			md += '\n';
+		} else if (type == u"CodeBlock"_q) {
+			// A block of its own: ``` on separate lines.
+			auto code = value.value(u"code"_q).toString();
+			if (code.endsWith('\n')) {
+				code.chop(1);
+			}
+			if (!md.isEmpty() && !md.endsWith('\n')) {
+				md += '\n';
+			}
+			md += u"```\n"_q + code + u"\n```"_q;
+			md += '\n';
+		} else if (type == u"EmojiElement"_q) {
+			md += value.value(u"symbol"_q).toString();
 		} else if (type == u"TextElement"_q) {
 			const auto text = value.value(u"text"_q).toString();
 			const auto style = value.value(u"style"_q).toObject();
@@ -1482,6 +1537,30 @@ QString markdownFromBlocks(const QJsonArray &blocks) {
 	}
 	return md;
 }
+
+} // namespace
+
+QString messageMarkdown(
+		const QJsonObject &message,
+		bool fallbackToBlocks) {
+	const auto blocks = message.value(u"blocks"_q).toArray();
+	const auto markdown = message.value(u"markdown"_q).toString();
+	// The markdown with ``` has the language of the block (sent so by
+	// TeleLink and the older clients), "CodeBlock" has no language.
+	const auto fenced = markdown.contains(u"```"_q);
+	if (hasCodeBlock(blocks) && !fenced) {
+		auto result = markdownFromBlocks(blocks);
+		while (result.endsWith('\n')) {
+			result.chop(1);
+		}
+		return result;
+	}
+	return (fallbackToBlocks && markdown.isEmpty() && !blocks.isEmpty())
+		? markdownFromBlocks(blocks)
+		: markdown;
+}
+
+namespace {
 
 // Mirrors MTS Link: "Outgoing / Incoming / Missed call" in personal chats,
 // "Group call" elsewhere, with the duration once the call has ended.
@@ -2012,8 +2091,6 @@ void saveThreadsListToCache(
 		not_null<Main::Session*> session,
 		const QJsonObject &value) {
 	auto data = QJsonDocument(value).toJson(QJsonDocument::Compact);
-	LOG(("MtsLink Threads: list saved to the cache, %1 bytes."
-		).arg(data.size()));
 	session->data().cache().put(
 		{ kMtsLinkThreadsListTag, 0 },
 		std::move(data));
@@ -2029,17 +2106,13 @@ void loadThreadsListFromCache(not_null<Main::Session*> session) {
 			[=](QByteArray &&data) {
 		crl::on_main(weak, [=, data = std::move(data)] {
 			if (ThreadsListFromServer) {
-				LOG(("MtsLink Threads: cache skipped, the server list."));
 				return;
 			}
 			const auto value = QJsonDocument::fromJson(data).object();
 			const auto mts = weak->account().mtsLinkSession();
 			if (value.isEmpty() || !mts) {
-				LOG(("MtsLink Threads: no list in the cache."));
 				return;
 			}
-			LOG(("MtsLink Threads: list from the cache, %1 threads."
-				).arg(value.value("items").toArray().size()));
 			mts->threads()->applyCachedList(value);
 		});
 	});
@@ -2428,9 +2501,6 @@ void connectToSession(
 				const auto messages = mtsSession->messages();
 				const auto refresh = !messages->loadedOnce(chatId)
 					&& !messages->isLoading(chatId);
-				LOG(("MtsLink Messages: shown %1 on connect, refresh=%2"
-					).arg(chatId
-					).arg(refresh ? 1 : 0));
 				if (refresh) {
 					messages->load(chatId);
 				}
@@ -2666,11 +2736,6 @@ void connectToSession(
 					break;
 				}
 			}
-			LOG(("MtsLink Messages: %1 newer of %2 for %3, cached=%4"
-				).arg(newerItems.size()
-				).arg(messages.size()
-				).arg(chatId
-				).arg(hasCachedMessages ? 1 : 0));
 			if (!newerItems.empty()) {
 				const auto history =
 					mainSession->data().history(peerId);
@@ -3140,21 +3205,7 @@ void connectToSession(
 					missing.insert(authorId);
 				}
 			}
-			LOG(("MtsLink Threads: list received, %1 threads."
-				).arg(threads.size()));
 			applyThreadsList(mainSession, threads);
-			{
-				using Flag = Data::ChatFilter::Flag;
-				auto &filters = mainSession->data().chatsFilters();
-				for (const auto &filter : filters.list()) {
-					if (filter.flags() & Flag::Threads) {
-						const auto list = filters.chatsList(filter.id());
-						LOG(("MtsLink Threads: folder %1 has %2 chats."
-							).arg(filter.id()
-							).arg(list->indexed()->size()));
-					}
-				}
-			}
 			for (const auto &authorId : missing) {
 				if (!UserProfileRequested.contains(authorId)) {
 					UserProfileRequested.insert(authorId);
@@ -3874,11 +3925,6 @@ void refreshThreadsMark(
 				break;
 			}
 		}
-	}
-	if (history->mtsLinkThreadsMark() != unread) {
-		LOG(("MtsLink ThreadsMark: %1 unread=%2"
-			).arg(peerIdToChatId(chatPeerId)
-			).arg(unread ? 1 : 0));
 	}
 	history->mtsLinkSetThreadsMark(unread);
 }
@@ -5398,18 +5444,13 @@ void handleChatEvent(
 				return;
 			}
 		}
+		logUnknownBlocks(m, u"event"_q);
 		Api::MessageData msg;
 		msg.id = m.value("id").toString();
 		msg.chatId = chatId;
 		msg.authorId = m.value("authorId").toString();
 		msg.text = m.value("text").toString();
-		msg.markdown = m.value("markdown").toString();
-		if (msg.markdown.isEmpty()) {
-			const auto blocksArr = m.value("blocks").toArray();
-			if (!blocksArr.isEmpty()) {
-				msg.markdown = markdownFromBlocks(blocksArr);
-			}
-		}
+		msg.markdown = messageMarkdown(m);
 		msg.createdAt = parseTimestamp(m, "createdAtMs", "createdAt");
 		msg.updatedAt = parseTimestamp(m, "updatedAtMs", "updatedAt");
 		if (m.contains("isRead")) {
@@ -5668,14 +5709,9 @@ void handleChatEvent(
 		deleteMessage(session, chatId, messageId);
 	} else if (type == "MessageUpdatedV2Event") {
 		const auto messageId = value.value("messageId").toString();
+		logUnknownBlocks(value, u"edit"_q);
 		const auto newText = value.value("text").toString();
-		auto newMarkdown = value.value("markdown").toString();
-		if (newMarkdown.isEmpty()) {
-			const auto blocksArr = value.value("blocks").toArray();
-			if (!blocksArr.isEmpty()) {
-				newMarkdown = markdownFromBlocks(blocksArr);
-			}
-		}
+		auto newMarkdown = messageMarkdown(value);
 		const auto updatedAt = value.value("updatedAt").toDouble();
 
 		if (messageId.isEmpty()) {
@@ -5769,16 +5805,6 @@ void handleChatEvent(
 			const auto count = value.value("unreadMessageCount").toInt();
 			const auto pending = PendingThreadUnread.find(
 				qMakePair(peerId, rootId));
-			LOG(("MtsLink ThreadRead: %1 in %2 unread=%3 entry=%4 "
-				"pending=%5 root=%6"
-				).arg(parentId
-				).arg(eventChatId
-				).arg(count
-				).arg(entry ? 1 : 0
-				).arg((pending != PendingThreadUnread.end())
-					? pending.value().count
-					: -1
-				).arg(session->data().message(peerId, rootId) ? 1 : 0));
 			// Read in another client: the replies to a thread without
 			// the subscription are not unread any more (the chat dot).
 			if (pending != PendingThreadUnread.end()) {
@@ -7530,7 +7556,6 @@ void loadChatListFromCache(
 void saveFiltersToCache(not_null<Main::Session*> session) {
 	const auto &filters = session->data().chatsFilters().list();
 	const auto language = currentLanguageId();
-	auto log = QStringList();
 	for (const auto &f : filters) {
 		if (!f.id()) {
 			continue;
@@ -7546,12 +7571,7 @@ void saveFiltersToCache(not_null<Main::Session*> session) {
 		if (standard.isEmpty()) {
 			titles.last = title;
 		}
-		log.push_back(u"%1='%2' flags=%3"_q
-			.arg(f.id())
-			.arg(title)
-			.arg(f.flags().value()));
 	}
-	LOG(("MtsLink Folders: saved (%1) %2").arg(language, log.join(u", "_q)));
 	auto data = serializeFilters(filters);
 	session->data().cache().put(filtersCacheKey(), std::move(data));
 }
@@ -7569,7 +7589,6 @@ void loadFiltersFromCache(
 			}
 			const auto strong = weak.get();
 			auto &chatFilters = strong->data().chatsFilters();
-			auto log = QStringList();
 			using Flag = Data::ChatFilter::Flag;
 			const auto hasThreads = ranges::any_of(*cached, [](
 					const CachedFilter &f) {
@@ -7615,14 +7634,6 @@ void loadFiltersFromCache(
 				for (const auto &chat : f.never) {
 					never.emplace(history(chat));
 				}
-				log.push_back(u"%1='%2' flags=%3 titles=%4 chats=%5/%6/%7"_q
-					.arg(f.id)
-					.arg(title)
-					.arg(f.flags.value())
-					.arg(titles.byLanguage.size())
-					.arg(always.size())
-					.arg(pinned.size())
-					.arg(never.size()));
 				chatFilters.set(Data::ChatFilter(
 					f.id,
 					{ { title } },
@@ -7639,8 +7650,6 @@ void loadFiltersFromCache(
 				order.push_back(f.id);
 			}
 			chatFilters.saveOrder(order);
-			LOG(("MtsLink Folders: loaded (%1) %2"
-				).arg(currentLanguageId(), log.join(u", "_q)));
 			done(true);
 		});
 	});
@@ -7797,6 +7806,11 @@ MtsLinkMessageContent convertMentionsForSending(
 	QMap<int, QString> allMdMarkers;
 	QMap<int, QString> blockMdMarkers;
 
+	// The code blocks: "CodeBlock" elements in the blocks (the new MTS Link
+	// format), ``` in the markdown for the clients without them.
+	struct CodeRange { int offset, length; };
+	QList<CodeRange> codeRanges;
+
 	struct BlockquoteRange { int offset, length; };
 	QList<BlockquoteRange> blockquoteRanges;
 
@@ -7843,8 +7857,7 @@ MtsLinkMessageContent convertMentionsForSending(
 				const auto close = u"\n```"_q;
 				allMdMarkers[tag.offset] += open;
 				allMdMarkers[tag.offset + tag.length] += close;
-				blockMdMarkers[tag.offset] += open;
-				blockMdMarkers[tag.offset + tag.length] += close;
+				codeRanges.push_back({ tag.offset, tag.length });
 			} else {
 				const auto mit = mdMap.constFind(tag.id);
 				if (mit != mdMap.constEnd()) {
@@ -7967,6 +7980,10 @@ MtsLinkMessageContent convertMentionsForSending(
 		splitSet.insert(h.offset);
 		splitSet.insert(h.offset + h.length);
 	}
+	for (const auto &c : codeRanges) {
+		splitSet.insert(c.offset);
+		splitSet.insert(c.offset + c.length);
+	}
 	// The quoted lines start with "> " in the blocks as well, the other
 	// clients show the blocks.
 	QSet<int> quotedLineStarts;
@@ -8002,6 +8019,22 @@ MtsLinkMessageContent convertMentionsForSending(
 		const auto from = splits[si];
 		const auto to = splits[si + 1];
 		if (from >= to) continue;
+
+		const auto inCode = ranges::find_if(codeRanges, [&](
+				const CodeRange &c) {
+			return (from >= c.offset) && (from < c.offset + c.length);
+		});
+		if (inCode != codeRanges.end()) {
+			if (from == inCode->offset) {
+				blocks.append(QJsonObject{
+					{ u"type"_q, u"CodeBlock"_q },
+					{ u"value"_q, QJsonObject{
+						{ u"code"_q, text.mid(inCode->offset, inCode->length) },
+					} },
+				});
+			}
+			continue;
+		}
 
 		const TagHit *inHit = nullptr;
 		for (const auto &h : hits) {

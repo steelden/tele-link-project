@@ -132,6 +132,16 @@ void addThreadEntryUnread(
 // The empty badge of a chat: a thread without the subscription there has
 // new messages (the dot on its loaded root, or the new replies to a root
 // not loaded yet).
+// Diagnostics: the blocks of a message with an element type not known
+// yet (the new code blocks of MTS Link) are logged with the raw message.
+void logUnknownBlocks(const QJsonObject &message, const QString &where);
+
+// The markdown of a message: built from the blocks when they have a code
+// block (MTS Link "CodeBlock", the markdown has no ``` for it then).
+[[nodiscard]] QString messageMarkdown(
+	const QJsonObject &message,
+	bool fallbackToBlocks = true);
+
 void refreshThreadsMark(
 	not_null<Main::Session*> session,
 	PeerId chatPeerId);

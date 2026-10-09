@@ -155,6 +155,7 @@ void Messages::loadPreview(const ChatId &chatId, int limit) {
 }
 
 MessageData Messages::parseMessage(const QJsonObject &obj) const {
+	logUnknownBlocks(obj, u"loaded"_q);
 	QList<FileData> files;
 	const auto filesArray = obj.value("files").toArray();
 	for (const auto &f : filesArray) {
@@ -228,7 +229,7 @@ MessageData Messages::parseMessage(const QJsonObject &obj) const {
 		.chatId = obj.value("chatId").toString(),
 		.authorId = obj.value("authorId").toString(),
 		.text = obj.value("text").toString(),
-		.markdown = obj.value("markdown").toString(),
+		.markdown = messageMarkdown(obj, false),
 		.type = msgType,
 		.blocks = obj.value("blocks").toArray(),
 		.files = files,

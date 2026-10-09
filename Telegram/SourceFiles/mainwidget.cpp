@@ -1706,13 +1706,6 @@ void MainWidget::showHistory(
 				&& mts->rpc()->isConnected()) {
 				LOG(("MtsLink Messages: refresh %1 on open").arg(chatId));
 				mts->messages()->load(chatId);
-			} else {
-				LOG(("MtsLink Messages: no refresh %1 on open, "
-					"loadedOnce=%2 loading=%3 connected=%4"
-					).arg(chatId
-					).arg(mts->messages()->loadedOnce(chatId) ? 1 : 0
-					).arg(mts->messages()->isLoading(chatId) ? 1 : 0
-					).arg(mts->rpc()->isConnected() ? 1 : 0));
 			}
 		}
 	}

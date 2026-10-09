@@ -125,15 +125,6 @@ void Channels::loadChatInfo(const ChatId &chatId) {
 			for (const auto &p : value.value("memberProfiles").toArray()) {
 				ch.memberProfiles.push_back(p.toObject());
 			}
-			if (ch.type == ChatType::Dialog) {
-				LOG(("MtsLink ChatInfo: dialog %1 interlocutor='%2' "
-					"profiles=%3 raw=%4"
-					).arg(ch.id
-					).arg(ch.interlocutorId
-					).arg(ch.memberProfiles.size()
-					).arg(QString::fromUtf8(QJsonDocument(result).toJson(
-						QJsonDocument::Compact)).left(3000)));
-			}
 			if (ch.type == ChatType::Dialog && ch.name.isEmpty()) {
 				const auto profiles = value.value("memberProfiles").toArray();
 				for (const auto &p : profiles) {
