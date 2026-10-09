@@ -10771,10 +10771,21 @@ struct ImportedImage {
 			|| lower.endsWith(u".jpeg"_q));
 }
 
-[[nodiscard]] std::vector<ImportedImage> ReadPackZip(const QString &path) {
+constexpr auto kPackManifestName = "pack.json";
+constexpr auto kPackCoverBaseName = "cover";
+
+struct ZipPack {
+	std::vector<ImportedImage> images;
+	std::optional<ImportedImage> cover;
+	QString title;
+};
+
+// A zip of stickers, an exported pack has "pack.json" (the title, the order
+// and the emoji of the stickers) and its cover ("cover.*").
+[[nodiscard]] ZipPack ReadPackZip(const QString &path) {
 	constexpr auto kMaxZipSize = 100 * 1024 * 1024;
 	constexpr auto kMaxImageSize = 10 * 1024 * 1024;
-	auto result = std::vector<ImportedImage>();
+	auto result = ZipPack();
 	auto f = QFile(path);
 	if (f.size() > kMaxZipSize || !f.open(QIODevice::ReadOnly)) {
 		LOG(("MtsLink Stickers: can't read %1").arg(path));
@@ -10785,16 +10796,43 @@ struct ImportedImage {
 		LOG(("MtsLink Stickers: not a zip %1").arg(path));
 		return result;
 	}
+	auto manifest = QJsonObject();
 	do {
 		const auto name = zip.getCurrentFileName();
-		if (IsPackImageName(name)) {
+		const auto file = QFileInfo(name).fileName();
+		if (file == QLatin1String(kPackManifestName)) {
+			manifest = QJsonDocument::fromJson(
+				zip.readCurrentFileContent(kMaxImageSize)).object();
+		} else if (IsPackImageName(name)) {
 			auto bytes = zip.readCurrentFileContent(kMaxImageSize);
-			if (!bytes.isEmpty() && zip.error() == UNZ_OK) {
-				result.push_back({ QFileInfo(name).fileName(), bytes });
+			if (bytes.isEmpty() || zip.error() != UNZ_OK) {
+				continue;
+			} else if (QFileInfo(file).completeBaseName()
+				== QLatin1String(kPackCoverBaseName)) {
+				result.cover = ImportedImage{ file, bytes };
+			} else if (int(result.images.size()) < kMaxPackStickers) {
+				result.images.push_back({ file, bytes });
 			}
 		}
-	} while (zip.goToNextFile() == UNZ_OK
-		&& int(result.size()) < kMaxPackStickers);
+	} while (zip.goToNextFile() == UNZ_OK);
+	if (!manifest.isEmpty()) {
+		result.title = manifest.value(u"title"_q).toString();
+		auto emoji = QHash<QString, QString>();
+		for (const auto &value : manifest.value(u"stickers"_q).toArray()) {
+			const auto sticker = value.toObject();
+			emoji.insert(
+				sticker.value(u"file"_q).toString(),
+				sticker.value(u"emoji"_q).toString());
+		}
+		for (auto &image : result.images) {
+			image.emoji = emoji.value(image.name);
+		}
+	}
+	LOG(("MtsLink Stickers: zip %1: %2 stickers, cover=%3, manifest=%4"
+		).arg(path
+		).arg(result.images.size()
+		).arg(result.cover ? 1 : 0
+		).arg(manifest.isEmpty() ? 0 : 1));
 	return result;
 }
 
@@ -10869,11 +10907,16 @@ void importStickerPack(
 		}
 		const auto &paths = result.paths;
 		auto images = std::vector<ImportedImage>();
+		auto cover = std::optional<ImportedImage>();
 		auto title = QString();
 		if (paths.size() == 1
 			&& paths.front().endsWith(u".zip"_q, Qt::CaseInsensitive)) {
-			images = ReadPackZip(paths.front());
-			title = QFileInfo(paths.front()).completeBaseName();
+			auto zip = ReadPackZip(paths.front());
+			images = std::move(zip.images);
+			cover = std::move(zip.cover);
+			title = zip.title.isEmpty()
+				? QFileInfo(paths.front()).completeBaseName()
+				: zip.title;
 		} else {
 			for (const auto &path : paths) {
 				if (!IsPackImageName(path)
@@ -10896,7 +10939,151 @@ void importStickerPack(
 		LOG(("MtsLink Stickers: import '%1' from %2 files"
 			).arg(title
 			).arg(paths.size()));
-		addImportedPack(strong, title, std::move(images), showToast);
+		addImportedPack(
+			strong,
+			title,
+			std::move(images),
+			showToast,
+			std::move(cover));
+	});
+}
+
+bool isLocalStickerPack(uint64 setId) {
+	return LocalPackIds.contains(setId);
+}
+
+void exportStickerPack(
+		not_null<Main::Session*> session,
+		std::shared_ptr<Ui::Show> show,
+		QPointer<QWidget> parent,
+		uint64 setId) {
+	const auto &sets = session->data().stickers().sets();
+	const auto i = sets.find(setId);
+	if (i == sets.end() || !LocalPackIds.contains(setId)) {
+		return;
+	}
+	const auto title = i->second->title;
+	const auto stickers = localStickersOf(i->second->stickers);
+	const auto covers = localStickersOf(i->second->covers);
+	const auto weak = base::make_weak(session);
+	auto fileName = title;
+	fileName.replace(QRegularExpression(u"[\\\\/:*?\"<>|]"_q), u"_"_q);
+	FileDialog::GetWritePath(
+		parent,
+		tr::lng_mtslink_export_pack_title(tr::now),
+		u"Sticker pack (*.zip)"_q,
+		(fileName.isEmpty() ? u"stickers"_q : fileName) + u".zip"_q,
+		[=](const QString &path) {
+		const auto strong = weak.get();
+		if (!strong || path.isEmpty()) {
+			return;
+		}
+		// The contents from the cache (asynchronous), then the zip.
+		struct Entry {
+			QString file;
+			QString emoji;
+			QByteArray bytes;
+		};
+		struct State {
+			std::vector<Entry> entries;
+			int waiting = 0;
+		};
+		const auto state = std::make_shared<State>();
+		const auto suffixOf = [](const LocalSticker &sticker) {
+			const auto lower = sticker.name.toLower();
+			return lower.endsWith(u".webm"_q)
+				? u"webm"_q
+				: QFileInfo(lower).suffix();
+		};
+		auto all = stickers;
+		for (const auto &sticker : covers) {
+			all.push_back(sticker);
+		}
+		state->entries.resize(all.size());
+		state->waiting = int(all.size());
+		const auto finish = [=] {
+			auto zip = zlib::FileToWrite();
+			auto manifest = QJsonArray();
+			auto written = 0;
+			zip_fileinfo info = { { 0, 0, 0, 0, 0, 0 }, 0, 0, 0 };
+			for (const auto &entry : state->entries) {
+				if (entry.bytes.isEmpty()) {
+					continue;
+				}
+				const auto file = entry.file.toUtf8();
+				zip.openNewFile(
+					file.constData(),
+					&info,
+					nullptr,
+					0,
+					nullptr,
+					0,
+					nullptr,
+					Z_DEFLATED,
+					Z_DEFAULT_COMPRESSION);
+				zip.writeInFile(entry.bytes.constData(), entry.bytes.size());
+				zip.closeFile();
+				if (!entry.file.startsWith(QLatin1String(kPackCoverBaseName))) {
+					manifest.push_back(QJsonObject{
+						{ u"file"_q, entry.file },
+						{ u"emoji"_q, entry.emoji },
+					});
+				}
+				++written;
+			}
+			const auto json = QJsonDocument(QJsonObject{
+				{ u"title"_q, title },
+				{ u"stickers"_q, manifest },
+			}).toJson();
+			zip.openNewFile(
+				kPackManifestName,
+				&info,
+				nullptr,
+				0,
+				nullptr,
+				0,
+				nullptr,
+				Z_DEFLATED,
+				Z_DEFAULT_COMPRESSION);
+			zip.writeInFile(json.constData(), json.size());
+			zip.closeFile();
+			zip.close();
+			auto f = QFile(path);
+			const auto ok = (zip.error() == ZIP_OK)
+				&& f.open(QIODevice::WriteOnly)
+				&& (f.write(zip.result()) == zip.result().size());
+			LOG(("MtsLink Stickers: export '%1' to %2: %3 files, ok=%4"
+				).arg(title
+				).arg(path
+				).arg(written
+				).arg(ok ? 1 : 0));
+			show->showToast(ok
+				? tr::lng_mtslink_export_pack_done(tr::now, lt_pack, title)
+				: tr::lng_mtslink_export_pack_failed(tr::now));
+		};
+		if (all.isEmpty()) {
+			finish();
+			return;
+		}
+		for (auto index = 0; index != all.size(); ++index) {
+			const auto &sticker = all[index];
+			const auto cover = (index >= stickers.size());
+			state->entries[index].file = cover
+				? (QLatin1String(kPackCoverBaseName) + '.' + suffixOf(sticker))
+				: u"%1.%2"_q.arg(index + 1, 3, 10, QChar('0')).arg(
+					suffixOf(sticker));
+			state->entries[index].emoji = sticker.emoji;
+			strong->data().cache().get(
+				stickerBytesCacheKey(sticker.key),
+				[=](QByteArray &&bytes) {
+				crl::on_main([=, bytes = std::move(bytes)]() mutable {
+					state->entries[index].bytes = std::move(bytes);
+					if (!--state->waiting) {
+						finish();
+					}
+				});
+			});
+		}
 	});
 }
 

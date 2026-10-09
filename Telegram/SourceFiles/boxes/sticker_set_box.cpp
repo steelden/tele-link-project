@@ -73,6 +73,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_dialogs.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
+#include "mtslink/data_adapters.h"
 #include "styles/style_premium.h"
 #include "styles/style_window.h"
 
@@ -1114,6 +1115,46 @@ void StickerSetBox::updateButtons() {
 				if (fillSetCreatorFooter) {
 					fillSetCreatorFooter(raw);
 				}
+				raw->setForcedOrigin(
+					Ui::PanelAnimation::Origin::TopRight);
+				top->setForceRippled(true);
+				raw->setDestroyedCallback([top] {
+					crl::on_main(top, [top] {
+						if (const auto strong = top.data()) {
+							strong->setForceRippled(false);
+						}
+					});
+				});
+				const auto position = QPoint(
+					top->width(),
+					top->height() - st::lineWidth * 3);
+				raw->popup(top->mapToGlobal(position));
+				return true;
+			});
+		} else if (MtsLink::isLocalStickerPack(_inner->setId())) {
+			// MTS Link: an imported pack, no link of Telegram.
+			const auto top = addTopButton(st::stickerSetBoxMenu);
+			using MenuPointer = base::unique_qptr<Ui::PopupMenu>;
+			const auto menu = top->lifetime().make_state<MenuPointer>();
+			const auto setId = _inner->setId();
+			top->setClickedCallback([=] {
+				*menu = base::make_unique_q<Ui::PopupMenu>(
+					top,
+					st::popupMenuWithIcons);
+				const auto raw = menu->get();
+				raw->addAction(tr::lng_mtslink_export_pack(tr::now), [=] {
+					MtsLink::exportStickerPack(_session, _show, this, setId);
+				}, &st::menuIconExport);
+				raw->addSeparator();
+				raw->addAction(tr::lng_mtslink_remove_pack(tr::now), [=] {
+					auto box = ChatHelpers::MakeConfirmRemoveSetBox(
+						_session,
+						st::boxLabel,
+						setId);
+					if (box) {
+						_show->showBox(std::move(box));
+					}
+				}, &st::menuIconDelete);
 				raw->setForcedOrigin(
 					Ui::PanelAnimation::Origin::TopRight);
 				top->setForceRippled(true);

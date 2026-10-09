@@ -2818,6 +2818,24 @@ base::unique_qptr<Ui::PopupMenu> FillStickerSetContextMenu(
 		Fn<void()> repaint,
 		const style::PopupMenu &menuSt,
 		const style::ComposeIcons &icons) {
+	// MTS Link: an imported pack, no link of Telegram.
+	if (MtsLink::isLocalStickerPack(set->id)) {
+		const auto session = &set->session();
+		const auto setId = set->id;
+		auto menu = base::make_unique_q<Ui::PopupMenu>(parent, menuSt);
+		menu->addAction(
+			tr::lng_mtslink_export_pack(tr::now),
+			[=] {
+				MtsLink::exportStickerPack(session, show, parent.get(), setId);
+			},
+			&st::menuIconExport);
+		menu->addSeparator();
+		menu->addAction(
+			tr::lng_mtslink_remove_pack(tr::now),
+			[=] { remove(setId); },
+			&icons.menuSetRemove);
+		return menu;
+	}
 	if (set->shortName.isEmpty()
 		|| (set->id == Data::Stickers::MegagroupSetId)
 		|| (set->id == Data::Stickers::CollectibleSetId)) {

@@ -312,6 +312,15 @@ void importTelegramStickerPack(
 	not_null<Main::Session*> session,
 	std::shared_ptr<Ui::Show> show);
 [[nodiscard]] bool hasTelegramBotToken();
+
+// An imported (local) pack: no link, exported to a zip (the stickers, the
+// cover and "pack.json" with the title and the emoji) or removed.
+[[nodiscard]] bool isLocalStickerPack(uint64 setId);
+void exportStickerPack(
+	not_null<Main::Session*> session,
+	std::shared_ptr<Ui::Show> show,
+	QPointer<QWidget> parent,
+	uint64 setId);
 void editTelegramBotToken(
 	std::shared_ptr<Ui::Show> show,
 	Fn<void()> saved = nullptr);

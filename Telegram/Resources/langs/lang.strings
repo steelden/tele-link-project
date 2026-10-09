@@ -6534,6 +6534,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_telegram_bot_token_none" = "Not set";
 "lng_mtslink_telegram_bot_token_about" = "Create a bot with @BotFather in Telegram and paste its token here. It is used only to download sticker packs from Telegram and is kept on this computer.";
 "lng_mtslink_import_files" = "From files";
+"lng_mtslink_export_pack" = "Export pack";
+"lng_mtslink_export_pack_title" = "Save the sticker pack";
+"lng_mtslink_export_pack_done" = "Sticker pack «{pack}» saved";
+"lng_mtslink_export_pack_failed" = "Could not save the sticker pack";
+"lng_mtslink_remove_pack" = "Remove pack";
 "lng_mtslink_info_email" = "Email";
 "lng_mtslink_info_position" = "Position";
 "lng_mtslink_info_department" = "Department";
