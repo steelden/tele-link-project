@@ -2246,8 +2246,7 @@ void applyThreadsList(
 				fromId = PeerId(::UserId(authorBareId));
 				msgFlags |= MessageFlag::HasFromId;
 			}
-			const auto markdown =
-				thread.message.value("markdown").toString();
+			const auto markdown = messageMarkdown(thread.message);
 			QList<Api::MentionInfo> mentions;
 			auto mentionsArray = thread.message.value("metadata")
 				.toObject().value("value").toObject()
@@ -2275,6 +2274,8 @@ void applyThreadsList(
 				if (existing->originalText() != text) {
 					existing->setText(std::move(text));
 					session->data().requestItemTextRefresh(existing);
+					// The preview of the thread in the chats list.
+					existing->invalidateChatListEntry();
 				}
 			} else {
 				history->addNewLocalMessage(
@@ -5309,6 +5310,27 @@ void removeStaleChannels(
 	return result;
 }
 
+namespace {
+
+Storage::Cache::Key messageCacheKey(const QString &chatId);
+[[nodiscard]] Storage::Cache::Key threadCacheKey(
+	const QString &chatId,
+	const QString &parentId);
+
+} // namespace
+
+void applyEditToCachedMessages(
+	not_null<Main::Session*> session,
+	Storage::Cache::Key key,
+	const QString &messageId,
+	const QJsonObject &edit,
+	const QString &markdown,
+	const QList<Api::MentionInfo> &mentions);
+void applyEditToCachedThreadsList(
+	not_null<Main::Session*> session,
+	const QString &messageId,
+	const QJsonObject &edit);
+
 void handleChatEvent(
 		not_null<Main::Session*> session,
 		const QString &dst,
@@ -5745,6 +5767,41 @@ void handleChatEvent(
 			}
 			session->data().requestItemViewRefresh(existing);
 			existing->invalidateChatListEntry();
+		}
+		// The root of a thread: its copy is the preview in the chats list.
+		const auto rootId = localMsgId(messageId);
+		if (const auto threadPeer = ThreadReverseMap.value(
+				{ chatPeerId, rootId })) {
+			if (const auto root = session->data().message(
+					threadPeer,
+					rootId)) {
+				root->setText(parseMentionedText(
+					newText, newMarkdown, mentions, session));
+				session->data().requestItemTextRefresh(root);
+				root->invalidateChatListEntry();
+			}
+			applyEditToCachedThreadsList(session, messageId, value);
+		}
+		// Not to show the old text from the cache after a restart.
+		applyEditToCachedMessages(
+			session,
+			messageCacheKey(chatId),
+			messageId,
+			value,
+			newMarkdown,
+			mentions);
+		auto parentId = value.value("parentId").toString();
+		if (parentId.isEmpty() && existing && existing->replyToTop()) {
+			parentId = msgIdToMtsLinkId(chatPeerId, existing->replyToTop());
+		}
+		if (!parentId.isEmpty()) {
+			applyEditToCachedMessages(
+				session,
+				threadCacheKey(chatId, parentId),
+				messageId,
+				value,
+				newMarkdown,
+				mentions);
 		}
 	} else if (type == "MessageFileDeletedV2Event") {
 		const auto messageId = value.value("messageId").toString();
@@ -7213,6 +7270,84 @@ void saveThreadToCache(
 	session->data().cache().put(
 		threadCacheKey(chatId, parentId),
 		serializeMessages(messages, profiles));
+}
+
+// An edited message in a cached page (of a chat or of a thread).
+void applyEditToCachedMessages(
+		not_null<Main::Session*> session,
+		Storage::Cache::Key key,
+		const QString &messageId,
+		const QJsonObject &edit,
+		const QString &markdown,
+		const QList<Api::MentionInfo> &mentions) {
+	const auto weak = base::make_weak(session);
+	session->data().cache().get(key, [=](QByteArray &&data) {
+		crl::on_main(weak, [=, data = std::move(data)] {
+			auto cached = deserializeMessages(data);
+			if (!cached) {
+				return;
+			}
+			auto found = false;
+			for (auto &m : cached->messages) {
+				if (m.id != messageId) {
+					continue;
+				}
+				m.text = edit.value("text").toString();
+				m.markdown = markdown;
+				m.blocks = edit.value("blocks").toArray();
+				m.mentions = mentions;
+				if (const auto updatedAt = edit.value("updatedAt").toDouble()
+					; updatedAt > 0) {
+					m.updatedAt = qint64(updatedAt);
+				}
+				found = true;
+			}
+			if (found) {
+				weak->data().cache().put(
+					key,
+					serializeMessages(cached->messages, cached->profiles));
+			}
+		});
+	});
+}
+
+// An edited thread root in the cached list of the threads.
+void applyEditToCachedThreadsList(
+		not_null<Main::Session*> session,
+		const QString &messageId,
+		const QJsonObject &edit) {
+	const auto weak = base::make_weak(session);
+	const auto key = Storage::Cache::Key{ kMtsLinkThreadsListTag, 0 };
+	session->data().cache().get(key, [=](QByteArray &&data) {
+		crl::on_main(weak, [=, data = std::move(data)] {
+			auto value = QJsonDocument::fromJson(data).object();
+			auto items = value.value("items").toArray();
+			auto found = false;
+			for (auto i = 0; i != items.size(); ++i) {
+				auto item = items[i].toObject();
+				auto message = item.value("message").toObject();
+				if (message.value("id").toString() != messageId) {
+					continue;
+				}
+				for (const auto field : { "text", "markdown", "blocks" }) {
+					if (edit.contains(field)) {
+						message.insert(field, edit.value(field));
+					} else {
+						message.remove(field);
+					}
+				}
+				item.insert("message", message);
+				items[i] = item;
+				found = true;
+			}
+			if (found) {
+				value.insert("items", items);
+				weak->data().cache().put(
+					key,
+					QJsonDocument(value).toJson(QJsonDocument::Compact));
+			}
+		});
+	});
 }
 
 void loadThreadFromCache(
