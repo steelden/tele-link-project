@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_replies_list.h"
 
+#include "base/call_delayed.h"
+
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
@@ -1570,6 +1572,19 @@ void RepliesList::readTill(
 	const auto changed = isMtsLink
 		? (now != was)
 		: (was < now);
+	if (isMtsLink) {
+		LOG(("MtsLink ThreadReadTill: root=%1 till=%2 date=%3 was=%4 "
+			"readDate=%5 (old %6) unread=%7 changed=%8 fast=%9"
+			).arg(_rootId.bare
+			).arg(now.bare
+			).arg(tillIdItem ? tillIdItem->date() : 0
+			).arg(was.bare
+			).arg(_mtsLinkInboxReadDate
+			).arg(oldMtsReadDate
+			).arg(unreadCount ? *unreadCount : -1
+			).arg(changed ? 1 : 0
+			).arg(fast ? 1 : 0));
+	}
 	if (changed || (fast && now == was)) {
 		setInboxReadTill(now, unreadCount);
 		if (isMtsLink) {
@@ -1663,9 +1678,37 @@ void RepliesList::sendReadTillRequest() {
 				_history->peer->id,
 				tillId);
 			const auto sending = tillItem && tillItem->isSending();
+			LOG(("MtsLink ThreadReadSend: root=%1 till=%2 item=%3 date=%4 "
+				"mtsId='%5' sending=%6 newest=%7"
+				).arg(_rootId.bare
+				).arg(tillId.bare
+				).arg(tillItem ? 1 : 0
+				).arg(tillItem ? tillItem->date() : 0
+				).arg(mtsId
+				).arg(sending ? 1 : 0
+				).arg(_list.empty()
+					? QString()
+					: MtsLink::msgIdToMtsLinkId(
+						_history->peer->id,
+						_list.front())));
 			if (!chatId.isEmpty() && !mtsId.isEmpty() && !sending) {
 				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);
+				const auto session = &_history->session();
+				const auto peerId = _history->peer->id;
+				const auto rootId = _rootId;
+				const auto weak = base::make_weak(session);
+				for (const auto delay : { 2000, 8000 }) {
+					base::call_delayed(delay, [=] {
+						if (const auto strong = weak.get()) {
+							MtsLink::logThreadLastRead(
+								strong,
+								peerId,
+								rootId,
+								u"after %1 ms, sent '%2'"_q.arg(delay).arg(mtsId));
+						}
+					});
+				}
 			}
 			if (tillItem) {
 				setMtsLinkInboxReadDate(tillItem->date());

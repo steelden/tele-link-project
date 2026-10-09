@@ -136,6 +136,13 @@ void addThreadEntryUnread(
 // yet (the new code blocks of MTS Link) are logged with the raw message.
 void logUnknownBlocks(const QJsonObject &message, const QString &where);
 
+// Diagnostics: what the server has as the last read reply of a thread.
+void logThreadLastRead(
+	not_null<Main::Session*> session,
+	PeerId peerId,
+	MsgId rootId,
+	const QString &tag);
+
 // The markdown of a message: built from the blocks when they have a code
 // block (MTS Link "CodeBlock", the markdown has no ``` for it then).
 [[nodiscard]] QString messageMarkdown(

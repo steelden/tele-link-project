@@ -2486,6 +2486,7 @@ void connectToSession(
 		mtsSession->messages(),
 		[mainSession, mtsSession] {
 			mtsSession->messages()->retryFailedLoads();
+			mtsSession->sending()->forgetSentReads();
 			// The chat shown before the connection (restored at the start)
 			// was not refreshed on opening: refreshed now.
 			const auto window = Core::App().activePrimaryWindow();
@@ -5788,6 +5789,8 @@ void handleChatEvent(
 			mts->messages()->reloadPinned(chatId);
 		}
 	} else if (type == "ChatUnreadMessageCountUpdatedEvent") {
+		LOG(("MtsLink UnreadEvent: %1").arg(QString::fromUtf8(
+			QJsonDocument(value).toJson(QJsonDocument::Compact)).left(400)));
 		const auto eventChatId = value.value("chatId").toString();
 		if (eventChatId.isEmpty()) {
 			return;
@@ -6891,6 +6894,33 @@ void fetchThreadLastRead(
 						TimeId(qint64(createdAt) / 1000));
 				}
 			}
+		});
+}
+
+void logThreadLastRead(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		MsgId rootId,
+		const QString &tag) {
+	const auto mts = session->account().mtsLinkSession();
+	if (!mts) {
+		return;
+	}
+	const auto chatId = peerIdToChatId(peerId);
+	const auto rootMtsId = msgIdToMtsLinkId(peerId, rootId);
+	QJsonObject param;
+	param["organizationId"] = mts->organizationId();
+	param["chatId"] = chatId;
+	param["messageId"] = rootMtsId;
+	mts->rpc()->call(
+		"Chat.GetLastReadChildMessage",
+		param,
+		[=](const QJsonObject &result) {
+			LOG(("MtsLink ThreadReadProbe: %1 root=%2 -> %3"
+				).arg(tag
+				).arg(rootMtsId
+				).arg(QString::fromUtf8(QJsonDocument(result).toJson(
+					QJsonDocument::Compact)).left(300)));
 		});
 }
 

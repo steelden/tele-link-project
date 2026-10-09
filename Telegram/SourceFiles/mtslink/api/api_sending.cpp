@@ -6,6 +6,7 @@ based on Telegram Desktop.
 #include "mtslink/rpc.h"
 
 #include <QUuid>
+#include <QJsonDocument>
 #include <QTimer>
 
 namespace MtsLink::Api {
@@ -130,6 +131,11 @@ void Sending::editMessage(
 void Sending::readMessage(
 		const ChatId &chatId,
 		const MessageId &messageId) {
+	const auto key = chatId + ':' + messageId;
+	if (_sentReads.contains(key)) {
+		return;
+	}
+	_sentReads.insert(key);
 	QJsonObject param;
 	param["chatId"] = chatId;
 	param["lastMessageId"] = messageId;
@@ -137,11 +143,19 @@ void Sending::readMessage(
 		"Chat.MarkMessagesAsRead",
 		param,
 		[=](const QJsonObject &result) {
-			if (result.value(u"type"_q).toString() == u"RpcError"_q) {
-				LOG(("MtsLink Read: MarkMessagesAsRead failed chat=%1 id='%2'"
-					).arg(chatId, messageId));
+			LOG(("MtsLink Read: MarkMessagesAsRead chat=%1 id='%2' -> %3"
+				).arg(chatId, messageId
+				).arg(QString::fromUtf8(QJsonDocument(result).toJson(
+					QJsonDocument::Compact)).left(300)));
+			const auto type = result.value(u"type"_q).toString();
+			if (type == u"RpcError"_q || type == u"BusinessError"_q) {
+				_sentReads.remove(key);
 			}
 		});
+}
+
+void Sending::forgetSentReads() {
+	_sentReads.clear();
 }
 
 void Sending::setChatNotifications(

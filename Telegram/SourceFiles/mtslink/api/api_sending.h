@@ -9,6 +9,7 @@ based on Telegram Desktop.
 #include <QObject>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QSet>
 
 namespace MtsLink {
 class Rpc;
@@ -45,9 +46,13 @@ public:
 		const QJsonArray &blocks = {},
 		const QJsonArray &mentionsMeta = {});
 
+	// The same message of the same chat is read once (the chat read was
+	// sent again on each scroll / redraw of an open chat).
 	void readMessage(
 		const ChatId &chatId,
 		const MessageId &messageId);
+	// After a reconnect: the requests could be lost, sent again.
+	void forgetSentReads();
 
 	void setChatNotifications(
 		const ChatId &chatId,
@@ -94,6 +99,7 @@ private:
 		int attempt);
 
 	Rpc *_rpc = nullptr;
+	QSet<QString> _sentReads;
 };
 
 } // namespace MtsLink::Api
