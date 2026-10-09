@@ -1927,6 +1927,15 @@ void Session::setupUserIsContactViewer() {
 
 Session::~Session() = default;
 
+void Session::enumerateItems(
+		Fn<void(not_null<HistoryItem*>)> action) const {
+	for (const auto &[peerId, messages] : _messages) {
+		for (const auto &[msgId, item] : messages) {
+			action(item);
+		}
+	}
+}
+
 template <typename Method>
 void Session::enumerateItemViews(
 		not_null<const HistoryItem*> item,

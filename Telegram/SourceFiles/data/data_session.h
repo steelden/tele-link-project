@@ -341,6 +341,8 @@ public:
 	}
 
 	void enumerateUsers(Fn<void(not_null<UserData*>)> action) const;
+	// All the messages known (loaded) in this session.
+	void enumerateItems(Fn<void(not_null<HistoryItem*>)> action) const;
 	void enumerateGroups(Fn<void(not_null<PeerData*>)> action) const;
 	void enumerateBroadcasts(Fn<void(not_null<ChannelData*>)> action) const;
 	[[nodiscard]] UserData *userByPhone(const QString &phone) const;

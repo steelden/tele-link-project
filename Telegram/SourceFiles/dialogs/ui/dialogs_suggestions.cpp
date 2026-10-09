@@ -2307,23 +2307,17 @@ float64 Suggestions::shownOpacity() const {
 
 std::vector<Suggestions::Key> Suggestions::TabKeysFor(
 		not_null<Window::SessionController*> controller) {
-	auto result = std::vector<Key>{
+	// MTS Link: no channels search, apps, public posts and downloads tab,
+	// the media of the loaded chats only.
+	return std::vector<Key>{
 		{ Tab::Chats },
-		{ Tab::Channels },
-		{ Tab::Apps },
-		{ Tab::Posts },
 		{ Tab::Media, MediaType::Photo },
 		{ Tab::Media, MediaType::Video },
-		{ Tab::Downloads },
 		{ Tab::Media, MediaType::Link },
 		{ Tab::Media, MediaType::File },
 		{ Tab::Media, MediaType::MusicFile },
 		{ Tab::Media, MediaType::RoundVoiceFile },
 	};
-	if (Core::App().downloadManager().empty()) {
-		result.erase(ranges::find(result, Key{ Tab::Downloads }));
-	}
-	return result;
 }
 
 void Suggestions::paintEvent(QPaintEvent *e) {

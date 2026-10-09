@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_helpers.h"
 #include "history/history.h"
 #include "core/application.h"
+#include "mtslink/data_adapters.h"
 #include "storage/storage_shared_media.h"
 #include "layout/layout_selection.h"
 #include "styles/style_overview.h"
@@ -355,6 +356,51 @@ void Provider::requestMore(
 		return;
 	}
 	list->requestCursors.push_back(cursor);
+
+	// MTS Link has no global media search: the messages loaded in the
+	// chats, all at once (newest first).
+	{
+		const auto lower = query.trimmed().toLower();
+		const auto matches = [&](not_null<HistoryItem*> item) {
+			if (lower.isEmpty()) {
+				return true;
+			} else if (item->originalText().text.toLower().contains(lower)) {
+				return true;
+			}
+			const auto media = item->media();
+			const auto document = media ? media->document() : nullptr;
+			return document && document->filename().toLower().contains(lower);
+		};
+		auto found = std::vector<Data::MessagePosition>();
+		_controller->session().data().enumerateItems([&](
+				not_null<HistoryItem*> item) {
+			const auto peerId = item->history()->peer->id;
+			if (!IsServerMsgId(item->id)
+				|| item->isSending()
+				|| (MtsLink::chatTypeForPeer(peerId)
+					== MtsLink::ChatType::Thread) // Copies of thread roots.
+				|| !item->sharedMediaTypes().test(_type)
+				|| !matches(item)) {
+				return;
+			}
+			found.push_back(item->position());
+		});
+		for (const auto &position : found) {
+			if (list->ids.emplace(position.fullId).second) {
+				_seenIds.emplace(position.fullId);
+				list->list.push_back(position);
+			}
+		}
+		ranges::sort(list->list, std::greater<>());
+		list->loaded = true;
+		list->fullCount = int(list->list.size());
+		auto waiters = base::take(list->requestWaiters);
+		for (auto &callback : waiters) {
+			callback();
+		}
+		return;
+	}
+
 	const auto token = ++list->requestToken;
 	const auto done = [=](const Api::GlobalMediaResult &result) {
 		const auto list = listForQuery(query);
