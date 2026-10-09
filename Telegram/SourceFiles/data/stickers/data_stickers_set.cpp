@@ -204,6 +204,14 @@ DocumentData *StickersSet::lookupThumbnailDocument() const {
 		if (i != stickers.end()) {
 			return *i;
 		}
+		// MTS Link: the cover of an imported pack (its own image).
+		const auto j = ranges::find(
+			covers,
+			thumbnailDocumentId,
+			&DocumentData::id);
+		if (j != covers.end()) {
+			return *j;
+		}
 	}
 	return !stickers.empty()
 		? stickers.front()

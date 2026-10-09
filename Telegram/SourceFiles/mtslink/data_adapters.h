@@ -19,6 +19,7 @@ Bridges MTS Link API data into tdesktop's data model
 
 namespace Ui {
 struct GroupCallBarContent;
+class Show;
 } // namespace Ui
 
 namespace Main {
@@ -304,6 +305,16 @@ void importStickerPack(
 	not_null<Main::Session*> session,
 	QPointer<QWidget> parent,
 	Fn<void(QString)> showToast);
+
+// A sticker pack of Telegram by its link, through the Bot API with the
+// token of a bot of the user (set in the settings).
+void importTelegramStickerPack(
+	not_null<Main::Session*> session,
+	std::shared_ptr<Ui::Show> show);
+[[nodiscard]] bool hasTelegramBotToken();
+void editTelegramBotToken(
+	std::shared_ptr<Ui::Show> show,
+	Fn<void()> saved = nullptr);
 
 // The saved GIFs (the GIFs panel): local only, kept in the session cache.
 void restoreSavedGifs(not_null<Main::Session*> session);

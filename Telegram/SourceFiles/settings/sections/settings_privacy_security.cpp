@@ -70,6 +70,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
+#include "mtslink/data_adapters.h"
 #include "styles/style_settings.h"
 
 #include <QtGui/QGuiApplication>
@@ -1198,6 +1199,30 @@ void BuildMtsLinkSecuritySection(SectionBuilder &builder) {
 			}
 		},
 		.keywords = { u"passcode"_q, u"lock"_q, u"pin"_q },
+	});
+
+	// The token of a bot of the user: the sticker packs import from Telegram.
+	const auto controller = builder.controller();
+	const auto hasToken = std::make_shared<rpl::variable<bool>>(
+		MtsLink::hasTelegramBotToken());
+	builder.addButton({
+		.id = u"security/telegram_bot_token"_q,
+		.title = tr::lng_mtslink_telegram_bot_token(),
+		.icon = { &st::menuIconStickers },
+		.label = hasToken->value() | rpl::map([](bool has) {
+			return has
+				? tr::lng_mtslink_telegram_bot_token_set(tr::now)
+				: tr::lng_mtslink_telegram_bot_token_none(tr::now);
+		}),
+		.onClick = [=] {
+			if (!controller) {
+				return;
+			}
+			MtsLink::editTelegramBotToken(controller->uiShow(), [=] {
+				*hasToken = MtsLink::hasTelegramBotToken();
+			});
+		},
+		.keywords = { u"telegram"_q, u"bot"_q, u"token"_q, u"stickers"_q },
 	});
 
 	builder.addSkip();

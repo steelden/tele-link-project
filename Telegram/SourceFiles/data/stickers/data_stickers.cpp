@@ -1473,22 +1473,8 @@ std::vector<not_null<DocumentData*>> Stickers::getListByEmoji(
 		session().api().requestStickerSets();
 	}
 
-	if (forceAllResults || Core::App().settings().suggestStickersByEmoji()) {
-		const auto key = ranges::accumulate(
-			all,
-			QString(),
-			ranges::plus(),
-			&Ui::Emoji::One::text);
-		const auto others = session().api().stickersByEmoji(key);
-		if (others) {
-			result.reserve(result.size() + others->size());
-			for (const auto &document : *others) {
-				add(document, CreateOtherSortKey(document));
-			}
-		} else if (!forceAllResults) {
-			return {};
-		}
-	}
+	// MTS Link: no stickers by emoji on the server (the MTP request had no
+	// answer and the suggestions above the field were always empty).
 
 	ranges::sort(result, std::greater<>(), &StickerWithDate::date);
 

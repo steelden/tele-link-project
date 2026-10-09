@@ -796,7 +796,18 @@ void StickersListWidget::refreshSearchRows(
 	if (!searchShortcutSelected()) {
 		fillFilteredStickersRow();
 		if (hasCloudFoundStickers) {
-			fillFoundStickersRow(foundStickersIt->second);
+			// MTS Link: the local search finds the stickers by their emoji
+			// as well, the ones already found by the emoji are not repeated.
+			auto found = foundStickersIt->second;
+			found.erase(ranges::remove_if(found, [&](DocumentId id) {
+				return ranges::contains(
+					_filteredStickers,
+					id,
+					&DocumentData::id);
+			}), end(found));
+			if (!found.empty()) {
+				fillFoundStickersRow(found);
+			}
 		}
 	}
 	if (!cloudSets && _searchNextQuery.isEmpty()) {
@@ -854,6 +865,34 @@ void StickersListWidget::fillLocalSearchShortcuts(const QString &query) {
 			addSearchShortcut(it->second.get());
 		}
 	}
+}
+
+struct StickersListWidget::ShortcutIcon {
+	std::shared_ptr<Data::DocumentMedia> media;
+	std::unique_ptr<Lottie::SinglePlayer> lottie;
+	Media::Clip::ReaderPointer webm;
+	QSize size;
+	QImage savedFrame;
+	rpl::lifetime lifetime;
+};
+
+void StickersListWidget::shortcutClipCallback(
+		Media::Clip::Notification notification,
+		uint64 setId) {
+	using namespace Media::Clip;
+	const auto i = _shortcutIcons.find(setId);
+	if (i == end(_shortcutIcons) || !i->second->webm) {
+		return;
+	}
+	const auto icon = i->second.get();
+	if (notification == Notification::Reinit) {
+		if (icon->webm->state() == State::Error) {
+			icon->webm.setBad();
+		} else if (icon->webm->ready() && !icon->webm->started()) {
+			icon->webm->start({ .frame = icon->size, .keepAlpha = true });
+		}
+	}
+	update();
 }
 
 bool StickersListWidget::addSearchShortcut(not_null<StickersSet*> set) {
@@ -1563,21 +1602,78 @@ void StickersListWidget::paintSearchShortcutIcon(
 	if (set.stickers.empty()) {
 		return;
 	}
-	auto &sticker = set.stickers.front();
-	sticker.ensureMediaCreated();
-	const auto document = sticker.document;
-	const auto media = sticker.documentMedia.get();
-	media->thumbnailWanted(document->stickerSetOrigin());
+	// The cover (an imported pack has its own image), the first sticker
+	// otherwise: animated as the icons of the footer.
+	const auto document = (set.thumbnailDocument
+		&& set.thumbnailDocument->sticker())
+		? not_null(set.thumbnailDocument)
+		: set.stickers.front().document;
+	auto &icon = _shortcutIcons[set.id];
+	if (!icon || icon->media->owner() != document) {
+		icon = std::make_unique<ShortcutIcon>();
+		icon->media = document->createMediaView();
+	}
+	const auto media = icon->media.get();
+	const auto origin = document->stickerSetOrigin();
+	media->thumbnailWanted(origin);
 	media->checkStickerSmall();
+	const auto info = document->sticker();
+	// A local sticker (no thumbnail): the sticker itself.
+	const auto local = !document->hasThumbnail();
+	if (local) {
+		media->automaticLoad(origin, nullptr);
+	}
 
 	const auto size = ComputeStickerSize(document, rect.size());
 	if (size.isEmpty()) {
 		return;
 	}
+	icon->size = size;
 	const auto point = rect.topLeft() + QPoint(
 		(rect.width() - size.width()) / 2,
 		(rect.height() - size.height()) / 2);
-	if (const auto image = media->getStickerSmall()) {
+	const auto setId = set.id;
+	if (info->isLottie()
+		&& !icon->lottie
+		&& HasLottieThumbnail(StickerType(), nullptr, media)) {
+		icon->lottie = LottieThumbnail(
+			nullptr,
+			media,
+			StickerLottieSize::StickersFooter,
+			size * style::DevicePixelRatio(),
+			getLottieRenderer());
+		if (icon->lottie) {
+			icon->lottie->updates() | rpl::on_next([=] {
+				update();
+			}, icon->lifetime);
+		}
+	} else if (info->isWebm()
+		&& !icon->webm
+		&& !icon->webm.isBad()
+		&& HasWebmThumbnail(StickerType(), nullptr, media)) {
+		icon->webm = WebmThumbnail(nullptr, media, [=](
+				Media::Clip::Notification notification) {
+			shortcutClipCallback(notification, setId);
+		});
+	}
+	const auto paused = On(PowerSaving::kStickersPanel) || this->paused();
+	if (icon->lottie && icon->lottie->ready()) {
+		const auto frame = icon->lottie->frame();
+		p.drawImage(QRect(point, size), frame);
+		if (!paused) {
+			icon->lottie->markFrameShown();
+		}
+		return;
+	} else if (icon->webm && icon->webm->started()) {
+		const auto frame = icon->webm->current(
+			{ .frame = size, .keepAlpha = true },
+			paused ? 0 : crl::now());
+		p.drawImage(point, frame);
+		return;
+	}
+	if (const auto image = (local && info->isStatic())
+			? media->getStickerLarge()
+			: media->getStickerSmall()) {
 		const auto pixmap = image->pixSingle(size, { .outer = size });
 		p.drawPixmapLeft(point, width(), pixmap);
 	} else {

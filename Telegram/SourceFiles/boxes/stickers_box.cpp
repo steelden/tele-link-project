@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/stickers_box.h"
 
+#include "ui/widgets/popup_menu.h"
+#include "styles/style_menu_icons.h"
+
 #include "mtslink/data_adapters.h"
 #include "apiwrap.h"
 #include "base/timer.h"
@@ -680,12 +683,24 @@ void StickersBox::prepare() {
 			[=] { closeBox(); });
 		if (!_isMasks && !close) {
 			// MTS Link: the local sticker packs.
+			// One left button in a box: the import sources in its menu.
+			const auto menu = std::make_shared<
+				base::unique_qptr<Ui::PopupMenu>>();
 			addLeftButton(tr::lng_mtslink_import_stickers(), [=] {
 				const auto show = _show;
-				MtsLink::importStickerPack(
-					&session(),
+				*menu = base::make_unique_q<Ui::PopupMenu>(
 					this,
-					[=](QString text) { show->showToast(text); });
+					st::popupMenuWithIcons);
+				(*menu)->addAction(tr::lng_mtslink_import_files(tr::now), [=] {
+					MtsLink::importStickerPack(
+						&session(),
+						this,
+						[=](QString text) { show->showToast(text); });
+				}, &st::menuIconFile);
+				(*menu)->addAction(tr::lng_mtslink_import_telegram(tr::now), [=] {
+					MtsLink::importTelegramStickerPack(&session(), show);
+				}, &st::menuIconStickers);
+				(*menu)->popup(QCursor::pos());
 			});
 		}
 	}
@@ -2690,7 +2705,11 @@ StickersBox::Inner::Cover StickersBox::Inner::fillSetCover(
 	if (set->stickers.isEmpty()) {
 		return {};
 	}
-	const auto sticker = set->stickers.front();
+	// The cover of an imported pack (MTS Link), the first sticker otherwise.
+	const auto sticker = set->lookupThumbnailDocument();
+	if (!sticker) {
+		return {};
+	}
 	const auto size = set->hasThumbnail()
 		? QSize(
 			set->thumbnailLocation().width(),

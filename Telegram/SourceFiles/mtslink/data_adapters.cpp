@@ -73,6 +73,7 @@ based on Telegram Desktop.
 #include "ui/image/image_location.h"
 #include "ui/text/text_entity.h"
 #include "ui/emoji_config.h"
+#include "emoji_suggestions_helper.h"
 #include "ui/chat/group_call_bar.h"
 #include "ui/chat/group_call_userpics.h"
 #include "storage/cache/storage_cache_database.h"
@@ -90,6 +91,11 @@ based on Telegram Desktop.
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QRegularExpression>
+#include <QtCore/QUrlQuery>
+#include "base/options.h"
+#include "ui/layers/show.h"
+#include "ui/widgets/fields/input_field.h"
+#include "ui/painter.h"
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
 #include <QtNetwork/QNetworkAccessManager>
@@ -603,7 +609,8 @@ constexpr auto kAnimatedStickerSide = 512;
 [[nodiscard]] QVector<MTPDocumentAttribute> stickerAttributes(
 		const QString &name,
 		int width,
-		int height) {
+		int height,
+		const QString &emoji = QString()) {
 	return {
 		MTP_documentAttributeFilename(MTP_string(name)),
 		MTP_documentAttributeImageSize(
@@ -611,7 +618,7 @@ constexpr auto kAnimatedStickerSide = 512;
 			MTP_int(height > 0 ? height : kAnimatedStickerSide)),
 		MTP_documentAttributeSticker(
 			MTP_flags(0),
-			MTP_string(),
+			MTP_string(emoji),
 			MTP_inputStickerSetEmpty(),
 			MTPMaskCoords()),
 	};
@@ -10062,6 +10069,7 @@ struct LocalSticker {
 	QString mime;
 	int width = 0;
 	int height = 0;
+	QString emoji; // As in Telegram: the suggestions and the search.
 };
 constexpr auto kMtsLinkStickersTag = uint64(0xBC09'0000'0000'0001ULL);
 constexpr auto kMtsLinkStickerBytesTag = uint64(0xBC0A'0000'0000'0000ULL);
@@ -10163,7 +10171,8 @@ not_null<DocumentData*> makeLocalSticker(
 	const auto attrs = stickerAttributes(
 		sticker.name,
 		sticker.width,
-		sticker.height);
+		sticker.height,
+		sticker.emoji);
 	const auto document = session->data().document(
 		id,
 		uint64(0),
@@ -10181,16 +10190,23 @@ not_null<DocumentData*> makeLocalSticker(
 	return document;
 }
 
+// Version 4: with the emoji.
 void writeLocalSticker(QDataStream &s, const LocalSticker &sticker) {
 	s << sticker.key << sticker.name << sticker.mime
-		<< qint32(sticker.width) << qint32(sticker.height);
+		<< qint32(sticker.width) << qint32(sticker.height)
+		<< sticker.emoji;
 }
 
-[[nodiscard]] std::optional<LocalSticker> readLocalSticker(QDataStream &s) {
+[[nodiscard]] std::optional<LocalSticker> readLocalSticker(
+		QDataStream &s,
+		int version) {
 	auto sticker = LocalSticker();
 	auto w = qint32();
 	auto h = qint32();
 	s >> sticker.key >> sticker.name >> sticker.mime >> w >> h;
+	if (version >= 4) {
+		s >> sticker.emoji;
+	}
 	if (s.status() != QDataStream::Ok) {
 		return std::nullopt;
 	}
@@ -10224,6 +10240,7 @@ void saveLocalStickers(not_null<Main::Session*> session) {
 		uint64 id = 0;
 		QString title;
 		QList<LocalSticker> stickers;
+		QList<LocalSticker> cover;
 	};
 	auto packs = std::vector<Pack>();
 	for (const auto setId : session->data().stickers().setsOrder()) {
@@ -10236,6 +10253,7 @@ void saveLocalStickers(not_null<Main::Session*> session) {
 				setId,
 				j->second->title,
 				localStickersOf(j->second->stickers),
+				localStickersOf(j->second->covers),
 			});
 		}
 	}
@@ -10261,6 +10279,9 @@ void saveLocalStickers(not_null<Main::Session*> session) {
 		for (const auto &sticker : pack.stickers) {
 			used.insert(sticker.key);
 		}
+		for (const auto &sticker : pack.cover) {
+			used.insert(sticker.key);
+		}
 	}
 	for (auto j = LocalStickers.begin(); j != LocalStickers.end();) {
 		if (!used.contains(j->key)) {
@@ -10274,7 +10295,7 @@ void saveLocalStickers(not_null<Main::Session*> session) {
 	{
 		QDataStream s(&data, QIODevice::WriteOnly);
 		s.setVersion(QDataStream::Qt_5_1);
-		s << qint32(2) << qint32(faved.size());
+		s << qint32(4) << qint32(faved.size());
 		for (const auto &sticker : faved) {
 			writeLocalSticker(s, sticker);
 		}
@@ -10282,6 +10303,11 @@ void saveLocalStickers(not_null<Main::Session*> session) {
 		for (const auto &pack : packs) {
 			s << quint64(pack.id) << pack.title << qint32(pack.stickers.size());
 			for (const auto &sticker : pack.stickers) {
+				writeLocalSticker(s, sticker);
+			}
+			// Version 3: the cover (the icon of the tab).
+			s << qint32(pack.cover.size());
+			for (const auto &sticker : pack.cover) {
 				writeLocalSticker(s, sticker);
 			}
 		}
@@ -10314,7 +10340,8 @@ void applyLocalPack(
 		uint64 setId,
 		const QString &title,
 		const Data::StickersPack &stickers,
-		bool toFront) {
+		bool toFront,
+		DocumentData *cover = nullptr) {
 	using Flag = Data::StickersSetFlag;
 	auto &sets = session->data().stickers().setsRef();
 	const auto now = base::unixtime::now();
@@ -10339,6 +10366,17 @@ void applyLocalPack(
 	set->stickers = stickers;
 	set->dates = std::vector<TimeId>(stickers.size(), now);
 	set->emoji.clear();
+	for (const auto document : stickers) {
+		const auto j = LocalStickers.constFind(document->id);
+		if (j == LocalStickers.constEnd() || j->emoji.isEmpty()) {
+			continue;
+		} else if (const auto emoji = Ui::Emoji::Find(j->emoji)) {
+			set->emoji[emoji->original()].push_back(document);
+		}
+	}
+	// The icon of the tab (lookupThumbnailDocument).
+	set->covers = cover ? Data::StickersPack{ cover } : Data::StickersPack();
+	set->thumbnailDocumentId = cover ? cover->id : DocumentId();
 	LocalPackIds.insert(setId);
 	auto &order = session->data().stickers().setsOrderRef();
 	if (toFront) {
@@ -10443,6 +10481,8 @@ namespace {
 
 } // namespace
 
+[[nodiscard]] QString emojiShortcode(const QString &emoji);
+
 LocalStickersSearch searchLocalStickers(
 		not_null<Main::Session*> session,
 		const QString &query) {
@@ -10468,7 +10508,10 @@ LocalStickersSearch searchLocalStickers(
 			if (j != LocalStickers.constEnd()
 				&& !inFoundSet.contains(document->id)
 				&& !ranges::contains(result.stickers, document->id)
-				&& nameMatches(j->name, query)) {
+				&& (nameMatches(j->name, query)
+					|| (!j->emoji.isEmpty()
+						&& (query.contains(j->emoji)
+							|| nameMatches(emojiShortcode(j->emoji), query))))) {
 				result.stickers.push_back(document->id);
 			}
 		}
@@ -10491,8 +10534,43 @@ LocalStickersSearch searchLocalStickers(
 	return result;
 }
 
+// The text that types an emoji (":smile:"): the shortest replacement of
+// the built-in emoji suggestions, empty if there is none.
+[[nodiscard]] QString emojiShortcode(const QString &emoji) {
+	static const auto map = [] {
+		auto result = QHash<EmojiPtr, QString>();
+		for (const auto ch : u"abcdefghijklmnopqrstuvwxyz0123456789"_q) {
+			const auto list = Ui::Emoji::GetSuggestions(
+				Ui::Emoji::QStringToUTF16(QString(ch)));
+			for (const auto &suggestion : list) {
+				const auto found = Ui::Emoji::Find(
+					Ui::Emoji::QStringFromUTF16(suggestion.emoji()));
+				if (!found) {
+					continue;
+				}
+				const auto replacement = Ui::Emoji::QStringFromUTF16(
+					suggestion.replacement());
+				auto &existing = result[found->original()];
+				if (existing.isEmpty()
+					|| replacement.size() < existing.size()) {
+					existing = replacement;
+				}
+			}
+		}
+		return result;
+	}();
+	const auto found = Ui::Emoji::Find(emoji);
+	return found ? map.value(found->original()) : QString();
+}
+
 QString panelItemName(not_null<DocumentData*> document) {
 	const auto i = LocalStickers.constFind(document->id);
+	// A sticker of Telegram (numbered file): the code typing its emoji and
+	// the emoji itself, both are found by the search of the panel.
+	if (i != LocalStickers.constEnd() && !i->emoji.isEmpty()) {
+		const auto code = emojiShortcode(i->emoji);
+		return code.isEmpty() ? i->emoji : (code + ' ' + i->emoji);
+	}
 	auto name = (i != LocalStickers.constEnd())
 		? i->name
 		: document->filename();
@@ -10593,14 +10671,14 @@ void restoreLocalStickers(not_null<Main::Session*> session) {
 			auto count = qint32();
 			s >> version >> count;
 			if (s.status() != QDataStream::Ok
-				|| (version != 1 && version != 2)
+				|| (version < 1 || version > 4)
 				|| count < 0) {
 				return;
 			}
 			const auto readStickers = [&](int count) {
 				auto result = Data::StickersPack();
 				for (auto i = 0; i != count; ++i) {
-					const auto sticker = readLocalSticker(s);
+					const auto sticker = readLocalSticker(s, version);
 					if (!sticker) {
 						return std::optional<Data::StickersPack>();
 					}
@@ -10622,7 +10700,7 @@ void restoreLocalStickers(not_null<Main::Session*> session) {
 				documents.push_back(document);
 			}
 			auto packs = qint32();
-			if (version == 2) {
+			if (version >= 2) {
 				s >> packs;
 				for (auto i = 0; i < packs; ++i) {
 					auto setId = quint64();
@@ -10636,7 +10714,26 @@ void restoreLocalStickers(not_null<Main::Session*> session) {
 					if (!stickers) {
 						break;
 					}
-					applyLocalPack(strong, setId, title, *stickers, false);
+					auto cover = (DocumentData*)nullptr;
+					if (version >= 3) {
+						auto covers = qint32();
+						s >> covers;
+						if (s.status() != QDataStream::Ok || covers < 0) {
+							break;
+						}
+						const auto read = readStickers(covers);
+						if (!read) {
+							break;
+						}
+						cover = read->empty() ? nullptr : read->front();
+					}
+					applyLocalPack(
+						strong,
+						setId,
+						title,
+						*stickers,
+						false,
+						cover);
 				}
 				if (packs > 0) {
 					strong->data().stickers().notifyUpdated(
@@ -10659,6 +10756,7 @@ namespace {
 struct ImportedImage {
 	QString name;
 	QByteArray bytes;
+	QString emoji;
 };
 
 [[nodiscard]] bool IsPackImageName(const QString &name) {
@@ -10724,6 +10822,7 @@ struct ImportedImage {
 			.mime = tgs ? QString(kTgsMime) : u"video/webm"_q,
 			.width = kAnimatedStickerSide,
 			.height = kAnimatedStickerSide,
+			.emoji = image.emoji,
 		};
 	}
 	auto name = image.name;
@@ -10740,10 +10839,18 @@ struct ImportedImage {
 		.mime = mime,
 		.width = width,
 		.height = height,
+		.emoji = image.emoji,
 	};
 }
 
 } // namespace
+
+void addImportedPack(
+	not_null<Main::Session*> strong,
+	const QString &title,
+	std::vector<ImportedImage> images,
+	Fn<void(QString)> showToast,
+	std::optional<ImportedImage> cover = std::nullopt);
 
 void importStickerPack(
 		not_null<Main::Session*> session,
@@ -10786,11 +10893,24 @@ void importStickerPack(
 		ranges::sort(images, [&](const ImportedImage &a, const ImportedImage &b) {
 			return collator.compare(a.name, b.name) < 0;
 		});
-		auto pack = Data::StickersPack();
-		for (auto &image : images) {
+		LOG(("MtsLink Stickers: import '%1' from %2 files"
+			).arg(title
+			).arg(paths.size()));
+		addImportedPack(strong, title, std::move(images), showToast);
+	});
+}
+
+void addImportedPack(
+		not_null<Main::Session*> strong,
+		const QString &title,
+		std::vector<ImportedImage> images,
+		Fn<void(QString)> showToast,
+		std::optional<ImportedImage> cover) {
+	{
+		const auto make = [&](ImportedImage &image) -> DocumentData* {
 			const auto sticker = PreparePackImage(image);
 			if (!sticker) {
-				continue;
+				return nullptr;
 			}
 			const auto document = makeLocalSticker(
 				strong,
@@ -10800,11 +10920,17 @@ void importStickerPack(
 				stickerBytesCacheKey(sticker->key),
 				QByteArray(image.bytes));
 			putToDocumentCache(document, stickerUrl(sticker->key), image.bytes);
-			pack.push_back(document);
+			return document;
+		};
+		auto pack = Data::StickersPack();
+		for (auto &image : images) {
+			if (const auto document = make(image)) {
+				pack.push_back(document);
+			}
 		}
-		LOG(("MtsLink Stickers: import '%1' from %2 files: %3 stickers"
+		const auto coverDocument = cover ? make(*cover) : nullptr;
+		LOG(("MtsLink Stickers: import '%1': %2 stickers"
 			).arg(title
-			).arg(paths.size()
 			).arg(pack.size()));
 		if (pack.isEmpty()) {
 			showToast(tr::lng_mtslink_import_stickers_empty(tr::now));
@@ -10815,13 +10941,385 @@ void importStickerPack(
 			setId = (base::RandomValue<uint64>() & 0x3FFF'FFFF'FFFF'FFFFULL)
 				| 1ULL;
 		} while (strong->data().stickers().sets().contains(setId));
-		applyLocalPack(strong, setId, title, pack, true);
+		applyLocalPack(strong, setId, title, pack, true, coverDocument);
 		strong->data().stickers().notifyUpdated(Data::StickersType::Stickers);
 		showToast(tr::lng_mtslink_import_stickers_done(
 			tr::now,
 			lt_pack,
 			title));
+	}
+}
+
+namespace {
+
+base::options::option<QString> OptionTelegramBotToken({
+	.id = "telegram-bot-token",
+	.name = "Telegram bot token",
+});
+
+constexpr auto kTelegramBotApi = "https://api.telegram.org";
+
+// The name of a pack from "t.me/addstickers/NAME" (or the name itself).
+[[nodiscard]] QString TelegramPackName(const QString &link) {
+	const auto trimmed = link.trimmed();
+	static const auto byLink = QRegularExpression(
+		u"(?:addstickers/|addemoji/|[?&]set=)([A-Za-z0-9_]+)"_q);
+	if (const auto m = byLink.match(trimmed); m.hasMatch()) {
+		return m.captured(1);
+	}
+	static const auto byName = QRegularExpression(u"^[A-Za-z0-9_]+$"_q);
+	return byName.match(trimmed).hasMatch() ? trimmed : QString();
+}
+
+struct TelegramPackImport {
+	base::weak_ptr<Main::Session> session;
+	std::shared_ptr<Ui::Show> show;
+	QString token;
+	QString name;
+	QString title;
+	QJsonArray stickers;
+	QString coverFileId;
+	int index = 0;
+	int total = 0;
+	std::vector<ImportedImage> images;
+	std::optional<ImportedImage> cover;
+	std::unique_ptr<QNetworkAccessManager> manager;
+
+	// The progress box: closed by the user it cancels the import.
+	QPointer<Ui::GenericBox> box;
+	rpl::variable<QString> status;
+	rpl::variable<float64> progress = 0.;
+	bool finished = false;
+	bool cancelled = false;
+
+	~TelegramPackImport() {
+		// The last reference is held by a reply handler: destroyed with the
+		// reply, a manager deleted right away deleted its reply again.
+		if (manager) {
+			manager.release()->deleteLater();
+		}
+	}
+};
+
+void TelegramBotApiCall(
+		std::shared_ptr<TelegramPackImport> state,
+		const QString &method,
+		const QUrlQuery &query,
+		Fn<void(QJsonValue)> done,
+		Fn<void(QString)> fail) {
+	auto url = QUrl(QString::fromLatin1(kTelegramBotApi)
+		+ u"/bot"_q
+		+ state->token
+		+ '/'
+		+ method);
+	url.setQuery(query);
+	const auto reply = state->manager->get(QNetworkRequest(url));
+	QObject::connect(reply, &QNetworkReply::finished, [=] {
+		reply->deleteLater();
+		const auto object = QJsonDocument::fromJson(reply->readAll()).object();
+		if (object.value(u"ok"_q).toBool()) {
+			done(object.value(u"result"_q));
+		} else {
+			// The token is a part of the url: not logged.
+			const auto error = object.value(u"description"_q).toString(
+				reply->errorString());
+			LOG(("MtsLink Stickers: Bot API %1 failed: %2"
+				).arg(method
+				).arg(error));
+			fail(error);
+		}
 	});
+}
+
+// A file of the Bot API: getFile, then the download.
+void TelegramBotApiFile(
+		std::shared_ptr<TelegramPackImport> state,
+		const QString &fileId,
+		Fn<void(QString path, QByteArray bytes)> done) {
+	auto query = QUrlQuery();
+	query.addQueryItem(u"file_id"_q, fileId);
+	TelegramBotApiCall(state, u"getFile"_q, query, [=](QJsonValue result) {
+		const auto path = result.toObject().value(u"file_path"_q).toString();
+		if (path.isEmpty() || state->cancelled) {
+			done(QString(), QByteArray());
+			return;
+		}
+		const auto url = QUrl(QString::fromLatin1(kTelegramBotApi)
+			+ u"/file/bot"_q
+			+ state->token
+			+ '/'
+			+ path);
+		const auto reply = state->manager->get(QNetworkRequest(url));
+		QObject::connect(reply, &QNetworkReply::finished, [=] {
+			reply->deleteLater();
+			const auto bytes = reply->readAll();
+			if (reply->error() != QNetworkReply::NoError) {
+				LOG(("MtsLink Stickers: Telegram file failed: %1"
+					).arg(reply->errorString()));
+				done(path, QByteArray());
+			} else {
+				done(path, bytes);
+			}
+		});
+	}, [=](QString) { done(QString(), QByteArray()); });
+}
+
+void TelegramPackFinish(std::shared_ptr<TelegramPackImport> state) {
+	state->finished = true;
+	if (const auto box = state->box.data()) {
+		box->closeBox();
+	}
+	const auto session = state->session.get();
+	if (!session || state->cancelled) {
+		return;
+	}
+	LOG(("MtsLink Stickers: Telegram pack '%1' downloaded, %2 of %3, "
+		"cover=%4"
+		).arg(state->name
+		).arg(state->images.size()
+		).arg(state->stickers.size()
+		).arg(state->cover ? 1 : 0));
+	const auto show = state->show;
+	addImportedPack(
+		session,
+		state->title,
+		std::move(state->images),
+		[=](QString text) { show->showToast(text); },
+		std::move(state->cover));
+}
+
+void TelegramPackDownloadNext(std::shared_ptr<TelegramPackImport> state) {
+	if (state->cancelled || !state->session) {
+		return;
+	}
+	if (state->index >= state->total) {
+		// The stickers are loaded: the cover (the icon of the tab).
+		if (state->coverFileId.isEmpty() || state->cover) {
+			TelegramPackFinish(state);
+			return;
+		}
+		const auto fileId = base::take(state->coverFileId);
+		TelegramBotApiFile(state, fileId, [=](QString path, QByteArray bytes) {
+			if (!bytes.isEmpty()) {
+				const auto suffix = QFileInfo(path).suffix().toLower();
+				state->cover = ImportedImage{
+					u"cover."_q + (suffix.isEmpty() ? u"webp"_q : suffix),
+					bytes,
+				};
+			}
+			TelegramPackFinish(state);
+		});
+		return;
+	}
+	const auto index = state->index++;
+	const auto sticker = state->stickers[index].toObject();
+	const auto fileId = sticker.value(u"file_id"_q).toString();
+	const auto emoji = sticker.value(u"emoji"_q).toString();
+	TelegramBotApiFile(state, fileId, [=](QString path, QByteArray bytes) {
+		if (!bytes.isEmpty()) {
+			// Numbered: the pack keeps the order of Telegram.
+			const auto suffix = QFileInfo(path).suffix().toLower();
+			state->images.push_back({
+				u"%1.%2"_q.arg(index + 1, 3, 10, QChar('0')).arg(
+					suffix.isEmpty() ? u"webp"_q : suffix),
+				bytes,
+				emoji,
+			});
+		}
+		state->status = tr::lng_mtslink_import_telegram_progress(
+			tr::now,
+			lt_pack,
+			state->title,
+			lt_done,
+			QString::number(index + 1),
+			lt_stickers,
+			QString::number(state->total));
+		state->progress = float64(index + 1) / std::max(state->total, 1);
+		TelegramPackDownloadNext(state);
+	});
+}
+
+void ShowTelegramPackProgress(std::shared_ptr<TelegramPackImport> state) {
+	const auto weak = std::weak_ptr<TelegramPackImport>(state);
+	state->show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		const auto state = weak.lock();
+		if (!state) {
+			return;
+		}
+		state->box = box.get();
+		box->setTitle(tr::lng_mtslink_import_telegram_title());
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			state->status.value(),
+			st::boxLabel));
+		// A simple progress line.
+		const auto bar = box->addRow(
+			object_ptr<Ui::RpWidget>(box),
+			st::boxRowPadding + QMargins(0, st::boxLittleSkip, 0, 0));
+		bar->resize(bar->width(), st::boxLittleSkip);
+		const auto progress = std::make_shared<rpl::variable<float64>>(
+			state->progress.value());
+		progress->value() | rpl::on_next([=] {
+			bar->update();
+		}, bar->lifetime());
+		bar->paintRequest() | rpl::on_next([=] {
+			auto p = QPainter(bar);
+			auto hq = PainterHighQualityEnabler(p);
+			const auto radius = bar->height() / 2.;
+			p.setPen(Qt::NoPen);
+			p.setBrush(st::shadowFg);
+			p.drawRoundedRect(bar->rect(), radius, radius);
+			const auto width = int(std::round(
+				bar->width() * progress->current()));
+			if (width > 0) {
+				p.setBrush(st::activeButtonBg);
+				p.drawRoundedRect(
+					QRect(0, 0, width, bar->height()),
+					radius,
+					radius);
+			}
+		}, bar->lifetime());
+		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+		box->boxClosing() | rpl::on_next([=] {
+			if (const auto state = weak.lock(); state && !state->finished) {
+				LOG(("MtsLink Stickers: Telegram pack '%1' cancelled"
+					).arg(state->name));
+				state->cancelled = true;
+			}
+		}, box->lifetime());
+	}));
+}
+
+void StartTelegramPackImport(
+		not_null<Main::Session*> session,
+		std::shared_ptr<Ui::Show> show,
+		const QString &name) {
+	const auto state = std::make_shared<TelegramPackImport>();
+	state->session = base::make_weak(session);
+	state->show = show;
+	state->token = OptionTelegramBotToken.value().trimmed();
+	state->name = name;
+	state->manager = std::make_unique<QNetworkAccessManager>();
+	state->status = tr::lng_mtslink_import_telegram_requesting(tr::now);
+	ShowTelegramPackProgress(state);
+	LOG(("MtsLink Stickers: Telegram pack '%1' requested").arg(name));
+	auto query = QUrlQuery();
+	query.addQueryItem(u"name"_q, name);
+	TelegramBotApiCall(state, u"getStickerSet"_q, query, [=](QJsonValue result) {
+		if (state->cancelled) {
+			return;
+		}
+		const auto set = result.toObject();
+		state->title = set.value(u"title"_q).toString(name);
+		state->stickers = set.value(u"stickers"_q).toArray();
+		state->total = std::min(int(state->stickers.size()), kMaxPackStickers);
+		state->coverFileId = set.value(u"thumbnail"_q).toObject().value(
+			u"file_id"_q).toString();
+		state->status = tr::lng_mtslink_import_telegram_progress(
+			tr::now,
+			lt_pack,
+			state->title,
+			lt_done,
+			u"0"_q,
+			lt_stickers,
+			QString::number(state->total));
+		TelegramPackDownloadNext(state);
+	}, [=](QString error) {
+		state->finished = true;
+		if (const auto box = state->box.data()) {
+			box->closeBox();
+		}
+		show->showToast(tr::lng_mtslink_import_telegram_failed(
+			tr::now,
+			lt_error,
+			error));
+	});
+}
+
+} // namespace
+
+bool hasTelegramBotToken() {
+	return !OptionTelegramBotToken.value().trimmed().isEmpty();
+}
+
+void editTelegramBotToken(
+		std::shared_ptr<Ui::Show> show,
+		Fn<void()> saved) {
+	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(tr::lng_mtslink_telegram_bot_token());
+		const auto field = box->addRow(object_ptr<Ui::InputField>(
+			box,
+			st::defaultInputField,
+			Ui::InputField::Mode::NoNewlines,
+			rpl::single(u"123456:ABC-DEF..."_q),
+			OptionTelegramBotToken.value()));
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			tr::lng_mtslink_telegram_bot_token_about(),
+			st::boxLabel));
+		box->setFocusCallback([=] { field->setFocusFast(); });
+		const auto save = [=] {
+			OptionTelegramBotToken.set(field->getLastText().trimmed());
+			box->closeBox();
+			if (saved) {
+				saved();
+			}
+		};
+		field->submits() | rpl::on_next(save, field->lifetime());
+		box->addButton(tr::lng_settings_save(), save);
+		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	}));
+}
+
+void importTelegramStickerPack(
+		not_null<Main::Session*> session,
+		std::shared_ptr<Ui::Show> show) {
+	if (!hasTelegramBotToken()) {
+		show->showBox(Ui::MakeConfirmBox({
+			.text = tr::lng_mtslink_import_telegram_need_token(),
+			.confirmed = [=](Fn<void()> close) {
+				close();
+				editTelegramBotToken(show, [=] {
+					if (hasTelegramBotToken()) {
+						importTelegramStickerPack(session, show);
+					}
+				});
+			},
+			.confirmText = tr::lng_mtslink_import_telegram_set_token(),
+		}));
+		return;
+	}
+	const auto weak = base::make_weak(session);
+	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(tr::lng_mtslink_import_telegram_title());
+		const auto field = box->addRow(object_ptr<Ui::InputField>(
+			box,
+			st::defaultInputField,
+			Ui::InputField::Mode::NoNewlines,
+			tr::lng_mtslink_import_telegram_link(),
+			QString()));
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			tr::lng_mtslink_import_telegram_about(),
+			st::boxLabel));
+		box->setFocusCallback([=] { field->setFocusFast(); });
+		const auto submit = [=] {
+			const auto name = TelegramPackName(field->getLastText());
+			if (name.isEmpty()) {
+				field->showError();
+				show->showToast(tr::lng_mtslink_import_telegram_bad_link(
+					tr::now));
+				return;
+			}
+			box->closeBox();
+			if (const auto strong = weak.get()) {
+				StartTelegramPackImport(strong, show, name);
+			}
+		};
+		field->submits() | rpl::on_next(submit, field->lifetime());
+		box->addButton(tr::lng_mtslink_import_stickers(), submit);
+		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	}));
 }
 
 namespace {

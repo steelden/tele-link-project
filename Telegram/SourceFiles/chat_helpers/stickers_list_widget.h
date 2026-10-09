@@ -472,6 +472,12 @@ private:
 	std::vector<Set> _officialSets;
 	std::vector<Set> _searchSets;
 	std::vector<Set> _searchShortcutSets;
+	// The icons of the found packs: the covers, animated as in the footer.
+	struct ShortcutIcon;
+	base::flat_map<uint64, std::unique_ptr<ShortcutIcon>> _shortcutIcons;
+	void shortcutClipCallback(
+		Media::Clip::Notification notification,
+		uint64 setId);
 	int _featuredSetsCount = 0;
 	std::vector<bool> _custom;
 	std::vector<EmojiPtr> _cornerEmoji;
