@@ -3993,7 +3993,11 @@ bool ChatWidget::showMessage(
 	} else if (_repliesRootId
 		&& !message->inThread(_repliesRootId)
 		&& id.msg != _repliesRootId) {
-		if (!MtsLink::hasChatId(peerId)) {
+		// MTS Link: the replies are known by their thread root (inThread
+		// misses them), a message of the chat itself is shown in the chat.
+		if (!MtsLink::hasChatId(peerId)
+			|| (MtsLink::threadRootFor(peerId, messageId)
+				!= _repliesRootId)) {
 			return false;
 		}
 	} else if (_sublist && message->savedSublist() != _sublist) {

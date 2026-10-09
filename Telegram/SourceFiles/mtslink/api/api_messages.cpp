@@ -338,69 +338,26 @@ MemberProfile ParseMemberProfile(const QJsonObject &obj) {
 	return result;
 }
 
-void Messages::search(
-		const ChatId &chatId,
-		const QString &query,
-		int limit) {
-	QJsonObject param;
-	param["chatId"] = chatId;
-	param["query"] = query;
-	param["limit"] = limit;
-
-	_rpc->call(
-		"Chat.SearchMessagesV2",
-		param,
-		[this, chatId](const QJsonObject &result) {
-			const auto value = result.value("value").toObject();
-			const auto msgArray = value.value("messages").toArray();
-			const auto profilesArray =
-				value.value("memberProfiles").toArray();
-			const auto total = value.value("total").toInt(
-				msgArray.size());
-
-			QList<MessageData> messages;
-			messages.reserve(msgArray.size());
-			for (const auto &item : msgArray) {
-				auto msg = parseMessage(item.toObject());
-				if (msg.isDeleted) {
-					// Deleted on the server: removed locally (kept in the
-					// cache when deleted while TeleLink was closed).
-					Q_EMIT deletedMessageSeen(
-						msg.chatId.isEmpty() ? chatId : msg.chatId,
-						msg.id);
-					continue;
-				}
-				if (msg.chatId.isEmpty()) {
-					msg.chatId = chatId;
-				}
-				messages.push_back(std::move(msg));
-			}
-
-			QList<MemberProfile> profiles;
-			profiles.reserve(profilesArray.size());
-			for (const auto &item : profilesArray) {
-				profiles.push_back(parseProfile(item.toObject()));
-			}
-
-			Q_EMIT searchCompleted(chatId, messages, profiles, total);
-		});
-}
-
 void Messages::searchGlobal(
 		const QString &query,
 		const OrganizationId &organizationId,
 		int from,
 		int size,
-		GlobalSearchDone done) {
+		GlobalSearchDone done,
+		const ChatId &chatId) {
+	auto param = QJsonObject{
+		{ "query", query },
+		{ "organizationId", organizationId },
+		{ "from", from },
+		{ "size", size },
+		{ "previewCharsSize", 255 },
+	};
+	if (!chatId.isEmpty()) {
+		param.insert("chatId", chatId);
+	}
 	_rpc->call(
 		"Chat.SearchMessagesV4",
-		QJsonObject{
-			{ "query", query },
-			{ "organizationId", organizationId },
-			{ "from", from },
-			{ "size", size },
-			{ "previewCharsSize", 255 },
-		},
+		param,
 		[=](const QJsonObject &result) {
 			const auto value = result.value("value").toObject();
 			const auto items = value.value("items").toArray();

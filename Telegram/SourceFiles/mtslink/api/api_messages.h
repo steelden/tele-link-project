@@ -134,11 +134,6 @@ public:
 	[[nodiscard]] bool loadedOnce(const ChatId &chatId) const;
 	void retryFailedLoads();
 
-	void search(
-		const ChatId &chatId,
-		const QString &query,
-		int limit = 50);
-
 	void loadPinned(const ChatId &chatId, int limit = 50);
 	void reloadPinned(const ChatId &chatId);
 
@@ -172,12 +167,14 @@ public:
 		QList<MemberProfile>,
 		int,
 		int)>;
+	// With a chat id: in that chat only (as the chat search of MTS Link).
 	void searchGlobal(
 		const QString &query,
 		const OrganizationId &organizationId,
 		int from,
 		int size,
-		GlobalSearchDone done);
+		GlobalSearchDone done,
+		const ChatId &chatId = ChatId());
 
 	[[nodiscard]] MessageId newestRawId(const ChatId &chatId) const {
 		return _newestRawIds.value(chatId);
@@ -203,11 +200,6 @@ Q_SIGNALS:
 		const QList<MemberProfile> &profiles,
 		int rawCount,
 		int limit);
-	void searchCompleted(
-		const ChatId &chatId,
-		const QList<MessageData> &messages,
-		const QList<MemberProfile> &profiles,
-		int total);
 	void pinnedMessagesLoaded(
 		const ChatId &chatId,
 		const QList<MessageData> &messages,

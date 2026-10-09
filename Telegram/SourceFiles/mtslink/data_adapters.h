@@ -624,12 +624,14 @@ void searchPeersGlobal(
 		std::vector<not_null<PeerData*>> my,
 		std::vector<not_null<PeerData*>> peers)> done);
 // Global messages search, done(items, total, full).
+// With a peer: the messages of that chat only (the chat search).
 void searchMessagesGlobal(
 	not_null<Main::Session*> session,
 	const QString &query,
 	int offset,
 	int limit,
-	Fn<void(std::vector<not_null<HistoryItem*>>, int, bool)> done);
+	Fn<void(std::vector<not_null<HistoryItem*>>, int, bool)> done,
+	PeerId inPeer = PeerId());
 
 // Organization members not in the channel, empty query lists everyone.
 void searchChannelNonMembers(

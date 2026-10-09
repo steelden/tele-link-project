@@ -9073,7 +9073,8 @@ void searchMessagesGlobal(
 		const QString &query,
 		int offset,
 		int limit,
-		Fn<void(std::vector<not_null<HistoryItem*>>, int, bool)> done) {
+		Fn<void(std::vector<not_null<HistoryItem*>>, int, bool)> done,
+		PeerId inPeer) {
 	const auto mts = session->account().mtsLinkSession();
 	if (!mts || !mts->messages()) {
 		done({}, 0, true);
@@ -9117,16 +9118,18 @@ void searchMessagesGlobal(
 			}
 			const auto full = (rawCount < limit)
 				|| (offset + rawCount >= total);
-			LOG(("MtsLink Search: messages '%1' from %2: %3 of %4, "
+			LOG(("MtsLink Search: messages '%1' in '%7' from %2: %3 of %4, "
 				"skipped %5, full=%6"
 				).arg(query
 				).arg(offset
 				).arg(items.size()
 				).arg(total
 				).arg(skipped
-				).arg(full ? 1 : 0));
+				).arg(full ? 1 : 0
+				).arg(inPeer ? peerIdToChatId(inPeer) : QString()));
 			done(std::move(items), total, full);
-		});
+		},
+		inPeer ? peerIdToChatId(inPeer) : QString());
 }
 
 void reloadChannelMembers(

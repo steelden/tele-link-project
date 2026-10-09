@@ -3251,7 +3251,9 @@ bool Widget::search(bool inCache, SearchRequestDelay delay) {
 		process->full = false;
 		_migratedProcess.full = false;
 		cancelSearchRequest();
-		if (inPeer) {
+		if (inPeer && session().account().mtsLinkSession()) {
+			requestMtsLinkMessagesInChat(inPeer, true);
+		} else if (inPeer) {
 			const auto topic = searchInTopic();
 			auto &histories = session().data().histories();
 			const auto type = Data::Histories::RequestType::History;
@@ -3463,7 +3465,9 @@ void Widget::searchMore() {
 		|| _searchTimer.isActive()) {
 		return;
 	} else if (!process->full) {
-		if (const auto peer = searchInPeer()) {
+		if (searchInPeer() && session().account().mtsLinkSession()) {
+			requestMtsLinkMessagesInChat(searchInPeer(), false);
+		} else if (const auto peer = searchInPeer()) {
 			auto &histories = session().data().histories();
 			const auto topic = searchInTopic();
 			const auto type = Data::Histories::RequestType::History;
@@ -3607,6 +3611,51 @@ void Widget::requestPublicPosts(bool fromStart) {
 	if (fromStart) {
 		_postsProcess.queries.emplace(_postsProcess.requestId, _searchQuery);
 	}
+}
+
+// MTS Link: Chat.SearchMessagesV4 with the chat id, paged by the offset.
+void Widget::requestMtsLinkMessagesInChat(
+		not_null<PeerData*> peer,
+		bool fromStart) {
+	const auto process = currentSearchProcess();
+	const auto type = SearchRequestType{
+		.start = fromStart,
+		.peer = true,
+	};
+	static auto LastMtsLinkRequestId = mtpRequestId(0);
+	const auto requestId = --LastMtsLinkRequestId;
+	// The page size of the MTS Link client.
+	constexpr auto kPerPage = 20;
+	const auto offset = fromStart ? 0 : process->nextRate;
+	process->requestId = requestId;
+	MtsLink::searchMessagesGlobal(
+		&session(),
+		_searchQuery,
+		offset,
+		kPerPage,
+		crl::guard(this, [=](
+				std::vector<not_null<HistoryItem*>> items,
+				int total,
+				bool full) {
+			if (process->requestId != requestId) {
+				return;
+			}
+			if (type.start) {
+				process->lastPeer = nullptr;
+				process->lastId = 0;
+			}
+			process->nextRate = offset + kPerPage;
+			process->full = full;
+			if (!items.empty()) {
+				process->lastPeer = items.back()->history()->peer;
+				process->lastId = items.back()->id;
+			}
+			_inner->searchReceived(items, nullptr, type, total);
+			process->requestId = 0;
+			listScrollUpdated();
+			update();
+		}),
+		peer->id);
 }
 
 void Widget::requestMessages(bool fromStart) {

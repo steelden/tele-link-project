@@ -92,6 +92,8 @@ MessagesSearch::~MessagesSearch() {
 void MessagesSearch::searchMessages(Request request) {
 	_request = std::move(request);
 	_offsetId = {};
+	_mtsLinkOffset = 0;
+	_mtsLinkFull = false;
 	searchRequest();
 }
 
@@ -157,11 +159,43 @@ void MessagesSearch::searchRequest() {
 				handler);
 			mts->messages()->loadPinned(chatId);
 		} else {
-			*conn = QObject::connect(
-				mts->messages(),
-				&MtsLink::Api::Messages::searchCompleted,
-				handler);
-			mts->messages()->search(chatId, _request.query);
+			QObject::disconnect(*conn);
+			if (_mtsLinkFull) {
+				return;
+			}
+			// Chat.SearchMessagesV4 with the chat id (as MTS Link), the
+			// results by pages of 20.
+			constexpr auto kPerPage = 20;
+			const auto offset = _mtsLinkOffset;
+			_requestId = -1;
+			const auto weak = base::make_weak(this);
+			MtsLink::searchMessagesGlobal(
+				&_history->session(),
+				_request.query,
+				offset,
+				kPerPage,
+				[=](
+						std::vector<not_null<HistoryItem*>> items,
+						int total,
+						bool full) {
+					if (!weak) {
+						return;
+					}
+					_requestId = 0;
+					_mtsLinkOffset = offset + kPerPage;
+					_mtsLinkFull = full;
+					auto ids = MessageIdsList();
+					ids.reserve(items.size());
+					for (const auto &item : items) {
+						ids.push_back(item->fullId());
+					}
+					_messagesFounds.fire({
+						total,
+						std::move(ids),
+						nextToken,
+					});
+				},
+				_history->peer->id);
 		}
 		return;
 	}

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/qt/qt_compare.h"
+#include "base/weak_ptr.h"
 #include "data/data_message_reaction_id.h"
 
 class HistoryItem;
@@ -31,7 +32,7 @@ struct FoundMessages {
 	QString nextToken;
 };
 
-class MessagesSearch final {
+class MessagesSearch final : public base::has_weak_ptr {
 public:
 	struct Request {
 		QString query;
@@ -70,6 +71,9 @@ private:
 
 	Request _request;
 	MsgId _offsetId;
+	// MTS Link: the search is paged by the offset of the results.
+	int _mtsLinkOffset = 0;
+	bool _mtsLinkFull = false;
 
 	int _searchInHistoryRequest = 0; // Not real mtpRequestId.
 	mtpRequestId _requestId = 0;
