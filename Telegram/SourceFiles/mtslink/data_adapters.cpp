@@ -6022,6 +6022,60 @@ void handleChatEvent(
 					return;
 				}
 				if (isMine) {
+					// Mine from another client of the same account (the own
+					// ones from here are already shown: their echo is skipped).
+					const auto &existing = item->reactions();
+					// By the server id: the emoji may come without the
+					// variation selector ("❤" for "❤️") in the events.
+					const auto stripped = [](QString emoji) {
+						return emoji.remove(QChar(0xFE0F));
+					};
+					const auto isSame = [&](const QString &rEmoji) {
+						const auto rId = EmojiToIdMap.value(rEmoji);
+						return (!rId.isEmpty() && rId == emojiId)
+							|| (stripped(rEmoji) == stripped(resolvedEmoji));
+					};
+					const auto alreadyMine = ranges::any_of(existing, [&](
+							const auto &r) {
+						return r.my && isSame(r.id.emoji());
+					});
+					if (isAdded == alreadyMine) {
+						return;
+					}
+					QList<Api::ReactionData> reactions;
+					auto found = false;
+					for (const auto &r : existing) {
+						const auto rEmoji = r.id.emoji();
+						if (rEmoji.isEmpty()) {
+							continue;
+						}
+						const auto same = isSame(rEmoji);
+						found = found || same;
+						const auto count = same
+							? (r.count + (isAdded ? 1 : -1))
+							: r.count;
+						if (count <= 0) {
+							continue;
+						}
+						reactions.push_back({
+							.emojiId = same
+								? emojiId
+								: EmojiToIdMap.value(rEmoji),
+							.emoji = rEmoji,
+							.count = count,
+							.selected = same ? isAdded : r.my,
+						});
+					}
+					if (!found && isAdded) {
+						reactions.push_back({
+							.emojiId = emojiId,
+							.emoji = resolvedEmoji,
+							.count = 1,
+							.selected = true,
+						});
+					}
+					const auto mtp = buildMtpReactions(reactions);
+					item->updateReactions(mtp ? &*mtp : nullptr);
 					return;
 				}
 				const auto &existing = item->reactions();
