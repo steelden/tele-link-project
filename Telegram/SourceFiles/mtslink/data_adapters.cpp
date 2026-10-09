@@ -3875,6 +3875,11 @@ void refreshThreadsMark(
 			}
 		}
 	}
+	if (history->mtsLinkThreadsMark() != unread) {
+		LOG(("MtsLink ThreadsMark: %1 unread=%2"
+			).arg(peerIdToChatId(chatPeerId)
+			).arg(unread ? 1 : 0));
+	}
 	history->mtsLinkSetThreadsMark(unread);
 }
 
@@ -5762,6 +5767,27 @@ void handleChatEvent(
 			const auto rootId = localMsgId(parentId);
 			const auto entry = threadEntryHistory(session, peerId, rootId);
 			const auto count = value.value("unreadMessageCount").toInt();
+			const auto pending = PendingThreadUnread.find(
+				qMakePair(peerId, rootId));
+			LOG(("MtsLink ThreadRead: %1 in %2 unread=%3 entry=%4 "
+				"pending=%5 root=%6"
+				).arg(parentId
+				).arg(eventChatId
+				).arg(count
+				).arg(entry ? 1 : 0
+				).arg((pending != PendingThreadUnread.end())
+					? pending.value().count
+					: -1
+				).arg(session->data().message(peerId, rootId) ? 1 : 0));
+			// Read in another client: the replies to a thread without
+			// the subscription are not unread any more (the chat dot).
+			if (pending != PendingThreadUnread.end()) {
+				if (count > 0) {
+					pending.value().count = count;
+				} else {
+					PendingThreadUnread.erase(pending);
+				}
+			}
 			if (entry) {
 				entry->setUnreadCount(count);
 				session->data().refreshChatListEntry(Dialogs::Key(entry));
@@ -5783,6 +5809,7 @@ void handleChatEvent(
 					session->data().requestItemViewRefresh(root);
 				}
 			}
+			refreshThreadsMark(session, peerId);
 			return;
 		}
 		const auto history = session->data().historyLoaded(peerId);
