@@ -1592,12 +1592,23 @@ void StickersBox::Inner::paintRowThumbnail(
 			row->stickerMedia->thumbnailWanted(origin);
 		}
 	}
+	// A local static sticker (no thumbnail): the sticker itself, scaled.
+	const auto local = !row->thumbnailMedia
+		&& row->stickerMedia
+		&& !row->sticker->hasThumbnail()
+		&& row->sticker->sticker()
+		&& row->sticker->sticker()->isStatic();
+	if (local) {
+		row->stickerMedia->automaticLoad(origin, nullptr);
+	}
 	validateAnimation(row);
 	const auto thumb = row->thumbnailMedia
 		? row->thumbnailMedia->image()
-		: row->stickerMedia
-		? row->stickerMedia->thumbnail()
-		: nullptr;
+		: !row->stickerMedia
+		? nullptr
+		: local
+		? row->stickerMedia->getStickerLarge()
+		: row->stickerMedia->thumbnail();
 	const auto paused = _show->paused(ChatHelpers::PauseReason::Layer);
 	const auto x = left + (_st.photoSize - row->pixWidth) / 2;
 	const auto y = _st.photoPosition.y()
@@ -2718,6 +2729,9 @@ StickersBox::Inner::Cover StickersBox::Inner::fillSetCover(
 		? QSize(
 			sticker->thumbnailLocation().width(),
 			sticker->thumbnailLocation().height())
+		: !sticker->dimensions.isEmpty()
+		// A local sticker (no thumbnail): the size of the sticker itself.
+		? sticker->dimensions
 		: QSize(1, 1);
 	auto pixWidth = size.width();
 	auto pixHeight = size.height();
