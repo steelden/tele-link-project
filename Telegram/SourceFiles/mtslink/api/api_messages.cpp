@@ -602,9 +602,39 @@ void Messages::loadAround(
 			[=](const QString &) { emitEmpty(); });
 	};
 
-	request(messageId, u"Before"_q, 1, [=](const QJsonObject &result) {
-		if (const auto prevId = firstId(result); !prevId.isEmpty()) {
-			request(prevId, u"After"_q, half, emitResult);
+	// The older half before the target, then the newer half from the
+	// message right before it (the target included).
+	request(messageId, u"Before"_q, half, [=](const QJsonObject &result) {
+		const auto older = result.value("value").toObject();
+		const auto olderList = older.value("messages").toArray();
+		auto prevId = QString();
+		auto prevDate = 0.;
+		for (const auto &item : olderList) {
+			const auto obj = item.toObject();
+			const auto date = obj.value("createdAt").toDouble();
+			if (prevId.isEmpty() || date > prevDate) {
+				prevId = obj.value("id").toString();
+				prevDate = date;
+			}
+		}
+		if (!prevId.isEmpty()) {
+			request(prevId, u"After"_q, half + 1, [=](const QJsonObject &r) {
+				const auto newer = r.value("value").toObject();
+				auto messages = newer.value("messages").toArray();
+				for (const auto &item : olderList) {
+					messages.push_back(item);
+				}
+				auto profiles = newer.value("memberProfiles").toArray();
+				for (const auto &item : older.value("memberProfiles").toArray()) {
+					profiles.push_back(item);
+				}
+				emitResult(QJsonObject{
+					{ "value", QJsonObject{
+						{ "messages", messages },
+						{ "memberProfiles", profiles },
+					} },
+				});
+			});
 			return;
 		}
 		// The target is the first message in the chat: nothing before it,
@@ -617,6 +647,44 @@ void Messages::loadAround(
 			}
 		});
 	});
+}
+
+void Messages::loadAfter(
+		const ChatId &chatId,
+		const MessageId &fromId,
+		int limit,
+		SliceDone done) {
+	_rpc->call(
+		"Chat.GetMessagesV2",
+		QJsonObject{
+			{ "chatId", chatId },
+			{ "from", fromId },
+			{ "direction", u"After"_q },
+			{ "limit", limit },
+		},
+		[=](const QJsonObject &result) {
+			const auto value = result.value("value").toObject();
+			QList<MessageData> messages;
+			for (const auto &item : value.value("messages").toArray()) {
+				auto msg = parseMessage(item.toObject());
+				if (msg.isDeleted) {
+					Q_EMIT deletedMessageSeen(
+						msg.chatId.isEmpty() ? chatId : msg.chatId,
+						msg.id);
+					continue;
+				}
+				if (msg.chatId.isEmpty()) {
+					msg.chatId = chatId;
+				}
+				messages.push_back(std::move(msg));
+			}
+			QList<MemberProfile> profiles;
+			for (const auto &item : value.value("memberProfiles").toArray()) {
+				profiles.push_back(parseProfile(item.toObject()));
+			}
+			done(std::move(messages), std::move(profiles));
+		},
+		[=](const QString &) { done({}, {}); });
 }
 
 bool Messages::isLoading(const ChatId &chatId) const {

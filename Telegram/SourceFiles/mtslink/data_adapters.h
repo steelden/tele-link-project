@@ -423,6 +423,13 @@ void updateMessage(
 [[nodiscard]] QString msgIdToMtsLinkId(PeerId peerId, MsgId msgId);
 void registerMessageId(PeerId peerId, MsgId msgId, const QString &mtsLinkId);
 
+// The items of a loaded slice (created detached or already known), from
+// the oldest to the newest.
+[[nodiscard]] std::vector<not_null<HistoryItem*>> sliceItems(
+	not_null<Main::Session*> session,
+	PeerId peerId,
+	const QList<Api::MessageData> &messages);
+
 [[nodiscard]] QString buildChatLink(PeerId peerId);
 [[nodiscard]] QString buildMessageLink(
 	not_null<HistoryItem*> item,

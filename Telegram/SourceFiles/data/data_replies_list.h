@@ -29,6 +29,11 @@ struct RepliesReadTillUpdate;
 
 class RepliesList final : public base::has_weak_ptr {
 public:
+	// MTS Link: a jump target found on the older pages (the view was shown
+	// before it was loaded, it is shown again).
+	[[nodiscard]] rpl::producer<MsgId> mtsLinkSeekFound() const {
+		return _mtsLinkSeekFound.events();
+	}
 	RepliesList(
 		not_null<History*> history,
 		MsgId rootId,
@@ -143,6 +148,7 @@ private:
 	std::optional<int> _skippedAfter;
 	rpl::variable<std::optional<int>> _fullCount;
 	rpl::event_stream<> _listChanges;
+	rpl::event_stream<MsgId> _mtsLinkSeekFound;
 	rpl::event_stream<> _instantChanges;
 	std::optional<MsgId> _loadingAround;
 	// MTS Link: the server answered (the cached page isn't applied then).

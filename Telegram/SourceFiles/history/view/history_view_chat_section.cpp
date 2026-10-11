@@ -4192,6 +4192,13 @@ void ChatWidget::setReplies(std::shared_ptr<Data::RepliesList> replies) {
 	resetRepliesKeyboardState();
 	_repliesLifetime.destroy();
 
+	_replies->mtsLinkSeekFound(
+	) | rpl::on_next([=](MsgId id) {
+		if (const auto item = session().data().message(_peer->id, id)) {
+			showAtPosition(item->position(), FullMsgId());
+		}
+	}, _repliesLifetime);
+
 	_replies->unreadCountValue(
 	) | rpl::on_next([=](std::optional<int> count) {
 		refreshUnreadCountBadge(count);

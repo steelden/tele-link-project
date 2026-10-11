@@ -900,6 +900,7 @@ void RepliesList::loadBefore() {
 					LOG(("MtsLink Thread: target %1 found after %2 pages"
 						).arg(seek.bare).arg(_mtsLinkSeekPages + 1));
 					_mtsLinkSeekId = 0;
+					_mtsLinkSeekFound.fire_copy(seek);
 				} else if (_skippedBefore.value_or(0) != 0
 					&& ++_mtsLinkSeekPages < kMaxSeekPages) {
 					loadBefore();

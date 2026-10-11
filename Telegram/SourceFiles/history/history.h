@@ -271,6 +271,11 @@ public:
 	[[nodiscard]] Element *firstUnreadMessage() const;
 
 	[[nodiscard]] bool loadedAtBottom() const; // last message is in the list
+	// MTS Link: a slice around a jump target (not till the bottom) and the
+	// newest page (till the bottom), loaded by the adapter.
+	void mtsLinkSetLoadedAtBottom(bool loaded) {
+		_loadedAtBottom = loaded;
+	}
 	void setNotLoadedAtBottom();
 	[[nodiscard]] bool loadedAtTop() const; // nothing was added after loading history back
 	void markLoadedAtTop();

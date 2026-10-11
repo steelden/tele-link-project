@@ -143,6 +143,15 @@ public:
 		const MessageId &fromMessageId = {},
 		int limit = 50);
 
+	using SliceDone = std::function<void(
+		QList<MessageData>,
+		QList<MemberProfile>)>;
+	// The newer messages after a message (loading down from a jump).
+	void loadAfter(
+		const ChatId &chatId,
+		const MessageId &fromId,
+		int limit,
+		SliceDone done);
 	void loadAround(
 		const ChatId &chatId,
 		const MessageId &messageId,

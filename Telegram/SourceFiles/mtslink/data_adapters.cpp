@@ -2748,7 +2748,10 @@ void connectToSession(
 			if (!newerItems.empty()) {
 				const auto history =
 					mainSession->data().history(peerId);
-				history->addCreatedNewerSlice(newerItems);
+				// Not after a slice around a jump target (a gap).
+				if (history->loadedAtBottom()) {
+					history->addCreatedNewerSlice(newerItems);
+				}
 				// Messages already shown are not in newerItems, so its last
 				// item may be older than the current chat list preview.
 				const auto newest = *ranges::max_element(
@@ -2781,6 +2784,21 @@ void connectToSession(
 						history->setMtsLinkInboxReadDate(readDate);
 					}
 				}
+			}
+			if (const auto history = mainSession->data().historyLoaded(peerId)
+				; history
+				&& history->isEmpty()
+				&& hasCachedMessages
+				&& !messages.isEmpty()) {
+				// Unloaded (a jump to the end from a slice of a jump): the
+				// newest page is the history now.
+				const auto slice = sliceItems(mainSession, peerId, messages);
+				history->addCreatedOlderSlice(slice);
+				history->mtsLinkSetLoadedAtBottom(true);
+				if (!rawLastId.isEmpty()) {
+					setOldestLoadedMessageId(peerId, rawLastId);
+				}
+				mainSession->data().notifyHistoryChangeDelayed(history);
 			}
 			mainSession->data().sendHistoryChangeNotifications();
 			saveMessagesToCache(mainSession, chatId, messages, profiles);
@@ -4749,6 +4767,12 @@ HistoryItem *addMessage(
 		fields.replyTo.topicRootId = parentMsgId;
 		fields.flags |= MessageFlag::HasReplyInfo;
 		registerThreadRoot(chatPeerId, msgId, parentMsgId);
+		// The root may be not loaded (an old thread found by the search):
+		// its uuid is needed to load the thread (an empty "parentId" was
+		// a "badRequest" and an empty thread).
+		if (msgIdToMtsLinkId(chatPeerId, parentMsgId).isEmpty()) {
+			registerMessageId(chatPeerId, parentMsgId, src.parentId);
+		}
 	}
 	if (src.forward) {
 		const auto &fwd = *src.forward;
@@ -4996,7 +5020,13 @@ bool addOlderMessages(
 
 		const auto existing = session->data().message(chatPeerId, msgId);
 		if (existing) {
-			++duplicates;
+			// Known but not shown (the history was unloaded by a jump,
+			// a search result): shown in its place.
+			if (!existing->mainView()) {
+				items.push_back(existing);
+			} else {
+				++duplicates;
+			}
 			continue;
 		}
 
@@ -6539,6 +6569,29 @@ void updateMessage(
 		item->setText(parseMentionedText(src.text, src.markdown, src.mentions, session));
 		session->data().requestItemTextRefresh(item);
 	}
+}
+
+std::vector<not_null<HistoryItem*>> sliceItems(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		const QList<Api::MessageData> &messages) {
+	auto result = std::vector<not_null<HistoryItem*>>();
+	for (const auto &src : messages) {
+		auto detached = std::vector<not_null<HistoryItem*>>();
+		auto item = addMessage(session, src, false, &detached);
+		if (!item) {
+			item = session->data().message(peerId, localMsgId(src.id));
+		}
+		if (item
+			&& item->history()->peer->id == peerId
+			&& !ranges::contains(result, not_null(item))) {
+			result.push_back(item);
+		}
+	}
+	ranges::sort(result, ranges::less(), [](not_null<HistoryItem*> item) {
+		return std::make_pair(item->date(), item->id);
+	});
+	return result;
 }
 
 void registerMessageId(PeerId peerId, MsgId msgId, const QString &mtsLinkId) {

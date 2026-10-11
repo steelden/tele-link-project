@@ -5270,6 +5270,57 @@ void HistoryWidget::loadMessagesDown() {
 		return;
 	}
 	if (MtsLink::hasChatId(_history->peer->id)) {
+		// After a jump to an old message: the newer ones, till the bottom
+		// (not while the jump is in progress).
+		if (_history->loadedAtBottom()
+			|| _history->isEmpty()
+			|| (_delayedShowAtMsgId > 0)
+			|| _delayedShowAtRequest) {
+			return;
+		}
+		const auto peerId = _history->peer->id;
+		const auto chatId = MtsLink::peerIdToChatId(peerId);
+		const auto last = _history->blocks.back()->messages.back()->data();
+		const auto fromId = MtsLink::msgIdToMtsLinkId(peerId, last->id);
+		const auto mts = session().account().mtsLinkSession();
+		if (chatId.isEmpty() || fromId.isEmpty() || !mts) {
+			return;
+		}
+		constexpr auto kLimit = 50;
+		_preloadDownRequest = -1;
+		mts->messages()->loadAfter(chatId, fromId, kLimit, crl::guard(this, [=](
+				QList<MtsLink::Api::MessageData> messages,
+				QList<MtsLink::Api::MemberProfile> profiles) {
+			_preloadDownRequest = 0;
+			for (const auto &p : profiles) {
+				MtsLink::applyUserData(&session(), p);
+			}
+			const auto history = session().data().history(peerId);
+			const auto slice = MtsLink::sliceItems(
+				&session(),
+				peerId,
+				messages);
+			auto items = std::vector<not_null<HistoryItem*>>();
+			for (const auto &item : slice) {
+				if (!item->mainView()) {
+					items.push_back(item);
+				}
+			}
+			if (!items.empty()) {
+				history->addCreatedNewerSlice(items);
+			}
+			if (messages.size() < kLimit) {
+				history->mtsLinkSetLoadedAtBottom(true);
+			}
+			if (_history != history) {
+				return;
+			}
+			updateHistoryGeometry(false, true, { ScrollChangeNoJumpToBottom, 0 });
+			if (_list) {
+				_list->update();
+			}
+			preloadHistoryIfNeeded();
+		}));
 		return;
 	}
 
@@ -5379,24 +5430,56 @@ void HistoryWidget::delayedShowAt(
 						return;
 					}
 					QObject::disconnect(*conn);
+					if (_delayedShowAtMsgId == targetMsgId) {
+						_delayedShowAtRequest = 0;
+					}
 					for (const auto &p : profiles) {
 						MtsLink::applyUserData(&session(), p);
 					}
-					std::vector<not_null<HistoryItem*>> items;
-					for (const auto &src : messages) {
-						MtsLink::addMessage(
-							&session(), src, false, &items);
-					}
-					// The requested chat (the open one may be another now).
-					if (!items.empty()) {
-						session().data().history(peerId)->addCreatedOlderSlice(
-							items);
+					const auto history = session().data().history(peerId);
+					const auto slice = MtsLink::sliceItems(
+						&session(),
+						peerId,
+						messages);
+					// Adjacent to the shown messages: inserted among them,
+					// otherwise the slice replaces them (as in Telegram, the
+					// rest is loaded up and down by the scroll).
+					const auto adjacent = history->isEmpty()
+						|| ranges::any_of(slice, [](not_null<HistoryItem*> i) {
+							return i->mainView() != nullptr;
+						});
+					auto unloaded = false;
+					if (adjacent) {
+						auto items = std::vector<not_null<HistoryItem*>>();
+						for (const auto &item : slice) {
+							if (!item->mainView()) {
+								items.push_back(item);
+							}
+						}
+						if (!items.empty()) {
+							history->addCreatedOlderSlice(items);
+						}
+					} else if (!slice.empty()) {
+						unloaded = true;
+						history->clear(History::ClearType::Unload);
+						history->addCreatedOlderSlice(slice);
+						const auto last = history->lastMessage();
+						history->mtsLinkSetLoadedAtBottom(last
+							&& ranges::contains(slice, not_null(last)));
+						MtsLink::setOldestLoadedMessageId(
+							peerId,
+							MtsLink::msgIdToMtsLinkId(
+								peerId,
+								slice.front()->id));
 					}
 					if (!_history || _history->peer->id != peerId) {
 						return;
 					}
 					_delayedShowAtMsgId = -1;
-					if (_historyInited && _history->peer->id == peerId) {
+					if (unloaded) {
+						setMsgId(targetMsgId, _delayedShowAtMsgParams);
+						historyLoaded();
+					} else if (_historyInited && _history->peer->id == peerId) {
 						// Same as the "Showing instant" path: historyLoaded()
 						// re-inits the history and loses the jump target.
 						updateHistoryGeometry();
@@ -5416,6 +5499,7 @@ void HistoryWidget::delayedShowAt(
 						historyLoaded();
 					}
 				});
+			_delayedShowAtRequest = -1;
 			mts->messages()->loadAround(chatId, messageId, 50);
 		} else {
 			LOG(("MtsLink: can't jump to msg=%1 chat='%2' uuid='%3'")
@@ -9025,7 +9109,11 @@ void HistoryWidget::updateHistoryGeometry(
 	// MTS Link doesn't follow new incoming messages, but if the bottom
 	// message just got taller (comments bar, link preview, media) we keep
 	// the bottom visible.
+	// Not while scrolling to a jump target (still at the bottom then).
+	const auto mtsLinkJumping = isMtsLink
+		&& (_scrollToAnimation.animating() || (_delayedShowAtMsgId > 0));
 	const auto mtsLinkKeepBottom = isMtsLink
+		&& !mtsLinkJumping
 		&& wasAtBottom
 		&& !initial
 		&& bottomItemId
@@ -9039,7 +9127,7 @@ void HistoryWidget::updateHistoryGeometry(
 		_scrollToAnimation.stop();
 	} else if (mtsLinkKeepBottom && !loadedDown) {
 		newScrollTop = ScrollMax;
-	} else if (isMtsLink && wasAtBottom && !loadedDown) {
+	} else if (isMtsLink && !mtsLinkJumping && wasAtBottom && !loadedDown) {
 		// MTS Link: at the bottom new messages are always shown, the
 		// active window reads them, the inactive one adds the unread bar.
 		newScrollTop = _history->unreadBar()
