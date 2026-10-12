@@ -146,6 +146,8 @@ void requestProfileFields(not_null<Main::Session*> session);
 base::flat_set<FullMsgId> CallMessages;
 std::function<void()> TokenRefreshCallback;
 bool TokenRefreshInProgress = false;
+// The CDN answers 403 for a thumbnail not made yet too: no refresh for each.
+crl::time LastTokenRefresh = 0;
 QHash<QString, QString> EmojiToIdMap;
 std::vector<QString> EmojiCatalogueOrder; // The MTS Link catalogue order.
 QHash<QString, QString> IdToEmojiMap;
@@ -2473,6 +2475,7 @@ void connectToSession(
 		[mainSession, mtsSession](const QString &newToken) {
 			MtsLink::setFileAuthToken(newToken);
 			TokenRefreshInProgress = false;
+			LastTokenRefresh = crl::now();
 			const auto userId = mainSession->userId().bare;
 			const auto deviceId = mtsSession->auth()->deviceId();
 			mainSession->account().local().writeMtsLinkToken(
@@ -5966,7 +5969,9 @@ void handleChatEvent(
 		const auto threadId = value.value("threadId").toString();
 		const auto mts = session->account().mtsLinkSession();
 		if (!threadId.isEmpty() && mts && mts->threads()) {
-			mts->threads()->loadThread(threadId);
+			// The thread may be not found right after the event.
+			constexpr auto kRetries = 5;
+			mts->threads()->loadThread(threadId, kRetries);
 		}
 	} else if (type == "PinnedChatEvent") {
 		const auto eventChatId = value.value("chatId").toString();
@@ -7978,7 +7983,11 @@ void requestTokenRefresh() {
 		crl::on_main([] { requestTokenRefresh(); });
 		return;
 	}
+	constexpr auto kMinRefreshInterval = crl::time(60 * 1000);
 	if (TokenRefreshInProgress) {
+		return;
+	} else if (LastTokenRefresh
+		&& crl::now() - LastTokenRefresh < kMinRefreshInterval) {
 		return;
 	}
 	TokenRefreshInProgress = true;

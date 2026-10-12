@@ -34,14 +34,37 @@ constexpr auto kToastDuration = 9 * crl::time(1000);
 std::optional<RichPasteDecision> MimeDataRichPasteOffer(
 		not_null<Main::Session*> session,
 		not_null<const QMimeData*> data) {
-	if (PasteAsPlainTextRequested()
-		|| !Iv::Editor::CanAuthorRichMessages(session)) {
+	if (PasteAsPlainTextRequested()) {
 		return std::nullopt;
 	}
 	const auto limits = Iv::ResolveRichMessageLimits(session);
-	if (Iv::Editor::MimeDataHasRichStructure(session, data, limits)) {
-		return RichPasteDecision{ .offer = RichPasteOffer::Editor };
-	} else if (data->hasHtml() || !data->hasText()) {
+	// MTS Link: no rich messages (the editor of them is Premium only), the
+	// formatting of the pasted HTML a message can have is applied in the
+	// field: bold, italic, links, code, quotes, lists and headings as lines.
+	if (data->hasHtml()) {
+		auto imported = Iv::Editor::BlocksFromMimeData(
+			session,
+			data,
+			limits,
+			0);
+		if (!imported || imported->blocks.empty()) {
+			return std::nullopt;
+		}
+		auto page = Iv::RichPage();
+		page.blocks = std::move(imported->blocks);
+		const auto flat = Iv::FlattenRichPageToSimpleText(page);
+		if (flat.text.trimmed().isEmpty() || flat.entities.isEmpty()) {
+			return std::nullopt;
+		}
+		return RichPasteDecision{
+			.offer = RichPasteOffer::Field,
+			.markdown = TextWithTags{
+				flat.text,
+				TextUtilities::ConvertEntitiesToTextTags(flat.entities),
+			},
+			.applyNow = true,
+		};
+	} else if (!data->hasText()) {
 		return std::nullopt;
 	}
 	const auto text = data->text();
@@ -53,9 +76,8 @@ std::optional<RichPasteDecision> MimeDataRichPasteOffer(
 			.offer = RichPasteOffer::Field,
 			.markdown = std::move(*markdown),
 		};
-	} else if (Iv::Editor::TextHasMarkdownStructure(text, limits)) {
-		return RichPasteDecision{ .offer = RichPasteOffer::Markdown };
 	}
+	// MTS Link: no rich messages editor (Premium), the text as pasted.
 	return std::nullopt;
 }
 

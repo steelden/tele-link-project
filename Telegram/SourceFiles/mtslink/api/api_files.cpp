@@ -12,6 +12,7 @@ based on Telegram Desktop.
 #include <QtNetwork/QNetworkReply>
 #include <QtCore/QJsonArray>
 #include <QtCore/QFile>
+#include <QtCore/QTimer>
 
 namespace MtsLink::Api {
 
@@ -156,7 +157,8 @@ void Files::doHttpUpload(
 		const UploadResult &result,
 		DoneHandler done,
 		FailHandler fail,
-		ProgressHandler progress) {
+		ProgressHandler progress,
+		int attempt) {
 	const auto qurl = QUrl(url);
 	QNetworkRequest request(qurl);
 
@@ -206,6 +208,33 @@ void Files::doHttpUpload(
 		[=]() {
 			reply->deleteLater();
 			if (reply->error() != QNetworkReply::NoError) {
+				// The connection dropped, the server failed: uploaded again.
+				constexpr auto kDelays = std::array<int, 3>{ 2000, 5000, 10000 };
+				const auto status = reply->attribute(
+					QNetworkRequest::HttpStatusCodeAttribute).toInt();
+				if ((!status || status >= 500)
+					&& reply->error() != QNetworkReply::OperationCanceledError
+					&& attempt < int(kDelays.size())) {
+					LOG(("MtsLink Files: HTTP upload failed: %1 (status %2), "
+						"retry %3 in %4 ms"
+						).arg(reply->errorString()
+						).arg(status
+						).arg(attempt + 1
+						).arg(kDelays[attempt]));
+					QTimer::singleShot(kDelays[attempt], this, [=] {
+						doHttpUpload(
+							url,
+							method,
+							headers,
+							content,
+							result,
+							done,
+							fail,
+							progress,
+							attempt + 1);
+					});
+					return;
+				}
 				LOG(("MtsLink Files: HTTP upload failed: %1")
 					.arg(reply->errorString()));
 				if (fail) {

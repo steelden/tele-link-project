@@ -38,7 +38,9 @@ public:
 	void loadMyThreads(int limit = 100, int offset = 0);
 	// The list saved from the last "myThreadsReceived" (the disk cache).
 	void applyCachedList(const QJsonObject &value);
-	void loadThread(const MessageId &threadId);
+	// Retries: JoinToThreadEvent comes before the server gives the thread
+	// ("thread_not_found" right after it).
+	void loadThread(const MessageId &threadId, int retries = 0);
 	void setThreadNotifications(
 		const ChatId &chatId,
 		const MessageId &threadId,

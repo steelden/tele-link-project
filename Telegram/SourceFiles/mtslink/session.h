@@ -71,6 +71,7 @@ private:
 
 	void scheduleReconnect();
 	void doReconnect();
+	void initTimeout();
 
 	UserId _userId;
 	OrganizationId _organizationId;
@@ -79,6 +80,7 @@ private:
 	bool _manualStop = false;
 	int _initPendingCalls = 0;
 	QTimer _reconnectTimer;
+	QTimer _initTimer;
 	int _reconnectDelay = 0;
 	int _refreshRetryDelay = 0;
 };

@@ -10,6 +10,7 @@ based on Telegram Desktop.
 #include <QObject>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QTimer>
 #include <functional>
 
 namespace MtsLink {
@@ -28,6 +29,10 @@ public:
 	void connectAndAuth(const QString &token);
 	void disconnect();
 
+	// A dead or stuck connection: dropped, the session reconnects and the
+	// requests are sent again.
+	void dropConnection(const QString &reason);
+
 	void call(
 		const QString &method,
 		const QJsonObject &param,
@@ -40,6 +45,7 @@ public:
 		EventHandler handler);
 
 	[[nodiscard]] bool isConnected() const;
+	[[nodiscard]] bool isConnecting() const;
 	[[nodiscard]] QString clientId() const;
 
 Q_SIGNALS:
@@ -56,14 +62,30 @@ private:
 	void cancelPending();
 	[[nodiscard]] QString generateId() const;
 
+	// The connection is unstable: the requests wait for it, are sent again
+	// after a reconnect and when the answer doesn't come (rate limit).
+	void sendCall(const QString &id);
+	void sendWaiting();
+	void requeuePending(const QString &reason);
+	void checkTimeouts();
+	void retryRateLimited();
+	void failCalls(std::vector<QString> ids, const QString &error);
+
 	Connection _connection;
 	struct PendingCall {
 		QString method;
+		QJsonObject param;
 		DoneHandler handler;
 		FailHandler failHandler;
+		int attempts = 0;
+		crl::time sentAt = 0;
+		crl::time deadline = 0; // Zero: waits for the connection.
 	};
 	QHash<QString, PendingCall> _pending;
 	QHash<QString, EventHandler> _subscriptions;
+	QTimer _timeoutTimer;
+	// Different requests without an answer since the last one answered.
+	QSet<QString> _timedOut;
 };
 
 } // namespace MtsLink

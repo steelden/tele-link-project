@@ -22,10 +22,13 @@ public:
 
 	void connectToServer(const QString &token);
 	void disconnect();
+	// Dead or stuck: closed, "disconnected" is emitted (to reconnect).
+	void dropConnection();
 	void sendControl(const QString &name, const QJsonObject &param = {});
 	void sendMessages(const QJsonArray &messages);
 
 	[[nodiscard]] bool isConnected() const;
+	[[nodiscard]] bool isConnecting() const;
 	[[nodiscard]] QString sid() const;
 
 Q_SIGNALS:
@@ -51,9 +54,19 @@ private:
 	void processIncomingData();
 
 	void onSocketDisconnected();
+	// Once for an attempt: "disconnected" isn't emitted by the socket if
+	// the connection wasn't established (no network, no answer).
+	void finishAttempt();
+	void connectTimeout();
 
 	QSslSocket _socket;
 	QTimer _pingTimer;
+	QTimer _connectTimer;
+	bool _attemptActive = false;
+	bool _replacing = false;
+	crl::time _lastReceived = 0;
+	int _pingInterval = 0;
+	int _pingTimeout = 0;
 	QString _token;
 	QString _sid;
 	QString _host;

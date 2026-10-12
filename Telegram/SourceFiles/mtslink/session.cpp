@@ -11,6 +11,8 @@ namespace MtsLink {
 namespace {
 constexpr auto kReconnectInitialMs = 1000;
 constexpr auto kReconnectMaxMs = 30000;
+// Connected, but the subscriptions are not done in this time: a new attempt.
+constexpr auto kInitTimeoutMs = 30000;
 } // namespace
 
 Session::Session(QObject *parent)
@@ -21,6 +23,12 @@ Session::Session(QObject *parent)
 		&QTimer::timeout,
 		this,
 		&Session::doReconnect);
+	_initTimer.setSingleShot(true);
+	QObject::connect(
+		&_initTimer,
+		&QTimer::timeout,
+		this,
+		&Session::initTimeout);
 	QObject::connect(
 		&_rpc,
 		&Rpc::connected,
@@ -32,6 +40,7 @@ Session::Session(QObject *parent)
 		this,
 		[this] {
 			_active = false;
+			_initTimer.stop();
 			Q_EMIT stopped();
 			if (!_manualStop) {
 				scheduleReconnect();
@@ -47,9 +56,15 @@ Session::Session(QObject *parent)
 		&Api::Auth::tokenRefreshed,
 		this,
 		[this](const QString &newToken) {
-			LOG(("MtsLink Session: token refreshed, reconnecting"));
 			_token = newToken;
 			MtsLink::setFileAuthToken(newToken);
+			if (_rpc.isConnected() || _rpc.isConnecting()) {
+				// Refreshed for the files (CDN): the connection is alive,
+				// reconnecting dropped it with all the requests.
+				LOG(("MtsLink Session: token refreshed, connection kept"));
+				return;
+			}
+			LOG(("MtsLink Session: token refreshed, reconnecting"));
 			_rpc.connectAndAuth(newToken);
 		});
 	QObject::connect(
@@ -136,6 +151,7 @@ void Session::start(const QString &token, bool needsRefresh) {
 void Session::stop() {
 	_manualStop = true;
 	_reconnectTimer.stop();
+	_initTimer.stop();
 	_active = false;
 	// Pending RPC fail handlers capture the API objects, cancel them first.
 	_rpc.disconnect();
@@ -167,7 +183,8 @@ void Session::onAuthError(const QString &errorText) {
 	LOG(("MtsLink Session: auth error: %1, trying token refresh")
 		.arg(errorText));
 	_active = false;
-	_rpc.disconnect();
+	// Not disconnect(): the requests are sent with the new connection.
+	_rpc.dropConnection(u"auth error"_q);
 	_auth.refreshTokens();
 }
 
@@ -175,6 +192,7 @@ void Session::onConnected() {
 	LOG(("MtsLink Session: WS connected, running init sequence"));
 	_reconnectDelay = 0;
 	_active = true;
+	_initTimer.start(kInitTimeoutMs);
 	Q_EMIT started();
 	runInitSequence();
 }
@@ -209,6 +227,7 @@ void Session::subscribeToEvents() {
 	auto onDone = [this](const QJsonObject &) {
 		if (--_initPendingCalls <= 0) {
 			LOG(("MtsLink Session: fully initialized"));
+			_initTimer.stop();
 			Q_EMIT initialized();
 			loadChatLists();
 		}
@@ -304,8 +323,20 @@ void Session::doReconnect() {
 	if (_manualStop || _token.isEmpty()) {
 		return;
 	}
+	if (_rpc.isConnected() || _rpc.isConnecting()) {
+		// Connected meanwhile (after the token refresh).
+		LOG(("MtsLink Session: reconnect skipped, already connected"));
+		return;
+	}
 	LOG(("MtsLink Session: attempting reconnect"));
 	_rpc.connectAndAuth(_token);
+}
+
+void Session::initTimeout() {
+	if (_manualStop || !_rpc.isConnected()) {
+		return;
+	}
+	_rpc.dropConnection(u"the subscriptions are not done"_q);
 }
 
 } // namespace MtsLink

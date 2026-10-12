@@ -94,7 +94,10 @@ private:
 		int64 ready = 0;
 		int64 total = 0;
 		int redirectsLeft = kMaxHttpRedirects;
-		int retriesLeft = 3;
+		int retriesLeft = 5;
+		// Sent again later: the signals of the old reply are ignored (both
+		// "progress" and "error" came for a 403 and took two retries).
+		bool waiting = false;
 	};
 
 	// Constructor.
@@ -108,6 +111,11 @@ private:
 	void send(const Enqueued &entry);
 	[[nodiscard]] not_null<QNetworkReply*> send(int id, const QString &url);
 	[[nodiscard]] Sent *findSent(int id, not_null<QNetworkReply*> reply);
+	bool retryLater(
+		int id,
+		not_null<Sent*> sent,
+		not_null<QNetworkReply*> reply,
+		const QString &reason);
 	void removeSent(int id);
 	void progress(
 		int id,
@@ -343,9 +351,50 @@ WebLoadManager::Sent *WebLoadManager::findSent(
 		int id,
 		not_null<QNetworkReply*> reply) {
 	const auto i = _sent.find(id);
-	return (i != end(_sent) && i->second.reply == reply)
+	return (i != end(_sent)
+		&& i->second.reply == reply
+		&& !i->second.waiting)
 		? &i->second
 		: nullptr;
+}
+
+// MTS Link: the CDN answers 403 both for an expired token and for a
+// thumbnail not made yet (a new message), the connections drop: the file is
+// requested again with growing delays.
+bool WebLoadManager::retryLater(
+		int id,
+		not_null<Sent*> sent,
+		not_null<QNetworkReply*> reply,
+		const QString &reason) {
+	constexpr auto kDelays = std::array<int, 5>{ 2000, 4000, 8000, 15000, 30000 };
+	if (sent->retriesLeft <= 0) {
+		return false;
+	}
+	const auto attempt = std::clamp(
+		int(kDelays.size()) - sent->retriesLeft,
+		0,
+		int(kDelays.size()) - 1);
+	--sent->retriesLeft;
+	sent->waiting = true;
+	const auto delay = kDelays[attempt];
+	const auto url = sent->url;
+	LOG(("MtsLink: %1 for '%2', retry in %3 ms (%4 left)"
+		).arg(reason
+		).arg(url
+		).arg(delay
+		).arg(sent->retriesLeft));
+	deleteDeferred(reply);
+	QTimer::singleShot(delay, _network.get(), [=] {
+		const auto it = _sent.find(id);
+		if (it != _sent.end()) {
+			it->second.waiting = false;
+			it->second.data.clear();
+			it->second.ready = 0;
+			it->second.total = 0;
+			it->second.reply = send(id, url);
+		}
+	});
+	return true;
 }
 
 void WebLoadManager::progress(
@@ -370,21 +419,9 @@ void WebLoadManager::progress(
 	} else if ((status == 401 || status == 403)
 		&& reply->url().toString().contains(u"mts-link.ru"_q)) {
 		if (const auto sent = findSent(id, reply)) {
-			if (sent->retriesLeft > 0) {
-				--sent->retriesLeft;
-				const auto url = sent->url;
-				LOG(("MtsLink: CDN auth failed (%1), refreshing token").arg(status));
-				MtsLink::requestTokenRefresh();
-				deleteDeferred(reply);
-				QTimer::singleShot(3000, _network.get(), [=] {
-					const auto it = _sent.find(id);
-					if (it != _sent.end()) {
-						it->second.data.clear();
-						it->second.ready = 0;
-						it->second.total = 0;
-						it->second.reply = send(id, url);
-					}
-				});
+			// The token is refreshed once a minute at most.
+			MtsLink::requestTokenRefresh();
+			if (retryLater(id, sent, reply, u"CDN %1"_q.arg(status))) {
 				return;
 			}
 		}
@@ -515,23 +552,22 @@ void WebLoadManager::failed(
 			});
 			return;
 		}
-		if ((status == 401 || status == 403)
-			&& sent->url.contains(u"mts-link.ru"_q)
-			&& sent->retriesLeft > 0) {
-			--sent->retriesLeft;
-			const auto url = sent->url;
-			LOG(("MtsLink: CDN auth failed (%1), refreshing token").arg(status));
+		const auto mtsLink = sent->url.contains(u"mts-link.ru"_q);
+		if (mtsLink && (status == 401 || status == 403)) {
+			// The token is refreshed once a minute at most.
 			MtsLink::requestTokenRefresh();
-			deleteDeferred(reply);
-			QTimer::singleShot(3000, _network.get(), [=] {
-				const auto it = _sent.find(id);
-				if (it != _sent.end()) {
-					it->second.data.clear();
-					it->second.ready = 0;
-					it->second.total = 0;
-					it->second.reply = send(id, url);
-				}
-			});
+			if (retryLater(id, sent, reply, u"CDN %1"_q.arg(status))) {
+				return;
+			}
+		} else if (mtsLink
+			&& (!status || status >= 500)
+			&& error != QNetworkReply::OperationCanceledError
+			&& retryLater(
+				id,
+				sent,
+				reply,
+				u"network error %1 (status %2)"_q.arg(int(error)).arg(status))) {
+			// The connection dropped, the server failed: requested again.
 			return;
 		}
 		LOG(("Network Error: "

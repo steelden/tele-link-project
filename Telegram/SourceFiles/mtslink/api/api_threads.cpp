@@ -5,6 +5,8 @@ based on Telegram Desktop.
 #include "mtslink/api/api_threads.h"
 #include "mtslink/rpc.h"
 
+#include <QtCore/QTimer>
+
 namespace MtsLink::Api {
 
 Threads::Threads(Rpc *rpc, QObject *parent)
@@ -49,12 +51,22 @@ void Threads::applyList(const QJsonObject &value, bool cached) {
 	}
 }
 
-void Threads::loadThread(const MessageId &threadId) {
+void Threads::loadThread(const MessageId &threadId, int retries) {
 	_rpc->call(
 		"Chat.GetMyThreadV2",
 		QJsonObject{ { "threadId", threadId } },
-		[this](const QJsonObject &result) {
+		[=](const QJsonObject &result) {
 			const auto value = result.value("value").toObject();
+			if (retries > 0
+				&& result.value("type").toString() == u"BusinessError"_q) {
+				constexpr auto kDelay = 2000;
+				LOG(("MtsLink Threads: %1 not found yet, retry in %2 ms "
+					"(%3 left)").arg(threadId).arg(kDelay).arg(retries));
+				QTimer::singleShot(kDelay, this, [=] {
+					loadThread(threadId, retries - 1);
+				});
+				return;
+			}
 			const auto thread = value.value("thread").toObject();
 			if (!thread.isEmpty()) {
 				QList<MemberProfile> profiles;

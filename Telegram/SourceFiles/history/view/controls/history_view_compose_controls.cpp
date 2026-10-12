@@ -2300,6 +2300,18 @@ void ComposeControls::offerRichPaste(not_null<const QMimeData*> data) {
 		if ((now == was) || !parent) {
 			return;
 		}
+		if (decision->applyNow) {
+			// MTS Link: the formatting of the pasted HTML right away.
+			const auto &markdown = decision->markdown;
+			const auto from = std::min(position, anchor);
+			_field->setTextWithTags(ChatHelpers::TextWithTagsReplaced(
+				was,
+				from,
+				std::max(position, anchor),
+				markdown));
+			_field->setCursorPosition(from + int(markdown.text.size()));
+			return;
+		}
 		ChatHelpers::ShowRichPasteToast({
 			.session = session,
 			.parent = parent,

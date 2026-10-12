@@ -86,7 +86,8 @@ private:
 		const UploadResult &result,
 		DoneHandler done,
 		FailHandler fail,
-		ProgressHandler progress);
+		ProgressHandler progress,
+		int attempt = 0);
 
 	Rpc *_rpc = nullptr;
 	QNetworkAccessManager *_network = nullptr;

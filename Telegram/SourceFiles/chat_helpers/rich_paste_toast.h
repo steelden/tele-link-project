@@ -25,6 +25,8 @@ enum class RichPasteOffer : uchar {
 struct RichPasteDecision {
 	RichPasteOffer offer = RichPasteOffer::Editor;
 	TextWithTags markdown;
+	// MTS Link: the formatted text replaces the pasted one right away.
+	bool applyNow = false;
 };
 
 struct RichPasteToastArgs {

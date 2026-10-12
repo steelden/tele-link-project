@@ -19,6 +19,9 @@ namespace {
 constexpr auto kPlatform = "desktop";
 constexpr auto kVersion = "1.0.0";
 constexpr auto kDefaultPingInterval = 10000;
+constexpr auto kDefaultPingTimeout = 60000;
+// Not connected and authorized in this time: a new attempt.
+constexpr auto kConnectTimeout = 20000;
 constexpr auto kWsPort = 443;
 
 [[nodiscard]] QByteArray GenerateWebSocketKey() {
@@ -72,6 +75,21 @@ constexpr auto kWsPort = 443;
 
 Connection::Connection(QObject *parent)
 : QObject(parent) {
+	_connectTimer.setSingleShot(true);
+	QObject::connect(
+		&_connectTimer,
+		&QTimer::timeout,
+		this,
+		&Connection::connectTimeout);
+	QObject::connect(
+		&_socket,
+		&QAbstractSocket::stateChanged,
+		this,
+		[this](QAbstractSocket::SocketState state) {
+			if (state == QAbstractSocket::UnconnectedState) {
+				finishAttempt();
+			}
+		});
 	_sendQueueTimer.setSingleShot(true);
 	QObject::connect(
 		&_sendQueueTimer,
@@ -110,6 +128,17 @@ Connection::~Connection() {
 }
 
 void Connection::connectToServer(const QString &token) {
+	if (_socket.state() != QAbstractSocket::UnconnectedState
+		|| _attemptActive) {
+		// connectToHostEncrypted() does nothing on a connected socket, and
+		// the state below (no handshake) dropped all the frames of it.
+		LOG(("MtsLink WS: closing the previous connection (state %1)"
+			).arg(int(_socket.state())));
+		_replacing = true;
+		_socket.abort();
+		finishAttempt();
+		_replacing = false;
+	}
 	_token = token;
 	_sendSeq = 0;
 	_recvSeq = 0;
@@ -154,7 +183,32 @@ void Connection::connectToServer(const QString &token) {
 			});
 	}
 
+	_attemptActive = true;
+	_lastReceived = crl::now();
+	_connectTimer.start(kConnectTimeout);
 	_socket.connectToHostEncrypted(_host, kWsPort);
+}
+
+void Connection::connectTimeout() {
+	if (!_attemptActive || _authenticated) {
+		return;
+	}
+	LOG(("MtsLink WS: not connected in %1 ms (state %2), a new attempt"
+		).arg(kConnectTimeout
+		).arg(int(_socket.state())));
+	dropConnection();
+}
+
+void Connection::dropConnection() {
+	if (!_attemptActive) {
+		return;
+	}
+	_socket.abort();
+	finishAttempt();
+}
+
+bool Connection::isConnecting() const {
+	return _attemptActive && !_authenticated;
 }
 
 void Connection::disconnect() {
@@ -319,6 +373,7 @@ void Connection::sendWebSocketHandshake() {
 }
 
 void Connection::onSocketReadyRead() {
+	_lastReceived = crl::now();
 	_readBuffer.append(_socket.readAll());
 
 	if (!_wsHandshakeDone) {
@@ -406,6 +461,7 @@ void Connection::processIncomingData() {
 
 void Connection::sendRawText(const QString &text) {
 	if (!_wsHandshakeDone) {
+		LOG(("MtsLink WS: not connected, a frame is not sent"));
 		return;
 	}
 	_socket.write(BuildWebSocketFrame(text.toUtf8()));
@@ -440,15 +496,18 @@ void Connection::handleControl(const QJsonObject &control, int seq) {
 	}
 	if (name == "open") {
 		_sid = param.value("sid").toString();
-		const auto pingInterval = param.value("pingInterval").toInt(
+		_pingInterval = param.value("pingInterval").toInt(
 			kDefaultPingInterval);
-		_pingTimer.start(pingInterval);
+		_pingTimeout = param.value("pingTimeout").toInt(
+			kDefaultPingTimeout);
+		_pingTimer.start(_pingInterval);
 		LOG(("MtsLink WS: got sid=%1, sending token").arg(_sid));
 		sendControl("token", QJsonObject{{"token", _token}});
 	} else if (name == "setTokenResp") {
 		const auto status = param.value("status").toString();
 		if (status == "ok") {
 			LOG(("MtsLink WS: setTokenResp status=ok"));
+			_connectTimer.stop();
 			_authenticated = true;
 			Q_EMIT connected(_sid);
 		} else {
@@ -494,10 +553,29 @@ void Connection::handleMessages(const QJsonArray &messages, int seq) {
 }
 
 void Connection::sendPing() {
+	// The server answers each ping: nothing for a few of them - the
+	// connection is dead (no network after a sleep, a half-open socket).
+	const auto silence = crl::now() - _lastReceived;
+	const auto dead = std::min(_pingTimeout, _pingInterval * 3);
+	if (_lastReceived && silence > dead) {
+		LOG(("MtsLink WS: no data from the server for %1 ms, reconnecting"
+			).arg(silence));
+		dropConnection();
+		return;
+	}
 	sendControl("ping");
 }
 
 void Connection::onSocketDisconnected() {
+	finishAttempt();
+}
+
+void Connection::finishAttempt() {
+	if (!_attemptActive) {
+		return;
+	}
+	_attemptActive = false;
+	_connectTimer.stop();
 	_pingTimer.stop();
 	_sendQueueTimer.stop();
 	_sendQueue.clear();
@@ -511,8 +589,14 @@ void Connection::onSocketDisconnected() {
 	_authenticated = false;
 	_wsHandshakeDone = false;
 	_readBuffer.clear();
-	LOG(("MtsLink WS: disconnected"));
-	Q_EMIT disconnected();
+	_lastReceived = 0;
+	if (_socket.state() != QAbstractSocket::UnconnectedState) {
+		_socket.abort();
+	}
+	LOG(("MtsLink WS: disconnected%1").arg(_replacing ? " (replaced)" : ""));
+	if (!_replacing) {
+		Q_EMIT disconnected();
+	}
 }
 
 } // namespace MtsLink
