@@ -525,39 +525,6 @@ std::optional<MTPMessageReactions> buildMtpReactions(
 		MTP_vector<MTPMessageReactor>());
 }
 
-// Temporary: the reactions of the message, to find the empty ones.
-[[nodiscard]] QString ReactionsStateForLog(not_null<HistoryItem*> item) {
-	auto result = QStringList();
-	for (const auto &r : item->reactions()) {
-		auto codes = QStringList();
-		for (const auto ch : r.id.emoji()) {
-			codes.push_back(QString::number(ch.unicode(), 16));
-		}
-		result.push_back(u"%1[%2] x%3%4%5"_q
-			.arg(r.id.emoji())
-			.arg(codes.join(' '))
-			.arg(r.count)
-			.arg(r.my ? " my" : "")
-			.arg(r.id.custom() ? u" custom=%1"_q.arg(r.id.custom()) : QString()));
-	}
-	return result.join(u", "_q);
-}
-
-void LogReactionsChange(
-		not_null<HistoryItem*> item,
-		const QString &before,
-		const char *where) {
-	const auto after = ReactionsStateForLog(item);
-	if (after != before) {
-		LOG(("MtsLink Reaction: %1 msg=%2 peer=%3 {%4} -> {%5}"
-			).arg(where
-			).arg(item->id.bare
-			).arg(item->history()->peer->name()
-			).arg(before
-			).arg(after));
-	}
-}
-
 void reapplyPhotoUrls(
 		not_null<HistoryItem*> item,
 		const Api::FileData &file) {
@@ -3968,7 +3935,6 @@ void refreshThreadsMark(
 		return channel && !(channel->flags() & ChannelDataFlag::Left);
 	};
 	auto unread = false;
-	auto reason = QString();
 	for (const auto &block : history->blocks) {
 		for (const auto &view : block->messages) {
 			const auto item = view->data();
@@ -3977,11 +3943,6 @@ void refreshThreadsMark(
 				&& views->commentsMaxId > views->commentsInboxReadTillId
 				&& !subscribed(item->id)) {
 				unread = true;
-				reason = u"root %1 '%2' max=%3 readTill=%4"_q
-					.arg(item->id.bare)
-					.arg(msgIdToMtsLinkId(chatPeerId, item->id))
-					.arg(views->commentsMaxId.bare)
-					.arg(views->commentsInboxReadTillId.bare);
 				break;
 			}
 		}
@@ -3997,19 +3958,9 @@ void refreshThreadsMark(
 				&& i.value().count > 0
 				&& !subscribed(i.key().second)) {
 				unread = true;
-				reason = u"pending root %1 '%2' count=%3"_q
-					.arg(i.key().second.bare)
-					.arg(i.value().parentUuid)
-					.arg(i.value().count);
 				break;
 			}
 		}
-	}
-	if (history->mtsLinkThreadsMark() != unread) {
-		LOG(("MtsLink ThreadsMark: '%1' -> %2 %3"
-			).arg(history->peer->name()
-			).arg(unread ? 1 : 0
-			).arg(reason));
 	}
 	history->mtsLinkSetThreadsMark(unread);
 }
@@ -4915,7 +4866,6 @@ HistoryItem *addMessage(
 				existing->updateDependencyItem();
 			}
 		}
-		const auto reactionsBefore = ReactionsStateForLog(existing);
 		if (!src.reactions.isEmpty()) {
 			const auto mtp = buildMtpReactions(src.reactions);
 			if (mtp) {
@@ -4925,7 +4875,6 @@ HistoryItem *addMessage(
 			// All the reactions removed (missed the event).
 			existing->updateReactions(nullptr);
 		}
-		LogReactionsChange(existing, reactionsBefore, "existing");
 		if (src.type == MessageType::Text && !existing->isSending()) {
 			// Edited (missed the event): the text of the server.
 			auto text = parseMentionedText(
@@ -5041,12 +4990,10 @@ HistoryItem *addMessage(
 		item->setEditDate(TimeId(src.updatedAt / 1000));
 	}
 	if (item && !src.reactions.isEmpty()) {
-		const auto reactionsBefore = ReactionsStateForLog(item);
 		const auto mtp = buildMtpReactions(src.reactions);
 		if (mtp) {
 			item->updateReactions(&*mtp);
 		}
-		LogReactionsChange(item, reactionsBefore, "created");
 	}
 	if (item && threadOnly) {
 		session->changes().messageUpdated(
@@ -5239,12 +5186,10 @@ bool addOlderMessages(
 			item->setEditDate(TimeId(src.updatedAt / 1000));
 		}
 		if (item && !src.reactions.isEmpty()) {
-			const auto reactionsBefore = ReactionsStateForLog(item);
 			const auto mtp = buildMtpReactions(src.reactions);
 			if (mtp) {
 				item->updateReactions(&*mtp);
 			}
-			LogReactionsChange(item, reactionsBefore, "loaded");
 		}
 	}
 
@@ -5966,8 +5911,6 @@ void handleChatEvent(
 			mts->messages()->reloadPinned(chatId);
 		}
 	} else if (type == "ChatUnreadMessageCountUpdatedEvent") {
-		LOG(("MtsLink UnreadEvent: %1").arg(QString::fromUtf8(
-			QJsonDocument(value).toJson(QJsonDocument::Compact)).left(400)));
 		const auto eventChatId = value.value("chatId").toString();
 		if (eventChatId.isEmpty()) {
 			return;
@@ -6120,8 +6063,6 @@ void handleChatEvent(
 			refreshThreadsMark(session, chatPeerId);
 		}
 	} else if (type == "MessageReactionsUpdatedEvent") {
-		LOG(("MtsLink Reaction: %1 %2").arg(type).arg(QString::fromUtf8(
-			QJsonDocument(value).toJson(QJsonDocument::Compact))));
 		const auto messageId = value.value("messageId").toString();
 		if (messageId.isEmpty()) {
 			return;
@@ -6161,23 +6102,14 @@ void handleChatEvent(
 				.selected = (count >= 2),
 			});
 		}
-		const auto reactionsBefore = ReactionsStateForLog(item);
 		const auto mtp = buildMtpReactions(reactions);
 		if (mtp) {
 			item->updateReactions(&*mtp);
 		} else {
 			item->updateReactions(nullptr);
 		}
-		LogReactionsChange(item, reactionsBefore, "updated event");
 	} else if (type == "MessageReactionAddedEvent"
 		|| type == "MessageReactionDeletedEvent") {
-		const auto reactionUser = session->data().userLoaded(::UserId(
-			uuidToBareId(value.value("userId").toString())));
-		LOG(("MtsLink Reaction: %1 from '%2' %3"
-			).arg(type
-			).arg(reactionUser ? reactionUser->name() : u"?"_q
-			).arg(QString::fromUtf8(
-				QJsonDocument(value).toJson(QJsonDocument::Compact))));
 		const auto emoji = ValidEmoji(value.value("emoji").toString());
 		const auto emojiId = value.value("emojiId").toString();
 		const auto reactionUserId = value.value("userId").toString();
@@ -6264,10 +6196,8 @@ void handleChatEvent(
 							.selected = true,
 						});
 					}
-					const auto reactionsBefore = ReactionsStateForLog(item);
 					const auto mtp = buildMtpReactions(reactions);
 					item->updateReactions(mtp ? &*mtp : nullptr);
-					LogReactionsChange(item, reactionsBefore, "my event");
 					return;
 				}
 				const auto &existing = item->reactions();
@@ -6312,14 +6242,12 @@ void handleChatEvent(
 						.selected = false,
 					});
 				}
-				const auto reactionsBefore = ReactionsStateForLog(item);
 				const auto mtp = buildMtpReactions(reactions);
 				if (mtp) {
 					item->updateReactions(&*mtp);
 				} else {
 					item->updateReactions(nullptr);
 				}
-				LogReactionsChange(item, reactionsBefore, "event");
 			}
 		}
 	} else if (type == "MessageUpdatedEvent") {
@@ -7165,33 +7093,6 @@ void fetchThreadLastRead(
 						TimeId(qint64(createdAt) / 1000));
 				}
 			}
-		});
-}
-
-void logThreadLastRead(
-		not_null<Main::Session*> session,
-		PeerId peerId,
-		MsgId rootId,
-		const QString &tag) {
-	const auto mts = session->account().mtsLinkSession();
-	if (!mts) {
-		return;
-	}
-	const auto chatId = peerIdToChatId(peerId);
-	const auto rootMtsId = msgIdToMtsLinkId(peerId, rootId);
-	QJsonObject param;
-	param["organizationId"] = mts->organizationId();
-	param["chatId"] = chatId;
-	param["messageId"] = rootMtsId;
-	mts->rpc()->call(
-		"Chat.GetLastReadChildMessage",
-		param,
-		[=](const QJsonObject &result) {
-			LOG(("MtsLink ThreadReadProbe: %1 root=%2 -> %3"
-				).arg(tag
-				).arg(rootMtsId
-				).arg(QString::fromUtf8(QJsonDocument(result).toJson(
-					QJsonDocument::Compact)).left(300)));
 		});
 }
 

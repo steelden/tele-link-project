@@ -3051,14 +3051,6 @@ void HistoryWidget::showHistory(
 		PeerId peerId,
 		MsgId showAtMsgId,
 		const Window::SectionShow &params) {
-	if (const auto history = peerId
-		? session().data().historyLoaded(peerId)
-		: nullptr) {
-		// MTS Link: the chats stuck in the folders of the unread ones.
-		LOG(("MtsLink UnreadFolder: '%1' opened: %2"
-			).arg(history->peer->name()
-			).arg(Data::UnreadStateForLog(history)));
-	}
 	_pinnedClickedId = FullMsgId();
 	_minPinnedId = std::nullopt;
 	_showAtMsgParams = {};

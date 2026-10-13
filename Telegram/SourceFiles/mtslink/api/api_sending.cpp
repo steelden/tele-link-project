@@ -145,10 +145,6 @@ void Sending::readMessage(
 		"Chat.MarkMessagesAsRead",
 		param,
 		[=](const QJsonObject &result) {
-			LOG(("MtsLink Read: MarkMessagesAsRead chat=%1 id='%2' -> %3"
-				).arg(chatId, messageId
-				).arg(QString::fromUtf8(QJsonDocument(result).toJson(
-					QJsonDocument::Compact)).left(300)));
 			const auto type = result.value(u"type"_q).toString();
 			if (type == u"RpcError"_q || type == u"BusinessError"_q) {
 				_sentReads.remove(key);

@@ -5723,26 +5723,12 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 		if (filter.contains(history)) {
 			const auto filterList = chatsFilters().chatsList(id);
 			event.existenceChanged = !entry->inChatList(id);
-			if (event.existenceChanged
-				&& (filter.flags() & ChatFilter::Flag::NoRead)
-				&& !filter.always().contains(history)) {
-				// MTS Link: why a chat is in a folder of the unread ones.
-				LOG(("MtsLink UnreadFolder: '%1' added to %2: %3"
-					).arg(history->peer->name()
-					).arg(id
-					).arg(UnreadStateForLog(history)));
-			}
 			if (event.existenceChanged) {
 				entry->addToChatList(id, filterList);
 			} else {
 				event.moved = entry->adjustByPosInChatList(id, filterList);
 			}
 		} else if (entry->inChatList(id)) {
-			if (filter.flags() & ChatFilter::Flag::NoRead) {
-				LOG(("MtsLink UnreadFolder: '%1' removed from %2"
-					).arg(history->peer->name()
-					).arg(id));
-			}
 			entry->removeFromChatList(id, chatsFilters().chatsList(id));
 			event.existenceChanged = true;
 		}

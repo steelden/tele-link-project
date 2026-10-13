@@ -277,6 +277,5 @@ private:
 	not_null<History*> history);
 
 // MTS Link: why a chat is in a folder of the unread ones (temporary).
-[[nodiscard]] QString UnreadStateForLog(not_null<History*> history);
 
 } // namespace Data

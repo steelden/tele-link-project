@@ -825,13 +825,6 @@ bool ChatFilters::applyChange(ChatFilter &filter, ChatFilter &&updated) {
 		const auto feedHistory = [&](not_null<History*> history) {
 			const auto now = filter.contains(history);
 			const auto was = wasFilter.contains(history);
-			if (now != was && (filter.flags() & ChatFilter::Flag::NoRead)) {
-				LOG(("MtsLink UnreadFolder: '%1' %2 %3 (rules): %4"
-					).arg(history->peer->name()
-					).arg(now ? "added to" : "removed from"
-					).arg(id
-					).arg(UnreadStateForLog(history)));
-			}
 			if (now != was) {
 				if (now) {
 					history->addToChatList(id, filterList);
@@ -1261,19 +1254,6 @@ bool CanRemoveFromChatFilter(
 		& ~(Flag::NoRead | Flag::NoArchived | Flag::NoMuted);
 	return (filter.always().size() > 1 || flagsWithoutNoReadNoArchivedNoMuted)
 		&& filter.contains(history);
-}
-
-QString UnreadStateForLog(not_null<History*> history) {
-	return u"count=%1 mark=%2 mentions=%3 reactions=%4 polls=%5 threads=%6 "
-		"fake=%7 muted=%8"_q
-		.arg(history->unreadCount())
-		.arg(history->unreadMark() ? 1 : 0)
-		.arg(history->unreadMentions().has() ? 1 : 0)
-		.arg(history->unreadReactions().has() ? 1 : 0)
-		.arg(history->unreadPollVotes().has() ? 1 : 0)
-		.arg(history->mtsLinkThreadsMark() ? 1 : 0)
-		.arg(history->fakeUnreadWhileOpened() ? 1 : 0)
-		.arg(history->muted() ? 1 : 0);
 }
 
 } // namespace Data

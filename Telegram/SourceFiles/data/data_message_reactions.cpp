@@ -769,15 +769,6 @@ void Reactions::preloadImageFor(const ReactionId &id) {
 		if (!e && id.emoji().startsWith(u"1ee90646-"_q)) {
 			e = Ui::Emoji::Find(QString::fromUtf8("\xe2\x9d\x93"));
 		}
-		if (!e) {
-			auto codes = QStringList();
-			for (const auto ch : id.emoji()) {
-				codes.push_back(QString::number(ch.unicode(), 16));
-			}
-			LOG(("MtsLink Reaction: unknown emoji '%1' codes=%2"
-				).arg(id.emoji()
-				).arg(codes.join(' ')));
-		}
 		if (e) {
 			const auto large = Ui::Emoji::GetSizeLarge();
 			const auto factor = style::DevicePixelRatio();
