@@ -2515,6 +2515,9 @@ if (MSVC)
         /DELAYLOAD:userenv.dll
         /DELAYLOAD:wtsapi32.dll
         /DELAYLOAD:propsys.dll
+        # TeleLink: Qt Core imports the system ICU, not in Windows 10
+        # before 1903: a foreign icu.dll from PATH gave 0xc000007b.
+        /DELAYLOAD:icu.dll
     )
     if (QT_VERSION GREATER 6)
         if (NOT build_winarm)

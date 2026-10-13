@@ -2459,6 +2459,9 @@ void History::mtsLinkSetThreadsMark(bool unread) {
 	}
 	_mtsLinkThreadsMark = unread;
 	updateChatListEntry();
+	// The folders of the unread chats: added / removed with the mark
+	// (stayed in "New" after the threads were read in another client).
+	owner().chatsFilters().refreshHistory(this);
 }
 
 void History::setFakeUnreadWhileOpened(bool enabled) {

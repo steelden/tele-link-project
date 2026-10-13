@@ -3929,6 +3929,7 @@ void refreshThreadsMark(
 		return channel && !(channel->flags() & ChannelDataFlag::Left);
 	};
 	auto unread = false;
+	auto reason = QString();
 	for (const auto &block : history->blocks) {
 		for (const auto &view : block->messages) {
 			const auto item = view->data();
@@ -3937,6 +3938,11 @@ void refreshThreadsMark(
 				&& views->commentsMaxId > views->commentsInboxReadTillId
 				&& !subscribed(item->id)) {
 				unread = true;
+				reason = u"root %1 '%2' max=%3 readTill=%4"_q
+					.arg(item->id.bare)
+					.arg(msgIdToMtsLinkId(chatPeerId, item->id))
+					.arg(views->commentsMaxId.bare)
+					.arg(views->commentsInboxReadTillId.bare);
 				break;
 			}
 		}
@@ -3952,9 +3958,19 @@ void refreshThreadsMark(
 				&& i.value().count > 0
 				&& !subscribed(i.key().second)) {
 				unread = true;
+				reason = u"pending root %1 '%2' count=%3"_q
+					.arg(i.key().second.bare)
+					.arg(i.value().parentUuid)
+					.arg(i.value().count);
 				break;
 			}
 		}
+	}
+	if (history->mtsLinkThreadsMark() != unread) {
+		LOG(("MtsLink ThreadsMark: '%1' -> %2 %3"
+			).arg(history->peer->name()
+			).arg(unread ? 1 : 0
+			).arg(reason));
 	}
 	history->mtsLinkSetThreadsMark(unread);
 }
