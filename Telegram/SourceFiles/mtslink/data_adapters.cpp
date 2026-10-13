@@ -4037,6 +4037,19 @@ void applyDialogData(
 	if (!src.interlocutorId.isEmpty()) {
 		const auto bareId = uuidToBareId(src.interlocutorId);
 		peerId = PeerId(::UserId(bareId));
+		// An empty chat made by an event before the dialog was known.
+		const auto was = ChatToPeerMap.value(src.id);
+		if (was && was != peerId) {
+			LOG(("MtsLink Dialog: %1 was %2, now %3, removing the old"
+				).arg(src.id
+				).arg(was.value
+				).arg(peerId.value));
+			PeerToChatMap.remove(was);
+			PeerToChatTypeMap.remove(was);
+			if (const auto peer = session->data().peerLoaded(was)) {
+				session->data().deleteConversationLocally(peer);
+			}
+		}
 		PeerToChatMap.insert(peerId, src.id);
 		ChatToPeerMap.insert(src.id, peerId);
 		PeerToChatTypeMap.insert(peerId, ChatType::Dialog);
@@ -5413,10 +5426,16 @@ void handleChatEvent(
 	}
 
 	const auto chatKnown = ChatToPeerMap.contains(chatId);
-	if (!chatKnown && type == "NewMessageV2Event") {
+	// The events of the user about an unknown chat (the unread counter of
+	// a new dialog comes before its message): chatIdToPeerId() made an
+	// empty channel of it, the dialog was the second chat in the list.
+	if (!chatKnown
+		&& (type == "NewMessageV2Event"
+			|| dst.startsWith(u"chat-user-"_q))) {
 		PendingChatEvents[chatId].append({ dst, param });
-		LOG(("MtsLink NewMsg: chat %1 is unknown, waiting for its info, "
-			"%2 pending").arg(chatId).arg(PendingChatEvents[chatId].size()));
+		LOG(("MtsLink NewMsg: chat %1 is unknown, %2 waits for its info, "
+			"%3 pending").arg(chatId, type).arg(
+				PendingChatEvents[chatId].size()));
 		if (!ChatInfoRequested.contains(chatId)) {
 			ChatInfoRequested.insert(chatId);
 			const auto mts = session->account().mtsLinkSession();
