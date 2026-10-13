@@ -7608,7 +7608,8 @@ QByteArray serializeFilters(
 	QDataStream s(&result, QIODevice::WriteOnly);
 	s.setVersion(QDataStream::Qt_5_1);
 
-	s << qint32(3); // format version
+	// Version 4: the pinned chats are not added to the always shown ones.
+	s << qint32(4); // format version
 	s << qint32(int(filters.size()));
 	for (const auto &f : filters) {
 		const auto titles = FolderTitlesById.value(f.id());
@@ -7653,7 +7654,7 @@ std::optional<std::vector<CachedFilter>> deserializeFilters(
 
 	qint32 version = 0;
 	s >> version;
-	if (version < 1 || version > 3) {
+	if (version < 1 || version > 4) {
 		return std::nullopt;
 	}
 
@@ -7684,6 +7685,19 @@ std::optional<std::vector<CachedFilter>> deserializeFilters(
 			f.always = deserializeFolderChats(s);
 			f.pinned = deserializeFolderChats(s);
 			f.never = deserializeFolderChats(s);
+		}
+		if (version == 3) {
+			// The pinned chats were added to the always shown ones when
+			// restored: a pinned channel stayed in "New" after it was read.
+			const auto pinned = [&](const CachedFolderChat &chat) {
+				return ranges::contains(
+					f.pinned,
+					chat.chatId,
+					&CachedFolderChat::chatId);
+			};
+			f.always.erase(
+				ranges::remove_if(f.always, pinned),
+				end(f.always));
 		}
 		if (s.status() != QDataStream::Ok) {
 			return std::nullopt;
@@ -7945,9 +7959,11 @@ void loadFiltersFromCache(
 					always.emplace(history(chat));
 				}
 				auto pinned = std::vector<not_null<History*>>();
+				// The pinned are not always shown: the folders pin the
+				// globally pinned chats they contain (syncFolderPins), a
+				// pinned chat in "New" stayed there forever after it was read.
 				for (const auto &chat : f.pinned) {
 					pinned.push_back(history(chat));
-					always.emplace(pinned.back());
 				}
 				auto never = base::flat_set<not_null<History*>>();
 				for (const auto &chat : f.never) {

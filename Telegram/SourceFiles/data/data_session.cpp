@@ -5727,18 +5727,10 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 				&& (filter.flags() & ChatFilter::Flag::NoRead)
 				&& !filter.always().contains(history)) {
 				// MTS Link: why a chat is in a folder of the unread ones.
-				LOG(("MtsLink UnreadFolder: '%1' added to %2: count=%3 "
-					"mark=%4 mentions=%5 reactions=%6 polls=%7 threads=%8 "
-					"fake=%9"
+				LOG(("MtsLink UnreadFolder: '%1' added to %2: %3"
 					).arg(history->peer->name()
 					).arg(id
-					).arg(history->unreadCount()
-					).arg(history->unreadMark() ? 1 : 0
-					).arg(history->unreadMentions().has() ? 1 : 0
-					).arg(history->unreadReactions().has() ? 1 : 0
-					).arg(history->unreadPollVotes().has() ? 1 : 0
-					).arg(history->mtsLinkThreadsMark() ? 1 : 0
-					).arg(history->fakeUnreadWhileOpened() ? 1 : 0));
+					).arg(UnreadStateForLog(history)));
 			}
 			if (event.existenceChanged) {
 				entry->addToChatList(id, filterList);
