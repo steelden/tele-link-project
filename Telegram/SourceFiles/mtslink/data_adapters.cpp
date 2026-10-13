@@ -197,6 +197,12 @@ void loadCachedUserId() {
 	}
 }
 
+// Other clients send "emoji":"empty" in the reaction events, the emoji is
+// known only by its id then: not a real emoji is not used (or remembered).
+[[nodiscard]] QString ValidEmoji(const QString &emoji) {
+	return (!emoji.isEmpty() && Ui::Emoji::Find(emoji)) ? emoji : QString();
+}
+
 QString emojiMapFilePath() {
 	return ProfileDataPath + u"mtslink_emoji_map.json"_q;
 }
@@ -224,7 +230,7 @@ void loadEmojiMaps() {
 	const auto obj = doc.object();
 	for (auto it = obj.constBegin(); it != obj.constEnd(); ++it) {
 		const auto &id = it.key();
-		const auto emoji = it.value().toString();
+		const auto emoji = ValidEmoji(it.value().toString());
 		if (!id.isEmpty() && !emoji.isEmpty()) {
 			IdToEmojiMap[id] = emoji;
 			EmojiToIdMap[emoji] = id;
@@ -476,7 +482,7 @@ std::optional<MTPMessageReactions> buildMtpReactions(
 	int chosenIdx = 0;
 
 	for (const auto &r : reactions) {
-		auto emoji = r.emoji;
+		auto emoji = ValidEmoji(r.emoji);
 		if (emoji.isEmpty()) {
 			emoji = IdToEmojiMap.value(r.emojiId);
 		}
@@ -517,6 +523,39 @@ std::optional<MTPMessageReactions> buildMtpReactions(
 		MTP_vector<MTPReactionCount>(results),
 		MTP_vector<MTPMessagePeerReaction>(),
 		MTP_vector<MTPMessageReactor>());
+}
+
+// Temporary: the reactions of the message, to find the empty ones.
+[[nodiscard]] QString ReactionsStateForLog(not_null<HistoryItem*> item) {
+	auto result = QStringList();
+	for (const auto &r : item->reactions()) {
+		auto codes = QStringList();
+		for (const auto ch : r.id.emoji()) {
+			codes.push_back(QString::number(ch.unicode(), 16));
+		}
+		result.push_back(u"%1[%2] x%3%4%5"_q
+			.arg(r.id.emoji())
+			.arg(codes.join(' '))
+			.arg(r.count)
+			.arg(r.my ? " my" : "")
+			.arg(r.id.custom() ? u" custom=%1"_q.arg(r.id.custom()) : QString()));
+	}
+	return result.join(u", "_q);
+}
+
+void LogReactionsChange(
+		not_null<HistoryItem*> item,
+		const QString &before,
+		const char *where) {
+	const auto after = ReactionsStateForLog(item);
+	if (after != before) {
+		LOG(("MtsLink Reaction: %1 msg=%2 peer=%3 {%4} -> {%5}"
+			).arg(where
+			).arg(item->id.bare
+			).arg(item->history()->peer->name()
+			).arg(before
+			).arg(after));
+	}
 }
 
 void reapplyPhotoUrls(
@@ -4876,6 +4915,7 @@ HistoryItem *addMessage(
 				existing->updateDependencyItem();
 			}
 		}
+		const auto reactionsBefore = ReactionsStateForLog(existing);
 		if (!src.reactions.isEmpty()) {
 			const auto mtp = buildMtpReactions(src.reactions);
 			if (mtp) {
@@ -4885,6 +4925,7 @@ HistoryItem *addMessage(
 			// All the reactions removed (missed the event).
 			existing->updateReactions(nullptr);
 		}
+		LogReactionsChange(existing, reactionsBefore, "existing");
 		if (src.type == MessageType::Text && !existing->isSending()) {
 			// Edited (missed the event): the text of the server.
 			auto text = parseMentionedText(
@@ -5000,10 +5041,12 @@ HistoryItem *addMessage(
 		item->setEditDate(TimeId(src.updatedAt / 1000));
 	}
 	if (item && !src.reactions.isEmpty()) {
+		const auto reactionsBefore = ReactionsStateForLog(item);
 		const auto mtp = buildMtpReactions(src.reactions);
 		if (mtp) {
 			item->updateReactions(&*mtp);
 		}
+		LogReactionsChange(item, reactionsBefore, "created");
 	}
 	if (item && threadOnly) {
 		session->changes().messageUpdated(
@@ -5196,10 +5239,12 @@ bool addOlderMessages(
 			item->setEditDate(TimeId(src.updatedAt / 1000));
 		}
 		if (item && !src.reactions.isEmpty()) {
+			const auto reactionsBefore = ReactionsStateForLog(item);
 			const auto mtp = buildMtpReactions(src.reactions);
 			if (mtp) {
 				item->updateReactions(&*mtp);
 			}
+			LogReactionsChange(item, reactionsBefore, "loaded");
 		}
 	}
 
@@ -6075,6 +6120,8 @@ void handleChatEvent(
 			refreshThreadsMark(session, chatPeerId);
 		}
 	} else if (type == "MessageReactionsUpdatedEvent") {
+		LOG(("MtsLink Reaction: %1 %2").arg(type).arg(QString::fromUtf8(
+			QJsonDocument(value).toJson(QJsonDocument::Compact))));
 		const auto messageId = value.value("messageId").toString();
 		if (messageId.isEmpty()) {
 			return;
@@ -6109,20 +6156,29 @@ void handleChatEvent(
 			const auto count = ro.value("count").toInt();
 			reactions.push_back({
 				.emojiId = ro.value("emojiId").toString(),
-				.emoji = ro.value("emoji").toString(),
+				.emoji = ValidEmoji(ro.value("emoji").toString()),
 				.count = count,
 				.selected = (count >= 2),
 			});
 		}
+		const auto reactionsBefore = ReactionsStateForLog(item);
 		const auto mtp = buildMtpReactions(reactions);
 		if (mtp) {
 			item->updateReactions(&*mtp);
 		} else {
 			item->updateReactions(nullptr);
 		}
+		LogReactionsChange(item, reactionsBefore, "updated event");
 	} else if (type == "MessageReactionAddedEvent"
 		|| type == "MessageReactionDeletedEvent") {
-		const auto emoji = value.value("emoji").toString();
+		const auto reactionUser = session->data().userLoaded(::UserId(
+			uuidToBareId(value.value("userId").toString())));
+		LOG(("MtsLink Reaction: %1 from '%2' %3"
+			).arg(type
+			).arg(reactionUser ? reactionUser->name() : u"?"_q
+			).arg(QString::fromUtf8(
+				QJsonDocument(value).toJson(QJsonDocument::Compact))));
+		const auto emoji = ValidEmoji(value.value("emoji").toString());
 		const auto emojiId = value.value("emojiId").toString();
 		const auto reactionUserId = value.value("userId").toString();
 		const auto reactionMsgId = value.value("messageId").toString();
@@ -6208,8 +6264,10 @@ void handleChatEvent(
 							.selected = true,
 						});
 					}
+					const auto reactionsBefore = ReactionsStateForLog(item);
 					const auto mtp = buildMtpReactions(reactions);
 					item->updateReactions(mtp ? &*mtp : nullptr);
+					LogReactionsChange(item, reactionsBefore, "my event");
 					return;
 				}
 				const auto &existing = item->reactions();
@@ -6254,12 +6312,14 @@ void handleChatEvent(
 						.selected = false,
 					});
 				}
+				const auto reactionsBefore = ReactionsStateForLog(item);
 				const auto mtp = buildMtpReactions(reactions);
 				if (mtp) {
 					item->updateReactions(&*mtp);
 				} else {
 					item->updateReactions(nullptr);
 				}
+				LogReactionsChange(item, reactionsBefore, "event");
 			}
 		}
 	} else if (type == "MessageUpdatedEvent") {
@@ -8446,6 +8506,9 @@ MtsLinkMessageContent convertMentionsForSending(
 void setEmojiMapping(const QHash<QString, QString> &emojiToId) {
 	ensureEmojiMapsInitialized();
 	for (auto it = emojiToId.constBegin(); it != emojiToId.constEnd(); ++it) {
+		if (ValidEmoji(it.key()).isEmpty()) {
+			continue;
+		}
 		EmojiToIdMap[it.key()] = it.value();
 		IdToEmojiMap[it.value()] = it.key();
 	}
@@ -8453,7 +8516,7 @@ void setEmojiMapping(const QHash<QString, QString> &emojiToId) {
 
 void setEmojiIdMapping(const QString &emojiId, const QString &emoji) {
 	ensureEmojiMapsInitialized();
-	if (!emojiId.isEmpty() && !emoji.isEmpty()
+	if (!emojiId.isEmpty() && !ValidEmoji(emoji).isEmpty()
 		&& !IdToEmojiMap.contains(emojiId)) {
 		IdToEmojiMap[emojiId] = emoji;
 		EmojiToIdMap[emoji] = emojiId;

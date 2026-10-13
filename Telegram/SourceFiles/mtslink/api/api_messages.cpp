@@ -6,6 +6,8 @@ based on Telegram Desktop.
 #include "mtslink/data_adapters.h"
 #include "mtslink/rpc.h"
 
+#include "ui/emoji_config.h"
+
 #include <QtCore/QJsonDocument>
 
 namespace MtsLink::Api {
@@ -188,6 +190,12 @@ MessageData Messages::parseMessage(const QJsonObject &obj) const {
 		const auto ro = r.toObject();
 		const auto eid = ro.value("emojiId").toString();
 		const auto emj = ro.value("emoji").toString();
+		if (!emj.isEmpty() && !Ui::Emoji::Find(emj)) {
+			LOG(("MtsLink Reaction: unknown in message %1: %2"
+				).arg(obj.value("id").toString()
+				).arg(QString::fromUtf8(
+					QJsonDocument(ro).toJson(QJsonDocument::Compact))));
+		}
 		MtsLink::setEmojiIdMapping(eid, emj);
 		reactions.push_back({
 			.emojiId = eid,

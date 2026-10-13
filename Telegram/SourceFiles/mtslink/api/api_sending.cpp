@@ -4,6 +4,8 @@ based on Telegram Desktop.
 */
 #include "mtslink/api/api_sending.h"
 #include "mtslink/rpc.h"
+#include "mtslink/data_adapters.h"
+#include "ui/emoji_config.h"
 
 #include <QUuid>
 #include <QJsonDocument>
@@ -170,6 +172,24 @@ void Sending::setChatNotifications(
 		[](const QJsonObject &) {});
 }
 
+namespace {
+
+// The other clients take the emoji from the reaction events: not a real
+// emoji ("empty" from the broken map) is replaced by the one of the id.
+[[nodiscard]] QString SentEmoji(const QString &emoji, const QString &id) {
+	if (!emoji.isEmpty() && Ui::Emoji::Find(emoji)) {
+		return emoji;
+	}
+	const auto result = MtsLink::idToEmoji(id);
+	LOG(("MtsLink Reaction: sending '%1' replaced by '%2' for %3"
+		).arg(emoji
+		).arg(result
+		).arg(id));
+	return result;
+}
+
+} // namespace
+
 void Sending::addReaction(
 		const ChatId &chatId,
 		const MessageId &messageId,
@@ -178,7 +198,7 @@ void Sending::addReaction(
 	QJsonObject param;
 	param["chatId"] = chatId;
 	param["messageId"] = messageId;
-	param["emoji"] = emoji;
+	param["emoji"] = SentEmoji(emoji, emojiId);
 	if (!emojiId.isEmpty()) {
 		param["emojiId"] = emojiId;
 	}
@@ -196,7 +216,7 @@ void Sending::removeReaction(
 	QJsonObject param;
 	param["chatId"] = chatId;
 	param["messageId"] = messageId;
-	param["emoji"] = emoji;
+	param["emoji"] = SentEmoji(emoji, emojiId);
 	if (!emojiId.isEmpty()) {
 		param["emojiId"] = emojiId;
 	}
