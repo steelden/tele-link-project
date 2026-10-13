@@ -1988,6 +1988,7 @@ void Updater::start(bool forceWait) {
 
 		_checking.fire({});
 	} else {
+		LOG(("Update Info: next check in %1 s").arg(updateInSecs + 5));
 		_timer.callOnce((updateInSecs + 5) * crl::time(1000));
 	}
 }

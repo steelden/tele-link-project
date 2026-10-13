@@ -25,7 +25,7 @@ enum {
 	WebPageUserId = 701000,
 
 	UpdateDelayConstPart = 3600, // 1 hour min time between update check requests
-	UpdateDelayRandPart = 3600, // 1 hour max - min time between update check requests
+	UpdateDelayRandPart = 300, // TeleLink: checked every hour (was up to 2 hours)
 
 	WrongPasscodeTimeout = 1500,
 
