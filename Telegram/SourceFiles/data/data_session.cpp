@@ -5746,6 +5746,11 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 				event.moved = entry->adjustByPosInChatList(id, filterList);
 			}
 		} else if (entry->inChatList(id)) {
+			if (filter.flags() & ChatFilter::Flag::NoRead) {
+				LOG(("MtsLink UnreadFolder: '%1' removed from %2"
+					).arg(history->peer->name()
+					).arg(id));
+			}
 			entry->removeFromChatList(id, chatsFilters().chatsList(id));
 			event.existenceChanged = true;
 		}

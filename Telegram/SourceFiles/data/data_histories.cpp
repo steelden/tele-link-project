@@ -250,9 +250,27 @@ void Histories::readInboxTill(
 		if (!IsServerMsgId(tillId)) {
 			return;
 		}
+		// The ids are hashes, not growing: an older message (the bottom one
+		// visible after a scroll up) was sent as read and the server moved
+		// the read position back, the chat was unread there again.
+		const auto dateOf = [&](MsgId id) {
+			const auto item = id
+				? session().data().message(history->peer, id)
+				: nullptr;
+			return item ? item->date() : TimeId();
+		};
+		const auto date = dateOf(tillId);
+		const auto readDate = history->mtsLinkInboxReadDate();
+		if (date && readDate && date < readDate) {
+			return;
+		}
+		auto &state = _states[history];
+		if (const auto pending = dateOf(state.willReadTill)
+			; date && pending && date < pending) {
+			return;
+		}
 		Core::App().notifications().clearIncomingFromHistory(history);
 		history->setInboxReadTill(tillId);
-		auto &state = _states[history];
 		if (state.willReadTill == tillId) {
 			return;
 		}

@@ -2404,6 +2404,14 @@ void History::setUnreadCount(int newUnreadCount) {
 	if (_unreadCount == newUnreadCount) {
 		return;
 	}
+	if (_unreadCount.value_or(0) != newUnreadCount
+		&& (!_unreadCount.value_or(0) || !newUnreadCount)) {
+		// MTS Link: the chats stuck in the folders of the unread ones.
+		LOG(("MtsLink UnreadCount: '%1' %2 -> %3"
+			).arg(peer->name()
+			).arg(_unreadCount.value_or(0)
+			).arg(newUnreadCount));
+	}
 	const auto notifier = unreadStateChangeNotifier(useMyUnreadInParent());
 	_unreadCount = newUnreadCount;
 
