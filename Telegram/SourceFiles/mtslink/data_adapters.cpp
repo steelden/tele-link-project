@@ -9731,9 +9731,11 @@ rpl::producer<Ui::GroupCallBarContent> activeCallBarContent(PeerId peerId) {
 	) | rpl::filter([=](PeerId id) {
 		return id == peerId;
 	}) | rpl::map([=] {
+		// The participants of a call are not known (MemberInCallChanged
+		// says only that the user is in some call): "click to join".
 		const auto hasCall = ActiveCallLinks.contains(peerId);
 		return Ui::GroupCallBarContent{
-			.count = hasCall ? 1 : 0,
+			.count = 0,
 			.shown = hasCall,
 		};
 	});
