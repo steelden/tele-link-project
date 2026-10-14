@@ -38,6 +38,10 @@ std::optional<RichPasteDecision> MimeDataRichPasteOffer(
 		return std::nullopt;
 	}
 	const auto limits = Iv::ResolveRichMessageLimits(session);
+	LOG(("MtsLink Paste: html=%1 text=%2 formats=%3"
+		).arg(data->hasHtml() ? 1 : 0
+		).arg(data->hasText() ? 1 : 0
+		).arg(data->formats().join(',')));
 	// MTS Link: no rich messages (the editor of them is Premium only), the
 	// formatting of the pasted HTML a message can have is applied in the
 	// field: bold, italic, links, code, quotes, lists and headings as lines.
@@ -123,6 +127,9 @@ void ShowRichPasteToast(RichPasteToastArgs &&args) {
 	const auto locked = !undo
 		&& !field
 		&& !Iv::Editor::SessionPremium(session);
+	LOG(("MtsLink Paste: toast offer=%1 locked=%2"
+		).arg(int(args.offer)
+		).arg(locked ? 1 : 0));
 	const auto button = locked
 		? QString()
 		: undo

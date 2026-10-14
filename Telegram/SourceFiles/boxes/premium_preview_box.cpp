@@ -1539,6 +1539,7 @@ void ShowPremiumPreviewToBuy(
 		std::shared_ptr<ChatHelpers::Show> show,
 		PremiumFeature section,
 		Fn<void()> hiddenCallback) {
+	LOG(("MtsLink Premium: preview to buy, section=%1").arg(int(section)));
 	Show(std::move(show), Descriptor{
 		.section = section,
 		.fromSettings = true,

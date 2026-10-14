@@ -4752,6 +4752,7 @@ std::shared_ptr<ChatHelpers::Show> ActiveWindowShow(
 }
 
 void ShowRichMessagesPremiumToast(std::shared_ptr<ChatHelpers::Show> show) {
+	LOG(("MtsLink Paste: rich messages Premium toast"));
 	if (!show) {
 		return;
 	}
@@ -4836,6 +4837,11 @@ void OfferRichMessagePremiumChoice(
 	const auto sendable = (CountRichPageMedia(page) == 0)
 		&& !flattened.text.isEmpty()
 		&& (int(flattened.text.size()) <= lengthLimit);
+	LOG(("MtsLink Paste: rich message Premium choice, media=%1 length=%2 "
+		"limit=%3"
+		).arg(CountRichPageMedia(page)
+		).arg(flattened.text.size()
+		).arg(lengthLimit));
 	if (!sendable) {
 		ShowRichMessagesPremiumToast(std::move(show));
 		return;
