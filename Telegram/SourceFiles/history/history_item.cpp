@@ -3333,6 +3333,11 @@ bool HistoryItem::canDelete() const {
 	}
 	auto channel = _history->peer->asChannel();
 	if (!channel) {
+		// MTS Link deletes only the own messages in a personal chat (there is
+		// no "delete for me", a hidden message would come back on reload).
+		if (_history->peer->isUser() && !out()) {
+			return false;
+		}
 		return !isGroupMigrate();
 	}
 
