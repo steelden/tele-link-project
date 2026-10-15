@@ -202,32 +202,6 @@ void Users::loadChatMembers(const ChatId &chatId) {
 			const auto value = result.value("value").toObject();
 			const auto membersList = value.value("members").toArray();
 			const auto adminsList = value.value("admins").toArray();
-			{
-				// Temporary: the presence of the chat members.
-				auto counts = QHash<QString, int>();
-				auto sample = QStringList();
-				for (const auto &list : { adminsList, membersList }) {
-					for (const auto &item : list) {
-						const auto profile = item.toObject().value(
-							"profile").toObject();
-						const auto presence = profile.value(
-							"presence").toString();
-						++counts[presence.isEmpty() ? u"none"_q : presence];
-						if (sample.size() < 8) {
-							sample.push_back(profile.value(
-								"lastName").toString() + '=' + presence);
-						}
-					}
-				}
-				auto parts = QStringList();
-				for (auto i = counts.cbegin(); i != counts.cend(); ++i) {
-					parts.push_back(i.key() + '=' + QString::number(i.value()));
-				}
-				LOG(("MtsLink Presence: chat %1 members: %2 (%3)"
-					).arg(chatId
-					).arg(parts.join(' ')
-					).arg(sample.join(", ")));
-			}
 
 			const auto parseEntry = [](const QJsonValue &item,
 					MemberRole defaultRole) -> MemberProfile {
