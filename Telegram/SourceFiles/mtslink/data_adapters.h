@@ -133,6 +133,18 @@ void addThreadEntryUnread(
 // The empty badge of a chat: a thread without the subscription there has
 // new messages (the dot on its loaded root, or the new replies to a root
 // not loaded yet).
+// How the users are named in the chat list.
+enum class NameOrder {
+	FirstLast = 0,
+	LastFirst = 1,
+};
+[[nodiscard]] NameOrder nameOrder();
+void setNameOrder(not_null<Main::Session*> session, NameOrder order);
+// Grows with each change of the order: the names in the list are redrawn.
+[[nodiscard]] int nameOrderVersion();
+// The name of the user in the chat list by the setting.
+[[nodiscard]] QString chatListUserName(not_null<UserData*> user);
+
 // The order of the pinned chats: as on the server (manual), by the first
 // or the last name, by the last message, the Favorites stay first.
 enum class PinnedSort {

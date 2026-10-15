@@ -1815,6 +1815,47 @@ void SetupMessages(
 		});
 	}
 
+	// MTS Link: how the users are named in the chat list.
+	{
+		using Order = MtsLink::NameOrder;
+		static const auto kOrders = std::vector<Order>{
+			Order::FirstLast,
+			Order::LastFirst,
+		};
+		const auto current = std::make_shared<rpl::variable<Order>>(
+			MtsLink::nameOrder());
+		const auto text = [](Order order) {
+			return (order == Order::LastFirst)
+				? tr::lng_mtslink_name_order_last(tr::now)
+				: tr::lng_mtslink_name_order_first(tr::now);
+		};
+		const auto button = AddButtonWithLabel(
+			container,
+			tr::lng_mtslink_name_order(),
+			current->value() | rpl::map(text),
+			st::settingsButton,
+			{ &st::menuIconProfile });
+		button->addClickHandler([=] {
+			auto options = std::vector<QString>();
+			for (const auto order : kOrders) {
+				options.push_back(text(order));
+			}
+			controller->show(Box(SingleChoiceBox, SingleChoiceBoxArgs{
+				.title = tr::lng_mtslink_name_order(),
+				.options = options,
+				.initialSelection = int(ranges::find(
+					kOrders,
+					current->current()) - begin(kOrders)),
+				.callback = [=](int index) {
+					*current = kOrders[index];
+					MtsLink::setNameOrder(
+						&controller->session(),
+						kOrders[index]);
+				},
+			}));
+		});
+	}
+
 	// MTS Link: the order of the pinned chats.
 	{
 		using Sort = MtsLink::PinnedSort;

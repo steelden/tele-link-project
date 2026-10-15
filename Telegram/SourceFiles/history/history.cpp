@@ -2653,7 +2653,8 @@ bool History::isLinkedCommunityMember() const {
 }
 
 int History::chatListNameVersion() const {
-	return peer->nameVersion();
+	// Both grow: the name is built again after the order setting change.
+	return peer->nameVersion() + MtsLink::nameOrderVersion();
 }
 
 void History::hasUnreadMentionChanged(bool has) {
@@ -3018,6 +3019,11 @@ bool History::chatListMessageKnown() const {
 const QString &History::chatListName() const {
 	if (const auto broadcast = peer->monoforumBroadcast()) {
 		return broadcast->name();
+	} else if (const auto user = peer->asUser()) {
+		if (MtsLink::nameOrder() == MtsLink::NameOrder::LastFirst) {
+			_mtsLinkChatListName = MtsLink::chatListUserName(user);
+			return _mtsLinkChatListName;
+		}
 	}
 	return peer->name();
 }

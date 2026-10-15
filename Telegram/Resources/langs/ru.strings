@@ -7087,6 +7087,9 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_sticker_size" = "Размер стикеров";
 "lng_mtslink_sticker_size_default" = "{size} px (стандарт)";
 "lng_mtslink_pinned_sort" = "Порядок закреплённых чатов";
+"lng_mtslink_name_order" = "Имена в списке чатов";
+"lng_mtslink_name_order_first" = "Имя Фамилия";
+"lng_mtslink_name_order_last" = "Фамилия Имя";
 "lng_mtslink_pinned_sort_manual" = "Не сортировать";
 "lng_mtslink_pinned_sort_name_asc" = "По имени (А–Я)";
 "lng_mtslink_pinned_sort_name_desc" = "По имени (Я–А)";

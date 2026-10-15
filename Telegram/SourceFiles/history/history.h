@@ -729,6 +729,7 @@ private:
 	std::optional<HistoryItem*> _chatListMessage;
 
 	QString _chatListNameSortKey;
+	mutable QString _mtsLinkChatListName; // "Last First" by the setting.
 
 	// A pointer to the block that is currently being built.
 	// We hold this pointer so we can destroy it while building

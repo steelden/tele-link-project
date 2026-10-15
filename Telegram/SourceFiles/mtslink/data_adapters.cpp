@@ -9841,6 +9841,59 @@ void setActiveCall(
 	}
 }
 
+base::options::option<int> OptionNameOrder({
+	.id = "mtslink-name-order",
+	.name = "Names in the chat list",
+});
+int NameOrderVersion = 0;
+
+NameOrder nameOrder() {
+	return (OptionNameOrder.value() == int(NameOrder::LastFirst))
+		? NameOrder::LastFirst
+		: NameOrder::FirstLast;
+}
+
+void setNameOrder(not_null<Main::Session*> session, NameOrder order) {
+	if (nameOrder() == order) {
+		return;
+	}
+	OptionNameOrder.set(int(order));
+	++NameOrderVersion;
+	// The chat list rows are redrawn (and resorted) by the name updates.
+	for (const auto &row : session->data().chatsList()->indexed()->all()) {
+		if (const auto history = row->history()) {
+			if (const auto user = history->peer->asUser()) {
+				session->changes().peerUpdated(
+					user,
+					Data::PeerUpdate::Flag::Name);
+			}
+		}
+	}
+}
+
+int nameOrderVersion() {
+	return NameOrderVersion;
+}
+
+QString chatListUserName(not_null<UserData*> user) {
+	const auto &name = user->name();
+	if (nameOrder() != NameOrder::LastFirst
+		|| user->id == FavoritesPeerIdValue) {
+		return name;
+	} else if (!user->lastName.isEmpty()) {
+		return user->firstName.isEmpty()
+			? user->lastName
+			: (user->lastName + ' ' + user->firstName);
+	}
+	// The profile is not loaded yet, only the full name "First Last": the
+	// last word goes first.
+	const auto trimmed = name.trimmed();
+	const auto space = trimmed.lastIndexOf(' ');
+	return (space > 0)
+		? (trimmed.mid(space + 1) + ' ' + trimmed.left(space).trimmed())
+		: name;
+}
+
 PinnedSort pinnedSort() {
 	const auto value = OptionPinnedSort.value();
 	return (value > int(PinnedSort::Manual)
