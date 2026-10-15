@@ -133,6 +133,22 @@ void addThreadEntryUnread(
 // The empty badge of a chat: a thread without the subscription there has
 // new messages (the dot on its loaded root, or the new replies to a root
 // not loaded yet).
+// The order of the pinned chats: as on the server (manual), by the first
+// or the last name, by the last message, the Favorites stay first.
+enum class PinnedSort {
+	Manual = 0,
+	NameAsc = 1,
+	NameDesc = 2,
+	LastNameAsc = 3,
+	LastNameDesc = 4,
+	DateDesc = 5,
+	DateAsc = 6,
+};
+[[nodiscard]] PinnedSort pinnedSort();
+void setPinnedSort(not_null<Main::Session*> session, PinnedSort sort);
+// The last message of a pinned chat changed: sorted again by the date.
+void pinnedChatDateChanged(not_null<Main::Session*> session);
+
 // Diagnostics: the blocks of a message with an element type not known
 // yet (the new code blocks of MTS Link) are logged with the raw message.
 void logUnknownBlocks(const QJsonObject &message, const QString &where);

@@ -6513,6 +6513,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_remove_from_stickers" = "Remove from stickers";
 "lng_mtslink_sticker_size" = "Sticker size";
 "lng_mtslink_sticker_size_default" = "{size} px (default)";
+"lng_mtslink_pinned_sort" = "Pinned chats order";
+"lng_mtslink_pinned_sort_manual" = "Don't sort";
+"lng_mtslink_pinned_sort_name_asc" = "By first name (A to Z)";
+"lng_mtslink_pinned_sort_name_desc" = "By first name (Z to A)";
+"lng_mtslink_pinned_sort_last_name_asc" = "By last name (A to Z)";
+"lng_mtslink_pinned_sort_last_name_desc" = "By last name (Z to A)";
+"lng_mtslink_pinned_sort_date_desc" = "By date (newest first)";
+"lng_mtslink_pinned_sort_date_asc" = "By date (oldest first)";
 "lng_mtslink_refresh_chat" = "Refresh";
 "lng_mtslink_import_stickers" = "Import pack";
 "lng_mtslink_import_stickers_title" = "Choose a zip with stickers or sticker images";

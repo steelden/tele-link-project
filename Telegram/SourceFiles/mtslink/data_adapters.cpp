@@ -405,10 +405,111 @@ QSet<QString> ThreadLoadRequested;
 // MemberOffline, so the online status must not expire on its own.
 constexpr auto kMtsLinkOnlineHorizon = TimeId(365 * 86400);
 
+base::options::option<int> OptionPinnedSort({
+	.id = "mtslink-pinned-sort",
+	.name = "Pinned chats order",
+});
+
+// The order of the pinned chats from the server (the chat list and the pin
+// events): restored when the sorting is turned off. By the chat ids, the
+// peers of the chats not applied yet are not known.
+std::vector<QString> ServerPinnedOrder;
+
+[[nodiscard]] bool IsFavoritesKey(const Dialogs::Key &key) {
+	const auto history = key.history();
+	return history && history->peer->id == FavoritesPeerIdValue;
+}
+
+void restoreServerPinnedOrder(not_null<Main::Session*> session) {
+	const auto pinned = session->data().chatsList()->pinned();
+	auto order = pinned->order();
+	const auto from = std::stable_partition(
+		order.begin(),
+		order.end(),
+		[&](const Dialogs::Key &key) {
+			return !key.history() || IsFavoritesKey(key);
+		});
+	// Not known to the server yet (just pinned here): first, as pinned.
+	const auto index = [](const Dialogs::Key &key) {
+		const auto i = ranges::find(
+			ServerPinnedOrder,
+			peerIdToChatId(key.history()->peer->id));
+		return (i == end(ServerPinnedOrder))
+			? -1
+			: int(i - begin(ServerPinnedOrder));
+	};
+	std::stable_sort(from, order.end(), [&](
+			const Dialogs::Key &a,
+			const Dialogs::Key &b) {
+		return index(a) < index(b);
+	});
+	if (order != pinned->order()) {
+		pinned->applyOrder(std::move(order));
+	}
+}
+
+// The pinned chats of the main list sorted by the setting.
+void sortMainPinned(not_null<Main::Session*> session) {
+	const auto sort = pinnedSort();
+	if (sort == PinnedSort::Manual) {
+		return;
+	}
+	const auto pinned = session->data().chatsList()->pinned();
+	auto order = pinned->order();
+	// The Favorites (and not chats) stay first, as they are.
+	const auto from = std::stable_partition(
+		order.begin(),
+		order.end(),
+		[&](const Dialogs::Key &key) {
+			return !key.history() || IsFavoritesKey(key);
+		});
+	// The channels and the groups have no last name: by their title.
+	const auto lastName = [](not_null<PeerData*> peer) {
+		const auto user = peer->asUser();
+		return (user && !user->lastName.isEmpty())
+			? user->lastName
+			: peer->name();
+	};
+	// Negative, zero or positive, as for the ascending order.
+	const auto compare = [&](const Dialogs::Key &a, const Dialogs::Key &b) {
+		const auto peerA = a.history()->peer;
+		const auto peerB = b.history()->peer;
+		switch (sort) {
+		case PinnedSort::NameAsc:
+		case PinnedSort::NameDesc:
+			return QString::localeAwareCompare(peerA->name(), peerB->name());
+		case PinnedSort::LastNameAsc:
+		case PinnedSort::LastNameDesc:
+			if (const auto result = QString::localeAwareCompare(
+					lastName(peerA),
+					lastName(peerB))) {
+				return result;
+			}
+			return QString::localeAwareCompare(peerA->name(), peerB->name());
+		}
+		const auto dateA = a.entry()->chatListTimeId();
+		const auto dateB = b.entry()->chatListTimeId();
+		return (dateA < dateB) ? -1 : (dateA > dateB) ? 1 : 0;
+	};
+	const auto descending = (sort == PinnedSort::NameDesc)
+		|| (sort == PinnedSort::LastNameDesc)
+		|| (sort == PinnedSort::DateDesc);
+	std::stable_sort(from, order.end(), [&](
+			const Dialogs::Key &a,
+			const Dialogs::Key &b) {
+		const auto result = compare(a, b);
+		return descending ? (result > 0) : (result < 0);
+	});
+	if (order != pinned->order()) {
+		pinned->applyOrder(std::move(order));
+	}
+}
+
 // MTS Link pins are global, so every folder pins the globally pinned
 // chats it contains, in the main list order.
 void syncFolderPins(not_null<Main::Session*> session) {
 	using Flag = Data::ChatFilter::Flag;
+	sortMainPinned(session);
 	auto &filters = session->data().chatsFilters();
 	const auto &mainOrder = session->data().chatsList()->pinned()->order();
 	auto updates = std::vector<Data::ChatFilter>();
@@ -6005,6 +6106,11 @@ void handleChatEvent(
 		if (!hasChatId(peerId)) {
 			return;
 		}
+		// Pinned on the server: the first one.
+		ServerPinnedOrder.erase(
+			ranges::remove(ServerPinnedOrder, eventChatId),
+			end(ServerPinnedOrder));
+		ServerPinnedOrder.insert(begin(ServerPinnedOrder), eventChatId);
 		const auto history = session->data().historyLoaded(peerId);
 		if (history) {
 			session->data().setChatPinned(history, FilterId(), true);
@@ -6019,6 +6125,9 @@ void handleChatEvent(
 		if (!hasChatId(peerId)) {
 			return;
 		}
+		ServerPinnedOrder.erase(
+			ranges::remove(ServerPinnedOrder, eventChatId),
+			end(ServerPinnedOrder));
 		const auto history = session->data().historyLoaded(peerId);
 		if (history) {
 			session->data().setChatPinned(history, FilterId(), false);
@@ -8018,6 +8127,17 @@ void applyChatList(
 		return ch.type == ChatType::Dialog
 			|| ch.type == ChatType::Favorites;
 	};
+	ServerPinnedOrder.clear();
+	for (const auto &ch : channels) {
+		if (isDialogType(ch) && (ch.isPinned || ch.type == ChatType::Favorites)) {
+			ServerPinnedOrder.push_back(ch.id);
+		}
+	}
+	for (const auto &ch : channels) {
+		if (!isDialogType(ch) && ch.isPinned) {
+			ServerPinnedOrder.push_back(ch.id);
+		}
+	}
 	for (const auto &ch : channels) {
 		if (isDialogType(ch) && (ch.isPinned || ch.type == ChatType::Favorites)) {
 			applyDialogData(session, ch);
@@ -9718,6 +9838,29 @@ void setActiveCall(
 				}
 			}
 		}
+	}
+}
+
+PinnedSort pinnedSort() {
+	const auto value = OptionPinnedSort.value();
+	return (value > int(PinnedSort::Manual)
+		&& value <= int(PinnedSort::DateAsc))
+		? PinnedSort(value)
+		: PinnedSort::Manual;
+}
+
+void setPinnedSort(not_null<Main::Session*> session, PinnedSort sort) {
+	OptionPinnedSort.set(int(sort));
+	if (sort == PinnedSort::Manual) {
+		restoreServerPinnedOrder(session);
+	}
+	scheduleFolderPinsSync(session);
+}
+
+void pinnedChatDateChanged(not_null<Main::Session*> session) {
+	const auto sort = pinnedSort();
+	if (sort == PinnedSort::DateDesc || sort == PinnedSort::DateAsc) {
+		scheduleFolderPinsSync(session);
 	}
 }
 

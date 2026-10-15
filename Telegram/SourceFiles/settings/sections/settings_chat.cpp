@@ -81,6 +81,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "support/support_common.h"
 #include "support/support_templates.h"
 #include "main/main_session.h"
+#include "mtslink/data_adapters.h"
 #include "main/main_session_settings.h"
 #include "mainwidget.h"
 #include "styles/style_chat_helpers.h" // stickersRemove
@@ -1809,6 +1810,64 @@ void SetupMessages(
 					base::options::lookup<int>("sticker-size").set(
 						(size == kDefault) ? 0 : size);
 					controller->session().data().requestStickerViewsRefresh();
+				},
+			}));
+		});
+	}
+
+	// MTS Link: the order of the pinned chats.
+	{
+		using Sort = MtsLink::PinnedSort;
+		static const auto kSorts = std::vector<Sort>{
+			Sort::Manual,
+			Sort::NameAsc,
+			Sort::NameDesc,
+			Sort::LastNameAsc,
+			Sort::LastNameDesc,
+			Sort::DateDesc,
+			Sort::DateAsc,
+		};
+		const auto current = std::make_shared<rpl::variable<Sort>>(
+			MtsLink::pinnedSort());
+		const auto text = [](Sort sort) {
+			switch (sort) {
+			case Sort::NameAsc:
+				return tr::lng_mtslink_pinned_sort_name_asc(tr::now);
+			case Sort::NameDesc:
+				return tr::lng_mtslink_pinned_sort_name_desc(tr::now);
+			case Sort::LastNameAsc:
+				return tr::lng_mtslink_pinned_sort_last_name_asc(tr::now);
+			case Sort::LastNameDesc:
+				return tr::lng_mtslink_pinned_sort_last_name_desc(tr::now);
+			case Sort::DateDesc:
+				return tr::lng_mtslink_pinned_sort_date_desc(tr::now);
+			case Sort::DateAsc:
+				return tr::lng_mtslink_pinned_sort_date_asc(tr::now);
+			}
+			return tr::lng_mtslink_pinned_sort_manual(tr::now);
+		};
+		const auto button = AddButtonWithLabel(
+			container,
+			tr::lng_mtslink_pinned_sort(),
+			current->value() | rpl::map(text),
+			st::settingsButton,
+			{ &st::menuIconPin });
+		button->addClickHandler([=] {
+			auto options = std::vector<QString>();
+			for (const auto sort : kSorts) {
+				options.push_back(text(sort));
+			}
+			controller->show(Box(SingleChoiceBox, SingleChoiceBoxArgs{
+				.title = tr::lng_mtslink_pinned_sort(),
+				.options = options,
+				.initialSelection = int(ranges::find(
+					kSorts,
+					current->current()) - begin(kSorts)),
+				.callback = [=](int index) {
+					*current = kSorts[index];
+					MtsLink::setPinnedSort(
+						&controller->session(),
+						kSorts[index]);
 				},
 			}));
 		});

@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_options.h"
 #include "ui/ui_utility.h"
 #include "history/history.h"
+#include "mtslink/data_adapters.h"
 #include "history/history_item.h"
 #include "styles/style_dialogs.h" // st::dialogsTextWidthMin
 
@@ -428,6 +429,9 @@ void Entry::setChatListTimeId(TimeId date) {
 	if (was != date) {
 		if (const auto history = asHistory()) {
 			history->communityChatsListDateChanged(was);
+		}
+		if (isPinnedDialog(FilterId())) {
+			MtsLink::pinnedChatDateChanged(&session());
 		}
 	}
 }

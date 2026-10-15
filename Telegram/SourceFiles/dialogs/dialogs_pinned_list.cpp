@@ -164,6 +164,15 @@ void PinnedList::applyList(const std::vector<not_null<History*>> &list) {
 	}
 }
 
+void PinnedList::applyOrder(std::vector<Key> order) {
+	Expects(order.size() == _data.size());
+
+	_data = std::move(order);
+	for (auto i = 0, count = int(_data.size()); i != count; ++i) {
+		_data[i].entry()->cachePinnedIndex(_filterId, i + 1);
+	}
+}
+
 void PinnedList::reorder(Key key1, Key key2) {
 	const auto index1 = ranges::find(_data, key1) - begin(_data);
 	const auto index2 = ranges::find(_data, key2) - begin(_data);

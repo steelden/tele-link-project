@@ -2721,6 +2721,11 @@ void InnerWidget::checkReorderPinnedStart(QPoint localPosition) {
 		&& (Core::App().settings().quickDialogAction()
 			!= Dialogs::Ui::QuickDialogAction::Disabled)) {
 		return;
+	} else if (!_openedForum
+		&& !_savedSublists
+		&& MtsLink::pinnedSort() != MtsLink::PinnedSort::Manual) {
+		// The pinned chats are sorted by the setting.
+		return;
 	}
 	unfreezeShownList(true);
 	_dragging = _pressed;
