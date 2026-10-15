@@ -149,6 +149,19 @@ private:
 				const auto targetName = _logsFilePath(type, postfix);
 
 				auto target = QFile(targetName);
+				// MTS Link: the log of the previous launch is kept (a crash
+				// on another computer: the log is sent after a restart).
+				if (target.exists()) {
+					const auto previousName = _logsFilePath(
+						type,
+						u"_previous"_q);
+					QFile(previousName).remove();
+					if (!target.rename(previousName)) {
+						LOG(("Could not keep '%1' as '%2': %3"
+							).arg(targetName, previousName, target.errorString()));
+					}
+					target.setFileName(targetName);
+				}
 				if (target.exists() && !target.remove()) {
 					LOG(("Could not delete '%1' file to start new logging: %2").arg(targetName, target.errorString()));
 					return false;
