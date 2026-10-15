@@ -32,6 +32,7 @@ constexpr auto kTimeoutsToReconnect = 3;
 		u"Chat.Subscribe"_q,
 		u"MessageScheduler.Subscribe"_q,
 		u"Notification.Subscribe"_q,
+		u"Status.Subscribe"_q,
 		u"Chat.GetMyFrequentlyUsedEmojis"_q,
 		u"Typing.Typing"_q,
 		u"Chat.SendMessageV2"_q,

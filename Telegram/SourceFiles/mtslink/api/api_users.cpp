@@ -66,9 +66,27 @@ void Users::loadOrganizationMembers(int offset, int limit) {
 	_rpc->call(
 		"Organization.GetMembersV2",
 		QJsonObject{{"offset", offset}, {"limit", limit}},
-		[this](const QJsonObject &result) {
+		[this, offset, limit](const QJsonObject &result) {
 			const auto value = result.value("value").toObject();
 			const auto list = value.value("members").toArray();
+			{
+				// Temporary: how many members and presences come.
+				auto counts = QHash<QString, int>();
+				for (const auto &item : list) {
+					++counts[item.toObject().value("presence").toString()];
+				}
+				auto parts = QStringList();
+				for (auto i = counts.cbegin(); i != counts.cend(); ++i) {
+					parts.push_back(i.key() + '=' + QString::number(i.value()));
+				}
+				LOG(("MtsLink Presence: GetMembersV2 offset=%1 limit=%2 "
+					"got=%3 keys=%4 presence: %5"
+					).arg(offset
+					).arg(limit
+					).arg(list.size()
+					).arg(value.keys().join(',')
+					).arg(parts.join(' ')));
+			}
 			QList<MemberProfile> members;
 			members.reserve(list.size());
 			for (const auto &item : list) {
@@ -184,16 +202,48 @@ void Users::loadChatMembers(const ChatId &chatId) {
 			const auto value = result.value("value").toObject();
 			const auto membersList = value.value("members").toArray();
 			const auto adminsList = value.value("admins").toArray();
+			{
+				// Temporary: the presence of the chat members.
+				auto counts = QHash<QString, int>();
+				auto sample = QStringList();
+				for (const auto &list : { adminsList, membersList }) {
+					for (const auto &item : list) {
+						const auto profile = item.toObject().value(
+							"profile").toObject();
+						const auto presence = profile.value(
+							"presence").toString();
+						++counts[presence.isEmpty() ? u"none"_q : presence];
+						if (sample.size() < 8) {
+							sample.push_back(profile.value(
+								"lastName").toString() + '=' + presence);
+						}
+					}
+				}
+				auto parts = QStringList();
+				for (auto i = counts.cbegin(); i != counts.cend(); ++i) {
+					parts.push_back(i.key() + '=' + QString::number(i.value()));
+				}
+				LOG(("MtsLink Presence: chat %1 members: %2 (%3)"
+					).arg(chatId
+					).arg(parts.join(' ')
+					).arg(sample.join(", ")));
+			}
 
 			const auto parseEntry = [](const QJsonValue &item,
 					MemberRole defaultRole) -> MemberProfile {
 				const auto wrapper = item.toObject();
 				const auto obj = wrapper.value("profile").toObject();
 				const auto chatRole = wrapper.value("role").toString();
-				// "presence" / "inCall" in chat member profiles are not
-				// reliable (almost everyone is "Online"), statuses come from
-				// Member.GetMember and organization events instead.
-				const auto presence = MemberPresence::Unknown;
+				// The presence of the members (checked: online and offline
+				// both come), the events update it later.
+				const auto presenceStr = obj.value("presence").toString();
+				const auto presence = (presenceStr == u"Online"_q)
+					? MemberPresence::Online
+					: (presenceStr == u"Away"_q)
+					? MemberPresence::Away
+					: (presenceStr == u"Offline"_q)
+					? MemberPresence::Offline
+					: MemberPresence::Unknown;
 				auto role = defaultRole;
 				if (chatRole.contains("Owner")) {
 					role = MemberRole::Owner;

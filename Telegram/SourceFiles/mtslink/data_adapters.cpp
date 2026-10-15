@@ -2980,6 +2980,10 @@ void connectToSession(
 				if (type == "MemberOnline"
 					|| type == "MemberOffline") {
 					const auto userId = value.value("userId").toString();
+					if (userId == CachedMyUserId) {
+						// Temporary: is this client seen as online.
+						LOG(("MtsLink Presence: own %1").arg(type));
+					}
 					if (!userId.isEmpty()) {
 						const auto bareId = uuidToBareId(userId);
 						const auto user = mainSession->data().user(::UserId(bareId));
