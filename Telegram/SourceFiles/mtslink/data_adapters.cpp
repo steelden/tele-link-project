@@ -6016,6 +6016,8 @@ void handleChatEvent(
 			mts->messages()->reloadPinned(chatId);
 		}
 	} else if (type == "ChatUnreadMessageCountUpdatedEvent") {
+		LOG(("MtsLink ReadInbox: unread event %1").arg(QString::fromUtf8(
+			QJsonDocument(value).toJson(QJsonDocument::Compact)).left(300)));
 		const auto eventChatId = value.value("chatId").toString();
 		if (eventChatId.isEmpty()) {
 			return;
@@ -6204,15 +6206,24 @@ void handleChatEvent(
 		if (!hasDoubleCount) {
 			return;
 		}
+		// The event is the same for everyone ("selected" of the author of
+		// the change): mine stay as they are known for the message, a
+		// reaction of two people was shown as mine for all of them.
+		const auto mine = [&](const QString &emojiId) {
+			return ranges::any_of(item->reactions(), [&](const auto &r) {
+				return r.my && (emojiToId(r.id.emoji()) == emojiId);
+			});
+		};
 		QList<Api::ReactionData> reactions;
 		for (const auto &r : arr) {
 			const auto ro = r.toObject();
 			const auto count = ro.value("count").toInt();
+			const auto emojiId = ro.value("emojiId").toString();
 			reactions.push_back({
-				.emojiId = ro.value("emojiId").toString(),
+				.emojiId = emojiId,
 				.emoji = ValidEmoji(ro.value("emoji").toString()),
 				.count = count,
-				.selected = (count >= 2),
+				.selected = mine(emojiId),
 			});
 		}
 		const auto mtp = buildMtpReactions(reactions);
