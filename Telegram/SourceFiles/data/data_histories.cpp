@@ -262,11 +262,25 @@ void Histories::readInboxTill(
 		const auto date = dateOf(tillId);
 		const auto readDate = history->mtsLinkInboxReadDate();
 		if (date && readDate && date < readDate) {
+			// Temporary: the slow / lost reads.
+			LOG(("MtsLink ReadInbox: '%1' till %2 skipped, older: date=%3 "
+				"readDate=%4"
+				).arg(history->peer->name()
+				).arg(tillId.bare
+				).arg(date
+				).arg(readDate));
 			return;
 		}
 		auto &state = _states[history];
 		if (const auto pending = dateOf(state.willReadTill)
 			; date && pending && date < pending) {
+			LOG(("MtsLink ReadInbox: '%1' till %2 skipped, older than "
+				"pending %3: date=%4 pending=%5"
+				).arg(history->peer->name()
+				).arg(tillId.bare
+				).arg(state.willReadTill.bare
+				).arg(date
+				).arg(pending));
 			return;
 		}
 		Core::App().notifications().clearIncomingFromHistory(history);
@@ -274,6 +288,13 @@ void Histories::readInboxTill(
 		if (state.willReadTill == tillId) {
 			return;
 		}
+		LOG(("MtsLink ReadInbox: '%1' till %2 date=%3 scheduled (unread %4, "
+			"timer %5)"
+			).arg(history->peer->name()
+			).arg(tillId.bare
+			).arg(date
+			).arg(history->unreadCount()
+			).arg(_readRequestsTimer.isActive() ? 1 : 0));
 		state.willReadTill = tillId;
 		state.willReadWhen = crl::now() + 300;
 		if (!_readRequestsTimer.isActive()) {
@@ -762,6 +783,12 @@ void Histories::sendReadRequest(not_null<History*> history, State &state) {
 				history->peer,
 				tillId);
 			const auto sending = tillItem && tillItem->isSending();
+			LOG(("MtsLink ReadInbox: '%1' sending till %2 mtsId='%3' "
+				"sending=%4"
+				).arg(history->peer->name()
+				).arg(tillId.bare
+				).arg(mtsId
+				).arg(sending ? 1 : 0));
 			if (!chatId.isEmpty() && !mtsId.isEmpty() && !sending) {
 				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);

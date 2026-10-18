@@ -1767,6 +1767,19 @@ void SetupMessages(
 		Core::App().saveSettingsDelayed();
 	}, inner->lifetime());
 
+	// MTS Link: the empty badge of the chats with the unread threads.
+	const auto threadsMark = inner->add(
+		object_ptr<Ui::Checkbox>(
+			inner,
+			tr::lng_mtslink_threads_mark(tr::now),
+			MtsLink::showThreadsMark(),
+			st::settingsCheckbox),
+		st::settingsCheckboxPadding);
+	threadsMark->checkedChanges(
+	) | rpl::on_next([=](bool checked) {
+		MtsLink::setShowThreadsMark(&controller->session(), checked);
+	}, inner->lifetime());
+
 	Ui::AddSkip(inner);
 
 	// MTS Link: the size of the stickers in the chats (the "sticker-size"

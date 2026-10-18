@@ -6515,6 +6515,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_sticker_size_default" = "{size} px (default)";
 "lng_mtslink_pinned_sort" = "Pinned chats order";
 "lng_mtslink_name_order" = "Names in the chat list";
+"lng_mtslink_threads_mark" = "Mark chats with unread threads";
 "lng_mtslink_name_order_first" = "First name Last name";
 "lng_mtslink_name_order_last" = "Last name First name";
 "lng_mtslink_pinned_sort_manual" = "Don't sort";

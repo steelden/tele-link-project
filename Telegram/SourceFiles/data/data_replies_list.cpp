@@ -1561,6 +1561,7 @@ void RepliesList::readTill(
 		// server again.
 		return;
 	}
+	const auto readStarted = crl::now();
 	if (isMtsLink && tillIdItem) {
 		setMtsLinkInboxReadDate(tillIdItem->date());
 	}
@@ -1622,6 +1623,20 @@ void RepliesList::readTill(
 				}
 			}
 		}
+		if (isMtsLink) {
+			// Temporary: the slow thread reads.
+			LOG(("MtsLink ThreadRead: root=%1 till=%2 date=%3 fast=%4 "
+				"timer=%5 remaining=%6 (%7 ms in readTill)"
+				).arg(_rootId.bare
+				).arg(now.bare
+				).arg(tillIdItem ? tillIdItem->date() : 0
+				).arg(fast ? 1 : 0
+				).arg(_readRequestTimer.isActive() ? 1 : 0
+				).arg(_readRequestTimer.isActive()
+					? _readRequestTimer.remainingTime()
+					: -1
+				).arg(crl::now() - readStarted));
+		}
 		if (!_readRequestTimer.isActive()) {
 			_readRequestTimer.callOnce(fast ? 0 : kReadRequestTimeout);
 		} else if (fast && _readRequestTimer.remainingTime() > 0) {
@@ -1666,6 +1681,12 @@ void RepliesList::sendReadTillRequest() {
 				_history->peer->id,
 				tillId);
 			const auto sending = tillItem && tillItem->isSending();
+			LOG(("MtsLink ThreadRead: root=%1 sending till %2 mtsId='%3' "
+				"sending=%4"
+				).arg(_rootId.bare
+				).arg(tillId.bare
+				).arg(mtsId
+				).arg(sending ? 1 : 0));
 			if (!chatId.isEmpty() && !mtsId.isEmpty() && !sending) {
 				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);

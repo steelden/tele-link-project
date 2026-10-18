@@ -9890,6 +9890,36 @@ int nameOrderVersion() {
 	return NameOrderVersion;
 }
 
+base::options::option<bool> OptionHideThreadsMark({
+	.id = "mtslink-hide-threads-mark",
+	.name = "Hide the badge of the unread threads",
+});
+
+bool showThreadsMark() {
+	return !OptionHideThreadsMark.value();
+}
+
+void setShowThreadsMark(not_null<Main::Session*> session, bool show) {
+	if (showThreadsMark() == show) {
+		return;
+	}
+	OptionHideThreadsMark.set(!show);
+	// The badges and the folders of the unread chats are recomputed.
+	auto marked = 0;
+	for (const auto &row : session->data().chatsList()->indexed()->all()) {
+		if (const auto history = row->history()) {
+			if (history->mtsLinkThreadsMark()) {
+				++marked;
+				history->updateChatListEntry();
+				session->data().chatsFilters().refreshHistory(history);
+			}
+		}
+	}
+	LOG(("MtsLink ThreadsMark: show=%1, chats with the mark: %2"
+		).arg(show ? 1 : 0
+		).arg(marked));
+}
+
 QString chatListUserName(not_null<UserData*> user) {
 	const auto &name = user->name();
 	if (nameOrder() != NameOrder::LastFirst

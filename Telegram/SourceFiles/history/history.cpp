@@ -2913,7 +2913,10 @@ Dialogs::BadgesState History::chatListBadgesState() const {
 
 Dialogs::BadgesState History::computeBadgesState() const {
 	auto state = computeUnreadState();
-	if (_mtsLinkThreadsMark && !state.messages && !state.marks) {
+	if (_mtsLinkThreadsMark
+		&& !state.messages
+		&& !state.marks
+		&& MtsLink::showThreadsMark()) {
 		// MTS Link: the empty badge of the chat only, the folders and the
 		// total counter don't count the threads without the subscription.
 		state.marks = 1;

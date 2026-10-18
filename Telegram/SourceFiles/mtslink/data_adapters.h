@@ -145,6 +145,11 @@ void setNameOrder(not_null<Main::Session*> session, NameOrder order);
 // The name of the user in the chat list by the setting.
 [[nodiscard]] QString chatListUserName(not_null<UserData*> user);
 
+// The empty badge of the chats with the unread threads without the
+// subscription (shown by default).
+[[nodiscard]] bool showThreadsMark();
+void setShowThreadsMark(not_null<Main::Session*> session, bool show);
+
 // The order of the pinned chats: as on the server (manual), by the first
 // or the last name, by the last message, the Favorites stay first.
 enum class PinnedSort {
