@@ -1360,11 +1360,22 @@ TextWithEntities parseMentionedText(
 					const auto linkText = unescaped.mid(pos + 1, closeB - pos - 1);
 					const auto linkUrl = unescaped.mid(closeB + 2, closeP - closeB - 2);
 					if (!linkText.isEmpty() && !linkUrl.isEmpty()) {
-						entities.push_back(EntityInText(
-							EntityType::CustomUrl,
-							result.size(),
-							linkText.size(),
-							linkUrl));
+						// The auto link (its text is the url, "https://"
+						// added on sending): a plain url, as in Telegram, the
+						// edited text is not a link tag on its part.
+						const auto autoLink = (linkUrl == linkText)
+							|| (linkUrl == u"https://"_q + linkText)
+							|| (linkUrl == u"http://"_q + linkText);
+						entities.push_back(autoLink
+							? EntityInText(
+								EntityType::Url,
+								result.size(),
+								linkText.size())
+							: EntityInText(
+								EntityType::CustomUrl,
+								result.size(),
+								linkText.size(),
+								linkUrl));
 						result += linkText;
 						pos = closeP + 1;
 						continue;
@@ -2980,10 +2991,6 @@ void connectToSession(
 				if (type == "MemberOnline"
 					|| type == "MemberOffline") {
 					const auto userId = value.value("userId").toString();
-					if (userId == CachedMyUserId) {
-						// Temporary: is this client seen as online.
-						LOG(("MtsLink Presence: own %1").arg(type));
-					}
 					if (!userId.isEmpty()) {
 						const auto bareId = uuidToBareId(userId);
 						const auto user = mainSession->data().user(::UserId(bareId));
@@ -4048,13 +4055,6 @@ void refreshThreadsMark(
 				&& views->commentsMaxId > views->commentsInboxReadTillId
 				&& !subscribed(item->id)) {
 				unread = true;
-				// Temporary: the stuck thread reads.
-				LOG(("MtsLink ThreadRead: '%1' mark by root=%2 (max %3, "
-					"read %4)"
-					).arg(history->peer->name()
-					).arg(item->id.bare
-					).arg(views->commentsMaxId.bare
-					).arg(views->commentsInboxReadTillId.bare));
 				break;
 			}
 		}
@@ -4070,11 +4070,6 @@ void refreshThreadsMark(
 				&& i.value().count > 0
 				&& !subscribed(i.key().second)) {
 				unread = true;
-				LOG(("MtsLink ThreadRead: '%1' mark by pending root=%2 "
-					"count=%3"
-					).arg(history->peer->name()
-					).arg(i.key().second.bare
-					).arg(i.value().count));
 				break;
 			}
 		}
@@ -6028,8 +6023,6 @@ void handleChatEvent(
 			mts->messages()->reloadPinned(chatId);
 		}
 	} else if (type == "ChatUnreadMessageCountUpdatedEvent") {
-		LOG(("MtsLink ReadInbox: unread event %1").arg(QString::fromUtf8(
-			QJsonDocument(value).toJson(QJsonDocument::Compact)).left(300)));
 		const auto eventChatId = value.value("chatId").toString();
 		if (eventChatId.isEmpty()) {
 			return;
@@ -7216,13 +7209,6 @@ void fetchThreadLastRead(
 		[session, peerId, rootId](const QJsonObject &result) {
 			const auto obj = result.value("value").toObject();
 			const auto lastReadId = obj.value("id").toString();
-			// Temporary: the stuck thread reads.
-			LOG(("MtsLink ThreadRead: root=%1 GetLastReadChildMessage -> "
-				"%2 id='%3' createdAt=%4"
-				).arg(rootId.bare
-				).arg(result.value("type").toString()
-				).arg(lastReadId
-				).arg(qint64(obj.value("createdAt").toDouble())));
 			if (lastReadId.isEmpty()) {
 				return;
 			}
@@ -9924,19 +9910,14 @@ void setShowThreadsMark(not_null<Main::Session*> session, bool show) {
 	}
 	OptionHideThreadsMark.set(!show);
 	// The badges and the folders of the unread chats are recomputed.
-	auto marked = 0;
 	for (const auto &row : session->data().chatsList()->indexed()->all()) {
 		if (const auto history = row->history()) {
 			if (history->mtsLinkThreadsMark()) {
-				++marked;
 				history->updateChatListEntry();
 				session->data().chatsFilters().refreshHistory(history);
 			}
 		}
 	}
-	LOG(("MtsLink ThreadsMark: show=%1, chats with the mark: %2"
-		).arg(show ? 1 : 0
-		).arg(marked));
 }
 
 QString chatListUserName(not_null<UserData*> user) {
