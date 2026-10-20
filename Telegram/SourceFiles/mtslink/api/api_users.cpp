@@ -69,24 +69,6 @@ void Users::loadOrganizationMembers(int offset, int limit) {
 		[this, offset, limit](const QJsonObject &result) {
 			const auto value = result.value("value").toObject();
 			const auto list = value.value("members").toArray();
-			{
-				// Temporary: how many members and presences come.
-				auto counts = QHash<QString, int>();
-				for (const auto &item : list) {
-					++counts[item.toObject().value("presence").toString()];
-				}
-				auto parts = QStringList();
-				for (auto i = counts.cbegin(); i != counts.cend(); ++i) {
-					parts.push_back(i.key() + '=' + QString::number(i.value()));
-				}
-				LOG(("MtsLink Presence: GetMembersV2 offset=%1 limit=%2 "
-					"got=%3 keys=%4 presence: %5"
-					).arg(offset
-					).arg(limit
-					).arg(list.size()
-					).arg(value.keys().join(',')
-					).arg(parts.join(' ')));
-			}
 			QList<MemberProfile> members;
 			members.reserve(list.size());
 			for (const auto &item : list) {

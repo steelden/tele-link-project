@@ -135,12 +135,9 @@ void Sending::readMessage(
 		const MessageId &messageId) {
 	const auto key = chatId + ':' + messageId;
 	if (_sentReads.contains(key)) {
-		LOG(("MtsLink ReadInbox: '%1' in %2 already sent, skipped"
-			).arg(messageId, chatId));
 		return;
 	}
 	_sentReads.insert(key);
-	const auto started = crl::now();
 	QJsonObject param;
 	param["chatId"] = chatId;
 	param["lastMessageId"] = messageId;
@@ -149,10 +146,6 @@ void Sending::readMessage(
 		param,
 		[=](const QJsonObject &result) {
 			const auto type = result.value(u"type"_q).toString();
-			LOG(("MtsLink ReadInbox: MarkMessagesAsRead '%1' in %2 -> %3 "
-				"in %4 ms"
-				).arg(messageId, chatId, type
-				).arg(crl::now() - started));
 			if (type == u"RpcError"_q || type == u"BusinessError"_q) {
 				_sentReads.remove(key);
 			}

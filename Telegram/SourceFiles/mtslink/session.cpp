@@ -245,11 +245,7 @@ void Session::subscribeToEvents() {
 	// The web client subscribes to the status service right after the login
 	// (an empty answer, no events): the presence of the user (online in the
 	// other clients) is expected to come from it.
-	_rpc.call("Status.Subscribe", QJsonObject{}, [](const QJsonObject &r) {
-		LOG(("MtsLink Presence: Status.Subscribe -> %1").arg(
-			QString::fromUtf8(QJsonDocument(r).toJson(
-				QJsonDocument::Compact)).left(200)));
-	});
+	_rpc.call("Status.Subscribe", QJsonObject{}, nullptr);
 
 	_rpc.call(
 		"Chat.GetMyFrequentlyUsedEmojis",
