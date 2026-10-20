@@ -1355,6 +1355,18 @@ void RepliesList::applyMtsLinkRootUnread() {
 		return;
 	}
 	const auto unread = std::max(rootUnread, entryUnread);
+	// Temporary: the stuck thread reads.
+	LOG(("MtsLink ThreadRead: root=%1 open, rootUnread=%2 (max %3, read %4) "
+		"entryUnread=%5 list=%6 skippedBefore=%7 skippedAfter=%8 readDate=%9"
+		).arg(_rootId.bare
+		).arg(rootUnread
+		).arg(views ? views->commentsMaxId.bare : -1
+		).arg(views ? views->commentsInboxReadTillId.bare : -1
+		).arg(entryUnread
+		).arg(_list.size()
+		).arg(_skippedBefore.value_or(-1)
+		).arg(_skippedAfter.value_or(-1)
+		).arg(_mtsLinkInboxReadDate));
 	// The list is newest first: the read till message is right after the
 	// unread ones (the ids are hashes, only the dates are ordered).
 	if (unread <= 0) {
@@ -1369,10 +1381,16 @@ void RepliesList::applyMtsLinkRootUnread() {
 			_inboxReadTillId = lastRead->id;
 		}
 		_unreadCount = unread;
-	} else if (_skippedBefore == 0) {
-		// All the loaded messages are unread.
-		_inboxReadTillId = MsgId(1);
-		_unreadCount = unread;
+	} else {
+		// All the loaded messages are unread: the read date is before them
+		// (it was the read date of the chat itself, newer than the replies,
+		// and the reads of the thread were skipped as older).
+		const auto oldest = data.message(peerId, _list.back());
+		_mtsLinkInboxReadDate = oldest ? (oldest->date() - 1) : TimeId(0);
+		if (_skippedBefore == 0) {
+			_inboxReadTillId = MsgId(1);
+			_unreadCount = unread;
+		}
 	}
 }
 
@@ -1559,6 +1577,18 @@ void RepliesList::readTill(
 		// Not back (by the date, the ids are not ordered): the read till
 		// an older message (scrolled up) made the newer ones unread on the
 		// server again.
+		static auto LoggedSkip = MsgId();
+		if (_unreadCount.current().value_or(0) != 0 && LoggedSkip != tillId) {
+			// Temporary: the stuck thread reads.
+			LoggedSkip = tillId;
+			LOG(("MtsLink ThreadRead: root=%1 till=%2 skipped, older: "
+				"date=%3 readDate=%4 unread=%5"
+				).arg(_rootId.bare
+				).arg(tillId.bare
+				).arg(tillIdItem->date()
+				).arg(_mtsLinkInboxReadDate
+				).arg(_unreadCount.current().value_or(-1)));
+		}
 		return;
 	}
 	const auto readStarted = crl::now();
@@ -1574,6 +1604,20 @@ void RepliesList::readTill(
 	const auto changed = isMtsLink
 		? (now != was)
 		: (was < now);
+	if (isMtsLink && !(changed || (fast && now == was))) {
+		static auto LoggedSame = MsgId();
+		if (_unreadCount.current().value_or(0) != 0 && LoggedSame != tillId) {
+			// Temporary: the stuck thread reads.
+			LoggedSame = tillId;
+			LOG(("MtsLink ThreadRead: root=%1 till=%2 not changed, "
+				"unread=%3 computed=%4 readDate=%5"
+				).arg(_rootId.bare
+				).arg(tillId.bare
+				).arg(_unreadCount.current().value_or(-1)
+				).arg(unreadCount.value_or(-1)
+				).arg(_mtsLinkInboxReadDate));
+		}
+	}
 	if (changed || (fast && now == was)) {
 		setInboxReadTill(now, unreadCount);
 		if (isMtsLink) {

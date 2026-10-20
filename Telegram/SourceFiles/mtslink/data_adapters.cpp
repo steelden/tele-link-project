@@ -4048,6 +4048,13 @@ void refreshThreadsMark(
 				&& views->commentsMaxId > views->commentsInboxReadTillId
 				&& !subscribed(item->id)) {
 				unread = true;
+				// Temporary: the stuck thread reads.
+				LOG(("MtsLink ThreadRead: '%1' mark by root=%2 (max %3, "
+					"read %4)"
+					).arg(history->peer->name()
+					).arg(item->id.bare
+					).arg(views->commentsMaxId.bare
+					).arg(views->commentsInboxReadTillId.bare));
 				break;
 			}
 		}
@@ -4063,6 +4070,11 @@ void refreshThreadsMark(
 				&& i.value().count > 0
 				&& !subscribed(i.key().second)) {
 				unread = true;
+				LOG(("MtsLink ThreadRead: '%1' mark by pending root=%2 "
+					"count=%3"
+					).arg(history->peer->name()
+					).arg(i.key().second.bare
+					).arg(i.value().count));
 				break;
 			}
 		}
@@ -7204,6 +7216,13 @@ void fetchThreadLastRead(
 		[session, peerId, rootId](const QJsonObject &result) {
 			const auto obj = result.value("value").toObject();
 			const auto lastReadId = obj.value("id").toString();
+			// Temporary: the stuck thread reads.
+			LOG(("MtsLink ThreadRead: root=%1 GetLastReadChildMessage -> "
+				"%2 id='%3' createdAt=%4"
+				).arg(rootId.bare
+				).arg(result.value("type").toString()
+				).arg(lastReadId
+				).arg(qint64(obj.value("createdAt").toDouble())));
 			if (lastReadId.isEmpty()) {
 				return;
 			}
