@@ -219,6 +219,8 @@ struct GiftCode {
 
 inline constexpr auto kTimeToLiveSingleView = crl::time(0x7FFFFFFF);
 
+class MediaDice;
+
 class Media {
 public:
 	Media(not_null<HistoryItem*> parent);

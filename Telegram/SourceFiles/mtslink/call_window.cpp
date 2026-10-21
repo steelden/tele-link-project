@@ -436,7 +436,7 @@ CallWindow::CallWindow(
 	_webview->setMessageHandler([=](const QJsonDocument &message) {
 	});
 	_webview->init(InitScript(language, video));
-	_webview->setNavigationStartHandler([=](QString url, bool newWindow) {
+	_webview->setNavigationPolicyHandler([=](QString url, bool newWindow) {
 		LOG(("MtsLink Call: navigate %1%2"
 			).arg(url, newWindow ? u" (new window)"_q : QString()));
 		// After leaving the conference the page goes to the meeting rating

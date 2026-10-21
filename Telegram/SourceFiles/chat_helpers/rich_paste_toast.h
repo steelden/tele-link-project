@@ -51,6 +51,14 @@ struct RichPasteToastArgs {
 [[nodiscard]] std::shared_ptr<QMimeData> CloneMimeData(
 	not_null<const QMimeData*> data);
 
+class RichPasteOfferThrottle {
+public:
+	[[nodiscard]] bool take();
+
+private:
+	crl::time _lastShown = 0;
+};
+
 void ShowRichPasteToast(RichPasteToastArgs &&args);
 
 } // namespace ChatHelpers

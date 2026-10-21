@@ -163,7 +163,7 @@ void AuthWidget::createWebView() {
 		})();
 	)JS");
 
-	_webView->setNavigationStartHandler([this](QString url, bool newWindow) {
+	_webView->setNavigationPolicyHandler([this](QString url, bool newWindow) {
 		LOG(("MtsLink Auth: navigation start: %1 (new=%2)")
 			.arg(url).arg(newWindow));
 		return onNavigationStart(url, newWindow);
