@@ -107,6 +107,7 @@ struct GiftUpdate {
 		Unpin,
 		ResaleChange,
 		Upgraded,
+		HostChange,
 	};
 
 	Data::SavedStarGiftId id;
@@ -656,8 +657,6 @@ public:
 	// MTS Link: the sticker size setting changed, all of them laid out.
 	void requestStickerViewsRefresh();
 	void markMediaRead(not_null<const DocumentData*> document);
-	void requestPollViewRepaint(not_null<const PollData*> poll);
-	void requestTodoListViewRepaint(not_null<const TodoListData*> todolist);
 
 	void photoLoadProgress(not_null<PhotoData*> photo);
 	void photoLoadDone(not_null<PhotoData*> photo);
@@ -694,7 +693,6 @@ public:
 	[[nodiscard]] bool unreadWithMentionsBadgeMuted() const;
 	[[nodiscard]] int unreadBadgeIgnoreOne(Dialogs::Key key) const;
 	[[nodiscard]] bool unreadBadgeMutedIgnoreOne(Dialogs::Key key) const;
-	[[nodiscard]] int unreadOnlyMutedBadge() const;
 	[[nodiscard]] rpl::producer<> unreadBadgeChanges() const;
 	void notifyUnreadBadgeChanged();
 

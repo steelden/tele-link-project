@@ -1685,13 +1685,14 @@ Section DetailsFiller::makeInfo() {
 				user->session().supportHelper().infoTextValue(user));
 		}
 
+		const auto phoneLine = addInfoOneLine(
+			tr::lng_info_mobile_label(),
+			PhoneWithSpoilerValue(user, PhoneOrHiddenValue(user)),
+			tr::lng_profile_copy_phone(tr::now),
+			st::infoProfileLabeledPadding,
+			st::popupMenuWithIcons);
 		{
-			const auto phoneLabel = addInfoOneLine(
-				tr::lng_info_mobile_label(),
-				PhoneWithSpoilerValue(user, PhoneOrHiddenValue(user)),
-				tr::lng_profile_copy_phone(tr::now),
-				st::infoProfileLabeledPadding,
-				st::popupMenuWithIcons).text;
+			const auto phoneLabel = phoneLine.text;
 			const auto hook = [=](Ui::FlatLabel::ContextMenuRequest request) {
 				if (request.selection.empty()) {
 					const auto callback = [=] {
@@ -3535,26 +3536,6 @@ void BuildProfileDetailsSections(
 		DetailsFiller filler(controller, &stack, peer, origin);
 		filler.buildSections();
 	}
-}
-
-void AddDetails(
-		not_null<Ui::VerticalLayout*> container,
-		not_null<Controller*> controller,
-		not_null<PeerData*> peer,
-		Data::ForumTopic *topic,
-		Data::SavedSublist *sublist,
-		Origin origin) {
-	auto layout = object_ptr<Ui::VerticalLayout>(container);
-	auto stack = SectionStack(layout.data());
-	BuildProfileDetailsSections(
-		stack,
-		controller,
-		peer,
-		topic,
-		sublist,
-		origin);
-	stack.finalize();
-	container->add(std::move(layout));
 }
 
 } // namespace Profile
