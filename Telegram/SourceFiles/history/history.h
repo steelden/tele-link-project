@@ -107,7 +107,6 @@ public:
 	[[nodiscard]] HistoryItem *joinedMessageInstance() const;
 	void checkLocalMessages();
 	void removeJoinedMessage();
-	void removeNewPeerMessages();
 
 	void reactionsEnabledChanged(bool enabled);
 
@@ -268,7 +267,6 @@ public:
 	void destroyUnreadBar();
 	[[nodiscard]] Element *unreadBar() const;
 	void calculateFirstUnreadMessage();
-	void unsetFirstUnreadMessage();
 	[[nodiscard]] Element *firstUnreadMessage() const;
 
 	[[nodiscard]] bool loadedAtBottom() const; // last message is in the list
@@ -338,9 +336,7 @@ public:
 		Data::SavedSublist *sublist);
 	void clearUnreadPollVotesFor(MsgId topicRootId);
 
-	[[nodiscard]] int unreadPollVotesCount() const;
 	void setUnreadPollVotesCount(int count);
-	[[nodiscard]] rpl::producer<int> unreadPollVotesCountChanges() const;
 
 	Data::Draft *draft(Data::DraftKey key) const;
 	void setDraft(Data::DraftKey key, std::unique_ptr<Data::Draft> &&draft);
@@ -724,7 +720,6 @@ private:
 	std::optional<int> _unreadCount;
 	bool _mtsLinkThreadsMark = false;
 	int _unreadPollVotesCount = 0;
-	rpl::event_stream<int> _unreadPollVotesCountChanges;
 	std::optional<HistoryItem*> _lastMessage;
 	std::optional<HistoryItem*> _lastServerMessage;
 	base::flat_set<not_null<HistoryItem*>> _clientSideMessages;
