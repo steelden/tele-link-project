@@ -826,6 +826,11 @@ FillMenuResult FillSendMenu(
 			[=] { action({ .type = ActionType::ChangePrice }, details); },
 			&icons.menuPrice);
 	}
+	// No silent sending in MTS Link: the menu of a thread (SilentOnly) is
+	// empty, an empty menu fails in the panel animation.
+	if (menu->empty()) {
+		return FillMenuResult::Skipped;
+	}
 
 	if (maybeShow) {
 		return AttachSendMenuEffect(
