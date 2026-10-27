@@ -260,6 +260,75 @@ void PeerMenuAddMuteSubmenuAction(
 		};
 	};
 	const auto isMuted = notifySettings->isMuted(thread);
+	if (const auto history = thread->asHistory()) {
+		// MTS Link: the submenu of the notifications always, with the local
+		// toggles of the threads mark and the unread counter.
+		const auto show = controller->uiShow();
+		const auto session = &history->session();
+		const auto peerId = history->peer->id;
+		addAction(PeerMenuCallback::Args{
+			.text = tr::lng_mtslink_notifications(tr::now),
+			.handler = nullptr,
+			.icon = (isMuted
+				? &st::menuIconMute
+				: notifySettings->sound(thread).none
+				? &st::menuIconSilent
+				: &st::menuIconUnmute),
+			.fillSubmenu = [&](not_null<Ui::PopupMenu*> menu) {
+				if (isMuted) {
+					const auto text = tr::lng_context_unmute(tr::now)
+						+ '\t'
+						+ Ui::FormatMuteForTiny(
+							thread->notify().muteUntil().value_or(0)
+								- base::unixtime::now());
+					menu->addAction(
+						text,
+						with([=](not_null<Data::Thread*> thread) {
+							notifySettings->update(
+								thread,
+								{ .unmute = true });
+						}),
+						&st::menuIconUnmute);
+				} else {
+					MuteMenu::FillMuteMenu(menu, thread, show);
+				}
+				menu->addSeparator();
+				const auto hideMark = MtsLink::hideThreadsMarkFor(
+					session,
+					peerId);
+				menu->addAction(
+					(hideMark
+						? tr::lng_mtslink_show_threads_mark
+						: tr::lng_mtslink_hide_threads_mark)(tr::now),
+					[=] {
+						if (const auto strong = weak.get()) {
+							MtsLink::setHideThreadsMarkFor(
+								strong->asHistory(),
+								!hideMark);
+						}
+					},
+					&st::menuIconTopics);
+				const auto hideCounter = MtsLink::hideUnreadCounterFor(
+					session,
+					peerId);
+				menu->addAction(
+					(hideCounter
+						? tr::lng_mtslink_show_unread_counter
+						: tr::lng_mtslink_hide_unread_counter)(tr::now),
+					[=] {
+						if (const auto strong = weak.get()) {
+							MtsLink::setHideUnreadCounterFor(
+								strong->asHistory(),
+								!hideCounter);
+						}
+					},
+					(hideCounter
+						? &st::menuIconMarkUnread
+						: &st::menuIconMarkRead));
+			},
+		});
+		return;
+	}
 	if (isMuted) {
 		const auto text = tr::lng_context_unmute(tr::now)
 			+ '\t'

@@ -260,6 +260,9 @@ public:
 	[[nodiscard]] bool mtsLinkThreadsMark() const {
 		return _mtsLinkThreadsMark;
 	}
+	// MTS Link: the local flags of the chat (no threads mark, no counter)
+	// changed, the unread state was `was`.
+	void mtsLinkUnreadHidesChanged(const Dialogs::UnreadState &was);
 	void setFakeUnreadWhileOpened(bool enabled);
 	[[nodiscard]] bool fakeUnreadWhileOpened() const;
 	void setMuted(bool muted) override;

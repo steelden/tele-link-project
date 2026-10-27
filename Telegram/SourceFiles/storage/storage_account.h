@@ -114,6 +114,9 @@ public:
 	[[nodiscard]] QString readMtsLinkActiveChat() const;
 	void writeMtsLinkActiveFilter(FilterId filterId);
 	[[nodiscard]] std::optional<FilterId> readMtsLinkActiveFilter() const;
+	// The local flags of the chats (peer id -> flags), encrypted.
+	void writeMtsLinkChatHides(const base::flat_map<PeerId, int> &hides);
+	[[nodiscard]] base::flat_map<PeerId, int> readMtsLinkChatHides() const;
 	[[nodiscard]] QString envConfigCachePath() const;
 	[[nodiscard]] QString basePath() const;
 

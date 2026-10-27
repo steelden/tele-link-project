@@ -10071,6 +10071,73 @@ void setShowThreadsMark(not_null<Main::Session*> session, bool show) {
 	}
 }
 
+struct ChatHides {
+	bool threadsMark = false;
+	bool unreadCounter = false;
+};
+
+// The flags of the chats of the account (by its folder).
+QString ChatHidesPath;
+QHash<PeerId, ChatHides> ChatHidesMap;
+
+QHash<PeerId, ChatHides> &chatHides(not_null<Main::Session*> session) {
+	const auto &local = session->account().local();
+	const auto path = local.basePath();
+	if (ChatHidesPath != path) {
+		ChatHidesPath = path;
+		ChatHidesMap.clear();
+		for (const auto &[peerId, flags] : local.readMtsLinkChatHides()) {
+			ChatHidesMap.insert(peerId, {
+				.threadsMark = (flags & 1) != 0,
+				.unreadCounter = (flags & 2) != 0,
+			});
+		}
+	}
+	return ChatHidesMap;
+}
+
+void writeChatHides(not_null<Main::Session*> session) {
+	auto hides = base::flat_map<PeerId, int>();
+	for (auto i = ChatHidesMap.cbegin(); i != ChatHidesMap.cend(); ++i) {
+		const auto flags = (i->threadsMark ? 1 : 0)
+			| (i->unreadCounter ? 2 : 0);
+		if (flags) {
+			hides.emplace(i.key(), flags);
+		}
+	}
+	session->account().local().writeMtsLinkChatHides(hides);
+}
+
+bool hideThreadsMarkFor(not_null<Main::Session*> session, PeerId peerId) {
+	return chatHides(session).value(peerId).threadsMark;
+}
+
+bool hideUnreadCounterFor(not_null<Main::Session*> session, PeerId peerId) {
+	return chatHides(session).value(peerId).unreadCounter;
+}
+
+void setHideThreadsMarkFor(not_null<History*> history, bool hide) {
+	auto &map = chatHides(&history->session());
+	if (map.value(history->peer->id).threadsMark == hide) {
+		return;
+	}
+	const auto was = history->chatListUnreadState();
+	map[history->peer->id].threadsMark = hide;
+	writeChatHides(&history->session());
+	history->mtsLinkUnreadHidesChanged(was);
+}
+
+void setHideUnreadCounterFor(not_null<History*> history, bool hide) {
+	auto &map = chatHides(&history->session());
+	if (map.value(history->peer->id).unreadCounter == hide) {
+		return;
+	}
+	const auto was = history->chatListUnreadState();
+	map[history->peer->id].unreadCounter = hide;
+	writeChatHides(&history->session());
+	history->mtsLinkUnreadHidesChanged(was);
+}
+
 QString chatListUserName(not_null<UserData*> user) {
 	const auto &name = user->name();
 	if (nameOrder() != NameOrder::LastFirst

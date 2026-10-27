@@ -158,6 +158,18 @@ void setNameOrder(not_null<Main::Session*> session, NameOrder order);
 [[nodiscard]] bool showThreadsMark();
 void setShowThreadsMark(not_null<Main::Session*> session, bool show);
 
+// The local settings of a chat (kept in the account folder, not on the
+// server): no empty badge of the threads without the subscription, no unread
+// counter (the folders and the total counter don't count the chat as well).
+[[nodiscard]] bool hideThreadsMarkFor(
+	not_null<Main::Session*> session,
+	PeerId peerId);
+[[nodiscard]] bool hideUnreadCounterFor(
+	not_null<Main::Session*> session,
+	PeerId peerId);
+void setHideThreadsMarkFor(not_null<History*> history, bool hide);
+void setHideUnreadCounterFor(not_null<History*> history, bool hide);
+
 // The order of the pinned chats: as on the server (manual), by the first
 // or the last name, by the last message, the Favorites stay first.
 enum class PinnedSort {

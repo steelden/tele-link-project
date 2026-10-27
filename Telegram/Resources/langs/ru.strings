@@ -7135,6 +7135,11 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_channel_read_only" = "Писать могут только администраторы";
 "lng_mtslink_filters_hide_all" = "Скрыть папку «Все чаты»";
 "lng_mtslink_filters_hide_all_about" = "В списке папок останутся только ваши папки. Работает, если создана хотя бы одна папка.";
+"lng_mtslink_notifications" = "Уведомления";
+"lng_mtslink_hide_threads_mark" = "Скрыть отметку тредов";
+"lng_mtslink_show_threads_mark" = "Показывать отметку тредов";
+"lng_mtslink_hide_unread_counter" = "Скрыть счётчик непрочитанных";
+"lng_mtslink_show_unread_counter" = "Показывать счётчик непрочитанных";
 "lng_call_invitation" = "Приглашение на групповой звонок";
 "lng_call_ongoing" = "Текущий групповой звонок";
 "lng_call_rate_label" = "Оцените качество звонка";

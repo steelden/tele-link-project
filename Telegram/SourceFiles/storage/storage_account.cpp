@@ -1333,6 +1333,45 @@ std::optional<FilterId> Account::readMtsLinkActiveFilter() const {
 	return ok ? std::make_optional(FilterId(result)) : std::nullopt;
 }
 
+void Account::writeMtsLinkChatHides(
+		const base::flat_map<PeerId, int> &hides) {
+	if (!_localKey) {
+		return;
+	}
+	const auto size = sizeof(quint32)
+		+ hides.size() * (sizeof(quint64) + sizeof(qint32));
+	FileWriteDescriptor file(u"mtslink_chat_hides"_q, _basePath);
+	EncryptedDescriptor data(size);
+	data.stream << quint32(hides.size());
+	for (const auto &[peerId, flags] : hides) {
+		data.stream << SerializePeerId(peerId) << qint32(flags);
+	}
+	file.writeEncrypted(data, _localKey);
+}
+
+base::flat_map<PeerId, int> Account::readMtsLinkChatHides() const {
+	auto result = base::flat_map<PeerId, int>();
+	if (!_localKey) {
+		return result;
+	}
+	FileReadDescriptor file;
+	if (!ReadEncryptedFile(file, u"mtslink_chat_hides"_q, _basePath, _localKey)) {
+		return result;
+	}
+	auto count = quint32();
+	file.stream >> count;
+	for (auto i = quint32(); i != count; ++i) {
+		auto peerId = quint64();
+		auto flags = qint32();
+		file.stream >> peerId >> flags;
+		if (!CheckStreamStatus(file.stream)) {
+			return {};
+		}
+		result.emplace(DeserializePeerId(peerId), flags);
+	}
+	return result;
+}
+
 QString Account::envConfigCachePath() const {
 	return _basePath + u"mtslink_env_config"_q;
 }

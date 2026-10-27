@@ -2533,6 +2533,12 @@ void History::mtsLinkSetThreadsMark(bool unread) {
 	owner().chatsFilters().refreshHistory(this);
 }
 
+void History::mtsLinkUnreadHidesChanged(const Dialogs::UnreadState &was) {
+	notifyUnreadStateChange(was);
+	updateChatListEntry();
+	owner().chatsFilters().refreshHistory(this);
+}
+
 void History::setFakeUnreadWhileOpened(bool enabled) {
 	if (fakeUnreadWhileOpened() == enabled) {
 		return;
@@ -2981,7 +2987,8 @@ Dialogs::BadgesState History::computeBadgesState() const {
 	if (_mtsLinkThreadsMark
 		&& !state.messages
 		&& !state.marks
-		&& MtsLink::showThreadsMark()) {
+		&& MtsLink::showThreadsMark()
+		&& !MtsLink::hideThreadsMarkFor(&session(), peer->id)) {
 		// MTS Link: the empty badge of the chat only, the folders and the
 		// total counter don't count the threads without the subscription.
 		state.marks = 1;
@@ -3024,6 +3031,12 @@ Dialogs::UnreadState History::computeUnreadState() const {
 	result.reactionsMuted = muted ? result.reactions : 0;
 	result.pollsMuted = muted ? result.polls : 0;
 	result.known = _unreadCount.has_value();
+	if (MtsLink::hideUnreadCounterFor(&session(), peer->id)) {
+		// MTS Link: the counter of the chat is hidden by its local setting.
+		result.messages = result.messagesMuted = 0;
+		result.chats = result.chatsMuted = 0;
+		result.marks = result.marksMuted = 0;
+	}
 	return result;
 }
 

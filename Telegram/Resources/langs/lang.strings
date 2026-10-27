@@ -6649,6 +6649,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_channel_read_only" = "Only administrators can post";
 "lng_mtslink_filters_hide_all" = "Hide the «All chats» folder";
 "lng_mtslink_filters_hide_all_about" = "Only your folders are shown in the list of folders. Works if you have at least one folder.";
+"lng_mtslink_notifications" = "Notifications";
+"lng_mtslink_hide_threads_mark" = "Hide the threads mark";
+"lng_mtslink_show_threads_mark" = "Show the threads mark";
+"lng_mtslink_hide_unread_counter" = "Hide the unread counter";
+"lng_mtslink_show_unread_counter" = "Show the unread counter";
 "lng_call_invitation" = "Group call invitation";
 "lng_call_ongoing" = "Ongoing group call";
 
