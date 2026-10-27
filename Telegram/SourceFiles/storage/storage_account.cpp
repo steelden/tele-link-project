@@ -282,7 +282,13 @@ base::flat_set<QString> Account::collectGoodNames() const {
 		"map1",
 		"maps",
 		"configs",
-		"mtslink_token",
+		"mtslink_token", // The old plain text tokens, moved to "auth".
+		"mtslink_auth0",
+		"mtslink_auth1",
+		"mtslink_auths",
+		"mtslink_chat_hides0",
+		"mtslink_chat_hides1",
+		"mtslink_chat_hidess",
 		"mtslink_env_config",
 		"mtslink_active_chat",
 		"mtslink_active_filter",
@@ -1249,47 +1255,79 @@ void Account::writeMtsLinkToken(
 		quint64 userId,
 		const QString &refreshToken,
 		const QString &deviceId) {
-	const auto path = _basePath + u"mtslink_token"_q;
-	QFile file(path);
+	// The tokens of the old versions, in plain text.
+	QFile::remove(_basePath + u"mtslink_token"_q);
 	if (token.isEmpty()) {
-		file.remove();
+		for (const auto suffix : { '0', '1', 's' }) {
+			QFile::remove(_basePath + u"mtslink_auth"_q + suffix);
+		}
+		return;
+	} else if (!_localKey) {
+		LOG(("MtsLink: FAILED to write the tokens, no local key."));
 		return;
 	}
-	QDir().mkpath(QFileInfo(path).absolutePath());
-	if (file.open(QIODevice::WriteOnly)) {
-		file.write(QString::number(userId).toUtf8());
-		file.write("\n");
-		file.write(token.toUtf8());
-		file.write("\n");
-		file.write(refreshToken.toUtf8());
-		file.write("\n");
-		file.write(deviceId.toUtf8());
-	} else {
-		LOG(("MtsLink: FAILED to write token file: %1").arg(file.errorString()));
-	}
+	const auto size = sizeof(quint64)
+		+ Serialize::stringSize(token)
+		+ Serialize::stringSize(refreshToken)
+		+ Serialize::stringSize(deviceId);
+	FileWriteDescriptor file(u"mtslink_auth"_q, _basePath);
+	EncryptedDescriptor data(size);
+	data.stream << quint64(userId) << token << refreshToken << deviceId;
+	file.writeEncrypted(data, _localKey);
 }
 
-Account::MtsLinkData Account::readMtsLinkData() const {
+Account::MtsLinkData Account::readMtsLinkData() {
+	if (_localKey) {
+		FileReadDescriptor file;
+		if (ReadEncryptedFile(file, u"mtslink_auth"_q, _basePath, _localKey)) {
+			auto result = MtsLinkData();
+			file.stream
+				>> result.userId
+				>> result.token
+				>> result.refreshToken
+				>> result.deviceId;
+			if (CheckStreamStatus(file.stream)) {
+				return result;
+			}
+			LOG(("MtsLink: FAILED to read the tokens."));
+		}
+	}
+
+	// The tokens of the old versions, in plain text: encrypted on the read.
 	const auto path = _basePath + u"mtslink_token"_q;
 	QFile file(path);
 	if (!file.open(QIODevice::ReadOnly)) {
 		return {};
 	}
 	const auto lines = QString::fromUtf8(file.readAll()).trimmed().split('\n');
+	file.close();
 	if (lines.isEmpty()) {
 		return {};
 	}
+	auto result = MtsLinkData();
 	if (lines.size() == 1) {
-		return { .token = lines[0].trimmed() };
+		result.token = lines[0].trimmed();
+	} else {
+		bool ok = false;
+		const auto userId = lines[0].trimmed().toULongLong(&ok);
+		result = {
+			.token = lines[1].trimmed(),
+			.refreshToken = (lines.size() > 2)
+				? lines[2].trimmed()
+				: QString(),
+			.deviceId = (lines.size() > 3) ? lines[3].trimmed() : QString(),
+			.userId = ok ? userId : 0,
+		};
 	}
-	bool ok = false;
-	const auto userId = lines[0].trimmed().toULongLong(&ok);
-	return {
-		.token = lines[1].trimmed(),
-		.refreshToken = (lines.size() > 2) ? lines[2].trimmed() : QString(),
-		.deviceId = (lines.size() > 3) ? lines[3].trimmed() : QString(),
-		.userId = ok ? userId : 0,
-	};
+	if (_localKey && !result.token.isEmpty()) {
+		LOG(("MtsLink: the plain text tokens are moved to the encrypted."));
+		writeMtsLinkToken(
+			result.token,
+			result.userId,
+			result.refreshToken,
+			result.deviceId);
+	}
+	return result;
 }
 
 void Account::writeMtsLinkActiveChat(const QString &chatId) {

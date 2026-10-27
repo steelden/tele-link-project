@@ -109,7 +109,8 @@ public:
 		quint64 userId,
 		const QString &refreshToken = {},
 		const QString &deviceId = {});
-	[[nodiscard]] MtsLinkData readMtsLinkData() const;
+	// Encrypted, the plain text of the old versions is moved on the read.
+	[[nodiscard]] MtsLinkData readMtsLinkData();
 	void writeMtsLinkActiveChat(const QString &chatId);
 	[[nodiscard]] QString readMtsLinkActiveChat() const;
 	void writeMtsLinkActiveFilter(FilterId filterId);
