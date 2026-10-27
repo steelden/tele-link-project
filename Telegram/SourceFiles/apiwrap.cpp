@@ -4786,7 +4786,19 @@ void ApiWrap::sendMessage(
 	const auto peer = history->peer;
 	const auto &textWithTags = message.textWithTags;
 
-	if (MtsLink::hasChatId(peer->id)) {
+	if (peer->isUser() && !MtsLink::hasChatId(peer->id)) {
+		const auto shared = std::make_shared<MessageToSend>(
+			std::move(message));
+		LOG(("MtsLink Dialog: a message to %1 waits for the dialog"
+			).arg(peer->id.value));
+		const auto weak = base::make_weak(_session);
+		MtsLink::ensureDialog(_session, peer->id, [=](bool ok) {
+			if (const auto strong = weak.get(); ok && strong) {
+				strong->api().sendMessage(std::move(*shared), localMessageId);
+			}
+		});
+		return;
+	} else if (MtsLink::hasChatId(peer->id)) {
 		// A reply with a selected part: a usual reply, the part is sent
 		// as a quote ("> text") before the message text.
 		auto quoted = textWithTags;

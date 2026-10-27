@@ -387,6 +387,63 @@ void Channels::joinChat(const ChatId &chatId, Done done) {
 	}, std::move(done));
 }
 
+void Channels::createDialog(
+		const QString &userId,
+		const QString &selfUserId,
+		const OrganizationId &organizationId,
+		std::function<void(QString chatId)> done) {
+	const auto chatIdOf = [](const QJsonObject &result) {
+		return (result.value("type").toString() == u"Dialog"_q)
+			? result.value("value").toObject().value("chatId").toString()
+			: QString();
+	};
+	const auto old = [=] {
+		_rpc->call(
+			"Chat.CreateDialog",
+			QJsonObject{
+				{ "users", QJsonArray{ userId, selfUserId } },
+				{ "organizationId", organizationId },
+			},
+			[=](const QJsonObject &result) {
+				LOG(("MtsLink Dialog: CreateDialog %1: %2").arg(
+					userId,
+					QString::fromUtf8(QJsonDocument(result).toJson(
+						QJsonDocument::Compact)).left(1000)));
+				done(chatIdOf(result));
+			},
+			[=](const QString &error) {
+				LOG(("MtsLink Dialog: CreateDialog %1 failed: %2"
+					).arg(userId, error));
+				done(QString());
+			});
+	};
+	_rpc->call(
+		"Chat.CreateDialogV2",
+		QJsonObject{
+			{ "interlocutor", QJsonObject{
+				{ "userId", userId },
+				{ "organizationId", organizationId },
+			} },
+		},
+		[=](const QJsonObject &result) {
+			LOG(("MtsLink Dialog: CreateDialogV2 %1: %2").arg(
+				userId,
+				QString::fromUtf8(QJsonDocument(result).toJson(
+					QJsonDocument::Compact)).left(1000)));
+			const auto chatId = chatIdOf(result);
+			if (chatId.isEmpty()) {
+				old();
+			} else {
+				done(chatId);
+			}
+		},
+		[=](const QString &error) {
+			LOG(("MtsLink Dialog: CreateDialogV2 %1 failed: %2"
+				).arg(userId, error));
+			old();
+		});
+}
+
 void Channels::createGroupChat(
 		const QString &name,
 		const OrganizationId &organizationId,

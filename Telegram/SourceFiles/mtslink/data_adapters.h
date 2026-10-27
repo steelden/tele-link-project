@@ -50,6 +50,14 @@ void connectToSession(
 [[nodiscard]] PeerId chatIdToPeerId(const QString &chatId, ChatType type);
 [[nodiscard]] PeerId chatIdToPeerId(const QString &chatId);
 [[nodiscard]] QString peerIdToChatId(PeerId peerId);
+
+// The dialog with a user without one (found by the search): created on the
+// server as the web client does on opening, done(true) when the user has the
+// chat id.
+void ensureDialog(
+	not_null<Main::Session*> session,
+	PeerId userPeerId,
+	Fn<void(bool)> done = nullptr);
 [[nodiscard]] bool hasChatId(PeerId peerId);
 // The own messages not read by the others yet ("isRead" of the server).
 [[nodiscard]] bool isOutboxUnread(PeerId peerId, MsgId msgId);

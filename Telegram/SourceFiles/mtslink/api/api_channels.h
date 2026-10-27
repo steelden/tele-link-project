@@ -101,6 +101,14 @@ public:
 	// Public channels.
 	void joinChat(const ChatId &chatId, Done done);
 
+	// The dialog with a user: the existing one or a new one, the chat id or
+	// empty on a failure.
+	void createDialog(
+		const QString &userId,
+		const QString &selfUserId,
+		const OrganizationId &organizationId,
+		std::function<void(QString chatId)> done);
+
 	// Group chats: only an owner, no administrators.
 	void createGroupChat(
 		const QString &name,

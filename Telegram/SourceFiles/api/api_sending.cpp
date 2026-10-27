@@ -1318,7 +1318,18 @@ void AddConfirmedLocalPlaceholder(const ConfirmedLocalFile &local) {
 void SendConfirmedFile(
 		not_null<Main::Session*> session,
 		const std::shared_ptr<FilePrepareResult> &file) {
-	if (MtsLink::hasChatId(file->to.peer)) {
+	if (peerIsUser(file->to.peer) && !MtsLink::hasChatId(file->to.peer)) {
+		// A file to a user without a dialog: sent after it is created.
+		LOG(("MtsLink Dialog: a file to %1 waits for the dialog"
+			).arg(file->to.peer.value));
+		const auto weak = base::make_weak(session);
+		MtsLink::ensureDialog(session, file->to.peer, [=](bool ok) {
+			if (ok && weak) {
+				SendConfirmedFile(weak.get(), file);
+			}
+		});
+		return;
+	} else if (MtsLink::hasChatId(file->to.peer)) {
 		const auto mts = session->account().mtsLinkSession();
 		if (!mts) {
 			return;

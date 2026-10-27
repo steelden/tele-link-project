@@ -1709,6 +1709,10 @@ void MainWidget::showHistory(
 				mts->messages()->load(chatId);
 			}
 		}
+	} else if (peerId
+		&& peerIsUser(peerId)
+		&& peerId != _controller->session().userPeerId()) {
+		MtsLink::ensureDialog(&_controller->session(), peerId);
 	}
 	if (alreadyThatPeer && params.reapplyLocalDraft) {
 		_history->applyDraft(HistoryWidget::FieldHistoryAction::NewEntry);

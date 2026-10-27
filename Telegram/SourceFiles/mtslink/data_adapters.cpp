@@ -3595,6 +3595,72 @@ bool hasChatId(PeerId peerId) {
 	return PeerToChatMap.contains(peerId);
 }
 
+void ensureDialog(
+		not_null<Main::Session*> session,
+		PeerId userPeerId,
+		Fn<void(bool)> done) {
+	static auto Pending = QHash<PeerId, std::vector<Fn<void(bool)>>>();
+	if (PeerToChatMap.contains(userPeerId)) {
+		if (done) {
+			done(true);
+		}
+		return;
+	}
+	const auto mts = session->account().mtsLinkSession();
+	const auto userId = peerIsUser(userPeerId)
+		? UserBareIdToUuidMap.value(peerToUser(userPeerId).bare)
+		: QString();
+	if (!mts
+		|| !mts->channels()
+		|| userId.isEmpty()
+		|| userId == mts->userId()) {
+		LOG(("MtsLink Dialog: no dialog for %1 (user '%2')"
+			).arg(userPeerId.value
+			).arg(userId));
+		if (done) {
+			done(false);
+		}
+		return;
+	}
+	auto &callbacks = Pending[userPeerId];
+	const auto requested = !callbacks.empty();
+	callbacks.push_back(done ? done : Fn<void(bool)>([](bool) {}));
+	if (requested) {
+		return;
+	}
+	LOG(("MtsLink Dialog: creating the dialog with %1").arg(userId));
+	const auto weak = base::make_weak(session);
+	mts->channels()->createDialog(
+		userId,
+		mts->userId(),
+		mts->organizationId(),
+		[=](QString chatId) {
+			const auto callbacks = Pending.take(userPeerId);
+			const auto strong = weak.get();
+			const auto mts = strong
+				? strong->account().mtsLinkSession()
+				: nullptr;
+			const auto ok = mts && !chatId.isEmpty();
+			if (ok && !PeerToChatMap.contains(userPeerId)) {
+				// The chat of another peer (an empty user of the chat id)
+				// is moved to the user by the chat info.
+				PeerToChatMap.insert(userPeerId, chatId);
+				ChatToPeerMap.insert(chatId, userPeerId);
+				PeerToChatTypeMap.insert(userPeerId, ChatType::Dialog);
+			}
+			LOG(("MtsLink Dialog: the dialog with %1 is %2"
+				).arg(userId, chatId.isEmpty() ? u"not created"_q : chatId));
+			if (ok) {
+				// The name and the existing messages of an old dialog.
+				mts->channels()->loadChatInfo(chatId);
+				mts->messages()->load(chatId);
+			}
+			for (const auto &callback : callbacks) {
+				callback(ok);
+			}
+		});
+}
+
 void markReadRequestSent(const QString &chatId) {
 	ReadRequestSentChats.insert(chatId);
 }
