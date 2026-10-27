@@ -50,6 +50,7 @@ based on Telegram Desktop.
 #include "base/timer.h"
 #include "dialogs/dialogs_pinned_list.h"
 #include "ui/text/format_values.h"
+#include "mtslink/code_language.h"
 #include "ui/boxes/confirm_box.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_layers.h"
@@ -1224,11 +1225,16 @@ TextWithEntities parseMentionedText(
 				if (preLength > 0 && result.endsWith('\n')) {
 					--preLength;
 				}
+				// The code blocks of MTS Link have no language: guessed by
+				// the content for the highlighting.
 				entities.push_back(EntityInText(
 					EntityType::Pre,
 					preStart,
 					preLength,
-					preLang));
+					(preLang.isEmpty()
+						? MtsLink::GuessCodeLanguage(
+							result.mid(preStart, preLength))
+						: preLang)));
 				preStart = -1;
 				preLang.clear();
 				inPre = false;
@@ -1277,7 +1283,15 @@ TextWithEntities parseMentionedText(
 		}
 
 		if (inPre) {
-			result += unescaped[pos];
+			if (unescaped[pos] == '\t') {
+				// The tabs are narrow in the text, the stops each 4 columns.
+				constexpr auto kTabSize = 4;
+				const auto column = result.size()
+					- (result.lastIndexOf('\n') + 1);
+				result += QString(kTabSize - (column % kTabSize), ' ');
+			} else {
+				result += unescaped[pos];
+			}
 			++pos;
 			continue;
 		}

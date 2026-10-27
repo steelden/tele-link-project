@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/iv_rich_page.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "mtslink/code_language.h"
 #include "window/window_session_controller.h"
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
@@ -25,12 +26,155 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat_helpers.h"
 
 #include <QtCore/QMimeData>
+#include <QtCore/QRegularExpression>
 
 namespace ChatHelpers {
 namespace {
 
 constexpr auto kToastDuration = 9 * crl::time(1000);
 constexpr auto kOfferTimeout = 30 * crl::time(1000);
+
+// The html of the code from an IDE: an element with "white-space:pre" and the
+// lines in <p> (JetBrains) or <div> (VS Code), the html parser collapsed the
+// spaces in it and made a code block of each line. It is replaced by <pre>
+// with the lines separated by newlines.
+[[nodiscard]] QString PreformattedToPre(const QString &html) {
+	static const auto kTag = QRegularExpression(
+		u"<(/?)([a-zA-Z][\\w-]*)([^>]*)>"_q);
+	static const auto kPreformatted = QRegularExpression(
+		u"white-space\\s*:\\s*(pre-wrap|break-spaces|pre)(?![\\w-])"_q,
+		QRegularExpression::CaseInsensitiveOption);
+	auto result = QString();
+	auto position = 0;
+	auto element = QString();
+	auto nesting = 0;
+	auto lastLineBreak = false;
+	auto found = false;
+	auto tags = kTag.globalMatch(html);
+	while (tags.hasNext()) {
+		const auto tag = tags.next();
+		const auto text = QStringView(html).mid(
+			position,
+			tag.capturedStart() - position);
+		result += text;
+		if (!text.isEmpty()) {
+			lastLineBreak = false;
+		}
+		position = tag.capturedEnd();
+
+		const auto closing = !tag.capturedView(1).isEmpty();
+		const auto name = tag.captured(2).toLower();
+		const auto attributes = tag.capturedView(3);
+		const auto selfClosing = attributes.endsWith('/');
+		if (element.isEmpty()) {
+			if (!closing
+				&& !selfClosing
+				&& name != u"br"_q
+				&& kPreformatted.match(attributes).hasMatch()) {
+				element = name;
+				nesting = 1;
+				lastLineBreak = false;
+				found = true;
+				result += u"<pre>"_q;
+			} else {
+				result += tag.capturedView(0);
+			}
+			continue;
+		}
+		const auto line = (name == u"p"_q)
+			|| (name == u"div"_q)
+			|| (name == u"li"_q);
+		if (name == element && !selfClosing) {
+			if (!closing) {
+				++nesting;
+			} else if (!--nesting) {
+				element = QString();
+				result += u"</pre>"_q;
+				continue;
+			}
+		}
+		if (name == u"br"_q) {
+			result += '\n';
+			lastLineBreak = true;
+		} else if (line) {
+			// A line ends with its element, an empty line is <p></p> or
+			// <div><br></div>.
+			if (closing) {
+				if (!lastLineBreak) {
+					result += '\n';
+				}
+				lastLineBreak = false;
+			}
+		} else {
+			result += tag.capturedView(0);
+		}
+	}
+	if (!found) {
+		return html;
+	}
+	result += QStringView(html).mid(position);
+	return result;
+}
+
+// The pasted code: the tabs (narrow in the text) as the spaces with the stops
+// each 4 columns, the common indent removed. The selection in an IDE usually
+// starts after the indent of the first line, so it is not counted.
+[[nodiscard]] QString PrepareCode(const QString &code) {
+	constexpr auto kTabSize = 4;
+	auto lines = code.split('\n');
+	for (auto &line : lines) {
+		if (!line.contains('\t')) {
+			continue;
+		}
+		auto expanded = QString();
+		for (const auto ch : line) {
+			if (ch == '\t') {
+				expanded += QString(
+					kTabSize - (expanded.size() % kTabSize),
+					' ');
+			} else {
+				expanded += ch;
+			}
+		}
+		line = expanded;
+	}
+	const auto indent = [](const QString &line) {
+		auto result = 0;
+		while (result < line.size() && line[result] == ' ') {
+			++result;
+		}
+		return result;
+	};
+	auto common = -1;
+	for (auto i = 1; i < lines.size(); ++i) {
+		if (!lines[i].trimmed().isEmpty()) {
+			const auto value = indent(lines[i]);
+			common = (common < 0) ? value : std::min(common, value);
+		}
+	}
+	if (common > 0) {
+		for (auto i = 0; i < lines.size(); ++i) {
+			lines[i].remove(0, std::min(common, indent(lines[i])));
+		}
+	}
+	return lines.join('\n');
+}
+
+// The code blocks: prepared, the language of them without one guessed by the
+// content.
+void PrepareCodeBlocks(std::vector<Iv::RichPage::Block> &blocks) {
+	for (auto &block : blocks) {
+		if (block.kind == Iv::RichPage::BlockKind::Code) {
+			auto &text = block.text.text;
+			text.text = PrepareCode(text.text);
+			text.entities.clear();
+			if (block.language.isEmpty()) {
+				block.language = MtsLink::GuessCodeLanguage(text.text);
+			}
+		}
+		PrepareCodeBlocks(block.blocks);
+	}
+}
 
 } // namespace
 
@@ -49,14 +193,22 @@ std::optional<RichPasteDecision> MimeDataRichPasteOffer(
 	// formatting of the pasted HTML a message can have is applied in the
 	// field: bold, italic, links, code, quotes, lists and headings as lines.
 	if (data->hasHtml()) {
+		const auto html = data->html();
+		const auto prepared = PreformattedToPre(html);
+		auto copy = std::shared_ptr<QMimeData>();
+		if (prepared != html) {
+			copy = CloneMimeData(data);
+			copy->setHtml(prepared);
+		}
 		auto imported = Iv::Editor::BlocksFromMimeData(
 			session,
-			data,
+			copy ? copy.get() : data.get(),
 			limits,
 			0);
 		if (!imported || imported->blocks.empty()) {
 			return std::nullopt;
 		}
+		PrepareCodeBlocks(imported->blocks);
 		auto page = Iv::RichPage();
 		page.blocks = std::move(imported->blocks);
 		const auto flat = Iv::FlattenRichPageToSimpleText(page);

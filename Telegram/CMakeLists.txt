@@ -1550,6 +1550,8 @@ PRIVATE
     mtslink/auth_widget.cpp
     mtslink/call_window.cpp
     mtslink/call_window.h
+    mtslink/code_language.cpp
+    mtslink/code_language.h
     mtslink/auth_widget.h
     mtslink/connection.cpp
     mtslink/connection.h
