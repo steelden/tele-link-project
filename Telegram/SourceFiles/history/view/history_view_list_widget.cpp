@@ -4249,6 +4249,10 @@ void ListWidget::reactionChosen(ChosenReaction reaction) {
 }
 
 void ListWidget::mousePressEvent(QMouseEvent *e) {
+	// Temporary: the viewer is not closed by a click.
+	LOG(("MtsLink Viewer: list press %1,%2"
+		).arg(e->globalPos().x()
+		).arg(e->globalPos().y()));
 	// The unread bar is removed by a click: of the open, and a later one
 	// (new messages in the inactive window).
 	if (base::take(_clearUnreadBarOnClick) || _bar.element) {
@@ -4530,6 +4534,10 @@ void ListWidget::mouseMoveEvent(QMouseEvent *e) {
 }
 
 void ListWidget::mouseReleaseEvent(QMouseEvent *e) {
+	// Temporary: the viewer is not closed by a click.
+	LOG(("MtsLink Viewer: list release %1,%2"
+		).arg(e->globalPos().x()
+		).arg(e->globalPos().y()));
 	if (_middleClickAutoscroll.finishHold(e->button())) {
 		e->accept();
 		return;

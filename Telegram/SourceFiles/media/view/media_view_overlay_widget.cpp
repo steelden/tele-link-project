@@ -129,6 +129,68 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #ifdef Q_OS_WIN
 #include <dwmapi.h>
 #endif // Q_OS_WIN
+#include "base/call_delayed.h"
+
+namespace {
+
+// Temporary: the viewer is not closed by a click.
+[[maybe_unused]] void LogTopWindow(
+		const char *when,
+		QWidget *viewer,
+		QRect geometry) {
+#ifdef Q_OS_WIN
+	const auto describe = [](HWND hwnd) {
+		if (!hwnd) {
+			return u"null"_q;
+		}
+		WCHAR name[256] = { 0 };
+		WCHAR title[256] = { 0 };
+		GetClassNameW(hwnd, name, 255);
+		GetWindowTextW(hwnd, title, 255);
+		auto rect = RECT();
+		GetWindowRect(hwnd, &rect);
+		auto cloaked = DWORD(0);
+		DwmGetWindowAttribute(
+			hwnd,
+			DWMWA_CLOAKED,
+			&cloaked,
+			sizeof(cloaked));
+		auto pid = DWORD(0);
+		GetWindowThreadProcessId(hwnd, &pid);
+		return u"%1 '%2' '%3' visible=%4 cloaked=%5 iconic=%6 "
+			"rect=%7,%8-%9,%10 pid=%11"_q
+			.arg(quintptr(hwnd), 0, 16)
+			.arg(QString::fromWCharArray(name))
+			.arg(QString::fromWCharArray(title))
+			.arg(IsWindowVisible(hwnd) ? 1 : 0)
+			.arg(cloaked)
+			.arg(IsIconic(hwnd) ? 1 : 0)
+			.arg(rect.left)
+			.arg(rect.top)
+			.arg(rect.right)
+			.arg(rect.bottom)
+			.arg(pid);
+	};
+	const auto center = geometry.center();
+	const auto at = WindowFromPoint(POINT{ center.x(), center.y() });
+	const auto top = at ? GetAncestor(at, GA_ROOT) : nullptr;
+	const auto own = viewer->internalWinId()
+		? (HWND)viewer->internalWinId()
+		: nullptr;
+	LOG(("MtsLink Viewer: %1 self pid=%2, at %3,%4: %5"
+		).arg(when
+		).arg(GetCurrentProcessId()
+		).arg(center.x()
+		).arg(center.y()
+		).arg(describe(top)));
+	LOG(("MtsLink Viewer: %1 viewer: %2").arg(when).arg(describe(own)));
+	LOG(("MtsLink Viewer: %1 foreground: %2"
+		).arg(when
+		).arg(describe(GetForegroundWindow())));
+#endif // Q_OS_WIN
+}
+
+} // namespace
 
 #include <QtWidgets/QApplication>
 #include <QtCore/QBuffer>
@@ -3155,11 +3217,47 @@ void OverlayWidget::showSaveMsgFile() {
 }
 
 void OverlayWidget::close() {
+	// Temporary: the viewer is not closed by a click.
+	LOG(("MtsLink Viewer: close, hidden=%1 visible=%2 minimized=%3"
+		).arg(Logs::b(isHidden())
+		).arg(Logs::b(_window->isVisible())
+		).arg(Logs::b(isMinimized())));
 	if (isHidden()) {
 		return;
 	}
+	auto geometry = QRect();
+#ifdef Q_OS_WIN
+	if (const auto own = (HWND)_window->internalWinId()) {
+		auto rect = RECT();
+		GetWindowRect(own, &rect);
+		geometry = QRect(
+			QPoint(rect.left, rect.top),
+			QPoint(rect.right - 1, rect.bottom - 1));
+	}
+#endif // Q_OS_WIN
 	hide();
 	_helper->clearState();
+	LOG(("MtsLink Viewer: closed, hidden=%1 visible=%2 handle=%3"
+		).arg(Logs::b(isHidden())
+		).arg(Logs::b(_window->isVisible())
+		).arg(Logs::b(_window->windowHandle()
+			&& _window->windowHandle()->isVisible())));
+	crl::on_main(_window, [=] {
+		LOG(("MtsLink Viewer: after close, hidden=%1 visible=%2 handle=%3"
+			).arg(Logs::b(isHidden())
+			).arg(Logs::b(_window->isVisible())
+			).arg(Logs::b(_window->windowHandle()
+				&& _window->windowHandle()->isVisible())));
+	});
+	LogTopWindow("closed", _window, geometry);
+	for (const auto delay : { 300, 1500, 4000 }) {
+		base::call_delayed(delay, _window, [=] {
+			LogTopWindow(
+				QString::number(delay).toUtf8().constData(),
+				_window,
+				geometry);
+		});
+	}
 }
 
 void OverlayWidget::minimize() {
@@ -4510,7 +4608,40 @@ not_null<QWidget*> OverlayWidget::widget() const {
 void OverlayWidget::hide() {
 	clearBeforeHide();
 	applyHideWindowWorkaround();
+#ifdef Q_OS_WIN
+	// The composition may keep showing the last frame of the hidden
+	// fullscreen window (black, with the close button) over the windows
+	// below. The window is cloaked before the hide, as before the show,
+	// and the windows below are redrawn.
+	const auto hwnd = (HWND)_window->internalWinId();
+	if (hwnd) {
+		BOOL cloakOn = TRUE;
+		DwmSetWindowAttribute(
+			hwnd,
+			DWMWA_CLOAK,
+			&cloakOn,
+			sizeof(cloakOn));
+	}
+#endif // Q_OS_WIN
 	_window->hide();
+#ifdef Q_OS_WIN
+	if (hwnd) {
+		EnumThreadWindows(GetCurrentThreadId(), [](HWND window, LPARAM) {
+			if (IsWindowVisible(window)) {
+				RedrawWindow(
+					window,
+					nullptr,
+					nullptr,
+					(RDW_INVALIDATE
+						| RDW_ERASE
+						| RDW_FRAME
+						| RDW_ALLCHILDREN
+						| RDW_UPDATENOW));
+			}
+			return TRUE;
+		}, 0);
+	}
+#endif // Q_OS_WIN
 	if (Platform::IsWayland()) {
 		if (const auto handle = _window->windowHandle()) {
 			handle->destroy();
@@ -4986,6 +5117,12 @@ void OverlayWidget::displayFinished(anim::activation activation) {
 }
 
 void OverlayWidget::showAndActivate() {
+	// Temporary: the viewer is not closed by a click.
+	LOG(("MtsLink Viewer: showAndActivate, hidden=%1 windowed=%2 "
+		"fullscreen=%3"
+		).arg(Logs::b(isHidden())
+		).arg(Logs::b(_windowed)
+		).arg(Logs::b(_fullscreen)));
 	_body->show();
 	initNormalGeometry();
 	if (_windowed || Platform::IsMac()) {
@@ -8040,6 +8177,16 @@ void OverlayWidget::handleMousePress(
 		QPoint position,
 		Qt::MouseButton button) {
 	updateOver(position);
+	// Temporary: the viewer is not closed by a click.
+	LOG(("MtsLink Viewer: press %1,%2 button=%3 over=%4 menu=%5 "
+		"receive=%6 hidden=%7"
+		).arg(position.x()
+		).arg(position.y()
+		).arg(int(button)
+		).arg(int(_over)
+		).arg(Logs::b(_menu != nullptr)
+		).arg(Logs::b(_receiveMouse)
+		).arg(Logs::b(isHidden())));
 	if (_menu || !_receiveMouse) {
 		return;
 	}
@@ -8498,6 +8645,18 @@ void OverlayWidget::handleMouseRelease(
 		QPoint position,
 		Qt::MouseButton button) {
 	updateOver(position);
+	// Temporary: the viewer is not closed by a click.
+	LOG(("MtsLink Viewer: release %1,%2 button=%3 over=%4 down=%5 "
+		"pressed=%6 dragging=%7 windowed=%8 hidden=%9"
+		).arg(position.x()
+		).arg(position.y()
+		).arg(int(button)
+		).arg(int(_over)
+		).arg(int(_down)
+		).arg(Logs::b(_pressed)
+		).arg(_dragging
+		).arg(Logs::b(_windowed)
+		).arg(Logs::b(isHidden())));
 
 	if (const auto activated = ClickHandler::unpressed()) {
 		if (activated->url() == u"internal:show_saved_message"_q) {

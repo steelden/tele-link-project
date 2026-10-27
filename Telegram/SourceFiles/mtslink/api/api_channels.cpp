@@ -122,6 +122,12 @@ void Channels::loadChatInfo(const ChatId &chatId) {
 		[this](const QJsonObject &result) {
 			const auto value = result.value("value").toObject();
 			auto ch = parseChat(value);
+			// Temporary: the empty user of a new dialog.
+			if (ch.type == ChatType::Dialog) {
+				LOG(("MtsLink NewDialog: GetChatV3 %1"
+					).arg(QString::fromUtf8(QJsonDocument(result).toJson(
+						QJsonDocument::Compact)).left(3000)));
+			}
 			for (const auto &p : value.value("memberProfiles").toArray()) {
 				ch.memberProfiles.push_back(p.toObject());
 			}

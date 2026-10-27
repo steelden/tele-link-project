@@ -3272,6 +3272,15 @@ void HistoryWidget::showHistory(
 							if (threadParent) break;
 						}
 					}
+					// Temporary: the stuck threads mark.
+					LOG(("MtsLink ThreadsMark: reopen %1 loadedBottom=%2 "
+						"scanned=%3 parent=%4 pending=%5"
+						).arg(_peer->id.value
+						).arg(Logs::b(loadedBottom)
+						).arg(totalScanned
+						).arg(threadParent ? threadParent->id.bare : 0
+						).arg(MtsLink::firstPendingThreadUnreadParent(
+							_peer->id).bare));
 					if (threadParent && threadParent->mainView()) {
 						const auto msgTop = _list->itemTop(
 							threadParent->mainView());
@@ -8976,6 +8985,25 @@ int HistoryWidget::countInitialScrollTop() {
 			createUnreadBarAndResize();
 		}
 		const auto highlightTarget = findFirstUnreadHighlight();
+		// Temporary: the stuck threads mark.
+		if (isMtsLink) {
+			const auto view = highlightTarget
+				? highlightTarget->mainView()
+				: nullptr;
+			LOG(("MtsLink ThreadsMark: open %1 unread=%2 target=%3 "
+				"commentsUnread=%4 top=%5 maxScroll=%6 height=%7 "
+				"loadedBottom=%8 readDate=%9"
+				).arg(_history->peer->id.value
+				).arg(unread ? unread->data()->id.bare : 0
+				).arg(highlightTarget ? highlightTarget->id.bare : 0
+				).arg(Logs::b(highlightTarget
+					&& highlightTarget->areCommentsUnread())
+				).arg(view ? _list->itemTop(view) : -1
+				).arg(_scroll->scrollTopMax()
+				).arg(_scroll->height()
+				).arg(Logs::b(_history->loadedAtBottom())
+				).arg(_history->mtsLinkInboxReadDate()));
+		}
 		if (highlightTarget) {
 			if (!isMtsLink) {
 				enqueueMessageHighlight({ highlightTarget });

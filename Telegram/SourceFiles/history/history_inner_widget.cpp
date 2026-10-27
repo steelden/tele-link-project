@@ -2230,6 +2230,10 @@ not_null<HistoryItem*> HistoryInner::lookupItemByPoint(
 }
 
 void HistoryInner::mousePressEvent(QMouseEvent *e) {
+	// Temporary: the viewer is not closed by a click.
+	LOG(("MtsLink Viewer: history press %1,%2"
+		).arg(e->globalPos().x()
+		).arg(e->globalPos().y()));
 	if (_menu) {
 		e->accept();
 		return; // ignore mouse press, that was hiding context menu
@@ -2711,6 +2715,10 @@ void HistoryInner::mouseActionFinish(
 }
 
 void HistoryInner::mouseReleaseEvent(QMouseEvent *e) {
+	// Temporary: the viewer is not closed by a click.
+	LOG(("MtsLink Viewer: history release %1,%2"
+		).arg(e->globalPos().x()
+		).arg(e->globalPos().y()));
 	if (_middleClickAutoscroll.finishHold(e->button())) {
 		e->accept();
 		return;

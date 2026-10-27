@@ -466,6 +466,12 @@ void Application::run() {
 
 	_openInMediaViewRequests.events(
 	) | rpl::on_next([=](Media::View::OpenRequest &&request) {
+		// Temporary: the viewer is not closed by a click.
+		LOG(("MtsLink Viewer: open request, photo=%1 document=%2 "
+			"buttons=%3"
+			).arg(Logs::b(request.photo() != nullptr)
+			).arg(Logs::b(request.document() != nullptr)
+			).arg(int(QGuiApplication::mouseButtons())));
 		if (_mediaView) {
 			_mediaView->show(std::move(request));
 		}

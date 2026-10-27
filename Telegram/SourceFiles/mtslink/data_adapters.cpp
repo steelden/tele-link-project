@@ -2721,6 +2721,33 @@ void connectToSession(
 					ch.interlocutorId = parsed.userId;
 				}
 			}
+			// A new dialog may come without the interlocutor: the author of
+			// its pending message is (else the user is made of the chat id,
+			// without the name and the userpic).
+			if (ch.type == ChatType::Dialog && ch.interlocutorId.isEmpty()) {
+				for (const auto &ev : PendingChatEvents.value(ch.id)) {
+					const auto author = ev.param.value("value").toObject()
+						.value("message").toObject()
+						.value("authorId").toString();
+					if (!author.isEmpty() && author != mtsSession->userId()) {
+						LOG(("MtsLink ChatInfo: dialog %1 interlocutor from "
+							"the pending message: %2").arg(ch.id, author));
+						ch.interlocutorId = author;
+						break;
+					}
+				}
+			}
+			// Temporary: the empty user of a new dialog.
+			if (ch.type == ChatType::Dialog) {
+				LOG(("MtsLink NewDialog: info %1 interlocutor='%2' name='%3' "
+					"profiles=%4 pending=%5 known=%6"
+					).arg(ch.id
+					).arg(ch.interlocutorId
+					).arg(ch.name
+					).arg(ch.memberProfiles.size()
+					).arg(PendingChatEvents.value(ch.id).size()
+					).arg(ChatToPeerMap.value(ch.id).value));
+			}
 			if (ch.type == ChatType::Dialog
 				|| ch.type == ChatType::Favorites) {
 				applyDialogData(mainSession, ch);
@@ -4054,6 +4081,17 @@ void refreshThreadsMark(
 			if (views
 				&& views->commentsMaxId > views->commentsInboxReadTillId
 				&& !subscribed(item->id)) {
+				// Temporary: the stuck threads mark.
+				LOG(("MtsLink ThreadsMark: %1 by item %2 max=%3 read=%4 "
+					"replies=%5 hasThread=%6 view=%7"
+					).arg(chatPeerId.value
+					).arg(item->id.bare
+					).arg(views->commentsMaxId.bare
+					).arg(views->commentsInboxReadTillId.bare
+					).arg(views->replies.count
+					).arg(Logs::b(ThreadReverseMap.contains(
+						{ chatPeerId, item->id }))
+					).arg(Logs::b(item->mainView() != nullptr)));
 				unread = true;
 				break;
 			}
@@ -4069,6 +4107,16 @@ void refreshThreadsMark(
 			if (i.key().first == chatPeerId
 				&& i.value().count > 0
 				&& !subscribed(i.key().second)) {
+				// Temporary: the stuck threads mark.
+				LOG(("MtsLink ThreadsMark: %1 by pending %2 count=%3 "
+					"uuid=%4 loaded=%5"
+					).arg(chatPeerId.value
+					).arg(i.key().second.bare
+					).arg(i.value().count
+					).arg(i.value().parentUuid
+					).arg(Logs::b(session->data().message(
+						chatPeerId,
+						i.key().second) != nullptr)));
 				unread = true;
 				break;
 			}
@@ -4166,6 +4214,22 @@ void applyDialogData(
 			PeerToChatTypeMap.remove(was);
 			if (const auto peer = session->data().peerLoaded(was)) {
 				session->data().deleteConversationLocally(peer);
+				// Temporary: the empty user of a new dialog stays.
+				const auto log = [=](const char *when) {
+					const auto history = session->data().historyLoaded(was);
+					LOG(("MtsLink NewDialog: old %1 %2: history=%3 inList=%4 "
+						"folderKnown=%5 lastKnown=%6 last=%7 time=%8"
+						).arg(was.value
+						).arg(when
+						).arg(Logs::b(history != nullptr)
+						).arg(Logs::b(history && history->inChatList())
+						).arg(Logs::b(history && history->folderKnown())
+						).arg(Logs::b(history && history->lastMessageKnown())
+						).arg(Logs::b(history && history->lastMessage())
+						).arg(history ? history->chatListTimeId() : 0));
+				};
+				log("deleted");
+				base::call_delayed(3000, session, [=] { log("after 3s"); });
 			}
 		}
 		PeerToChatMap.insert(peerId, src.id);
@@ -4174,6 +4238,13 @@ void applyDialogData(
 		UserBareIdToUuidMap.insert(bareId, src.interlocutorId);
 	} else {
 		peerId = chatIdToPeerId(src.id, ChatType::Dialog);
+		// Temporary: the empty user of a new dialog.
+		LOG(("MtsLink NewDialog: %1 without the interlocutor, peer %2 "
+			"(user %3), name '%4'"
+			).arg(src.id
+			).arg(peerId.value
+			).arg(Logs::b(peerIsUser(peerId))
+			).arg(src.name));
 	}
 	const auto userId = peerToUser(peerId);
 	const auto user = session->data().user(userId);
