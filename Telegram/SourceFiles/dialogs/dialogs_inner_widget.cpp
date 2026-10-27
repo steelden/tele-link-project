@@ -6344,7 +6344,7 @@ void InnerWidget::setupShortcuts() {
 
 		if (session().data().chatsFilters().has()) {
 			const auto filters = &session().data().chatsFilters();
-			const auto filtersCount = int(filters->list().size());
+			const auto filtersCount = int(filters->shownList().size());
 			auto &&folders = ranges::views::zip(
 				Shortcuts::kShowFolder,
 				ranges::views::ints(0, ranges::unreachable));

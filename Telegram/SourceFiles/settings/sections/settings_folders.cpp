@@ -1037,6 +1037,42 @@ void BuildTagsSection(SectionBuilder &builder, not_null<FoldersState*> state) {
 	});
 }
 
+// MTS Link: the "All chats" folder can be hidden, only the folders shown.
+void BuildHideAllSection(SectionBuilder &builder) {
+	builder.add([](const WidgetContext &ctx) {
+		const auto content = ctx.container;
+
+		Ui::AddSkip(content);
+		const auto button = content->add(
+			object_ptr<Ui::SettingsButton>(
+				content,
+				tr::lng_mtslink_filters_hide_all(),
+				st::settingsButtonNoIcon));
+		if (ctx.highlights) {
+			ctx.highlights->push_back({ u"folders/hide-all"_q, { button } });
+		}
+		button->toggleOn(
+			rpl::single(Core::App().settings().hideAllChatsFilter()));
+		button->toggledValue(
+		) | rpl::skip(1) | rpl::on_next([=](bool checked) {
+			Core::App().settings().setHideAllChatsFilter(checked);
+			Core::App().saveSettingsDelayed();
+		}, button->lifetime());
+		Ui::AddSkip(content);
+		Ui::AddDividerText(
+			content,
+			tr::lng_mtslink_filters_hide_all_about());
+
+		return SectionBuilder::WidgetToAdd{};
+	}, [] {
+		return SearchEntry{
+			.id = u"folders/hide-all"_q,
+			.title = tr::lng_mtslink_filters_hide_all(tr::now),
+			.keywords = { u"all"_q, u"chats"_q, u"hide"_q },
+		};
+	});
+}
+
 void BuildViewSection(SectionBuilder &builder) {
 	builder.add([](const WidgetContext &ctx) {
 		const auto controller = ctx.controller;
@@ -1189,6 +1225,7 @@ void Folders::setupContent() {
 		BuildTopContent(builder, std::move(showFinishedDup));
 		BuildFoldersListSection(builder, state.get());
 		// No folder tags: a Telegram Premium feature.
+		BuildHideAllSection(builder);
 		BuildViewSection(builder);
 
 		std::move(showFinished) | rpl::on_next([=] {

@@ -7133,6 +7133,8 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_role_admin" = "администратор";
 "lng_mtslink_channel_public" = "Публичный канал: его смогут найти и вступить все сотрудники организации";
 "lng_mtslink_channel_read_only" = "Писать могут только администраторы";
+"lng_mtslink_filters_hide_all" = "Скрыть папку «Все чаты»";
+"lng_mtslink_filters_hide_all_about" = "В списке папок останутся только ваши папки. Работает, если создана хотя бы одна папка.";
 "lng_call_invitation" = "Приглашение на групповой звонок";
 "lng_call_ongoing" = "Текущий групповой звонок";
 "lng_call_rate_label" = "Оцените качество звонка";

@@ -27,6 +27,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtslink/data_adapters.h"
 #include "lang/lang_keys.h"
 #include "apiwrap.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 
 namespace Data {
 namespace {
@@ -411,6 +413,11 @@ ChatFilters::ChatFilters(not_null<Session*> owner)
 , _moreChatsTimer([=] { checkLoadMoreChatsLists(); }) {
 	_list.emplace_back();
 	crl::on_main(&owner->session(), [=] { load(); });
+
+	Core::App().settings().hideAllChatsFilterValue(
+	) | rpl::skip(1) | rpl::on_next([=] {
+		_listChanged.fire({});
+	}, _hideAllLifetime);
 }
 
 ChatFilters::~ChatFilters() = default;
@@ -996,7 +1003,10 @@ FilterId ChatFilters::defaultId() const {
 FilterId ChatFilters::lookupId(int index) const {
 	Expects(index >= 0 && index < _list.size());
 
-	if (_owner->session().user()->isPremium()
+	if (allHidden()) {
+		const auto shown = shownList();
+		return shown[std::min(index, int(shown.size()) - 1)]->id();
+	} else if (_owner->session().user()->isPremium()
 		|| _owner->session().account().mtsLinkSession()
 		|| !_list.front().id()) {
 		return _list[index].id();
@@ -1007,6 +1017,36 @@ FilterId ChatFilters::lookupId(int index) const {
 		: (index <= int(i - begin(_list)))
 		? _list[index - 1].id()
 		: _list[index].id();
+}
+
+bool ChatFilters::allHidden() const {
+	return (_list.size() > 1)
+		&& Core::App().settings().hideAllChatsFilter();
+}
+
+std::vector<not_null<const ChatFilter*>> ChatFilters::shownList() const {
+	const auto hidden = allHidden();
+	auto result = std::vector<not_null<const ChatFilter*>>();
+	result.reserve(_list.size());
+	for (const auto &filter : _list) {
+		if (!hidden || filter.id()) {
+			result.push_back(&filter);
+		}
+	}
+	return result;
+}
+
+std::vector<FilterId> ChatFilters::orderWithHidden(
+		std::vector<FilterId> shown) const {
+	if (!allHidden() || ranges::contains(shown, FilterId())) {
+		return shown;
+	}
+	const auto i = ranges::find(_list, FilterId(), &ChatFilter::id);
+	const auto index = std::min(
+		int(i - begin(_list)),
+		int(shown.size()));
+	shown.insert(begin(shown) + index, FilterId());
+	return shown;
 }
 
 bool ChatFilters::loaded() const {

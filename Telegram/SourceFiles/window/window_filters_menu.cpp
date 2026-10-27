@@ -274,14 +274,14 @@ void FiltersMenu::scrollToButton(not_null<Ui::RpWidget*> widget) {
 }
 
 void FiltersMenu::applyFilterAt(int start, int delta) {
-	const auto &list = _session->session().data().chatsFilters().list();
+	const auto list = _session->session().data().chatsFilters().shownList();
 	const auto count = int(list.size());
 	// Move focus to the folder at `start`, then in the `delta` direction,
 	// stopping at the bounds (no wrap). Arrow keys only move focus; activation
 	// (switching the chat list, or opening the Premium box for a locked folder)
 	// happens when the user presses Enter on the focused folder.
 	for (auto index = start; index >= 0 && index < count; index += delta) {
-		const auto i = _filters.find(list[index].id());
+		const auto i = _filters.find(list[index]->id());
 		if (i != end(_filters)) {
 			const auto raw = i->second.get();
 			// Just move focus; the FocusIn handler makes this the list's single
@@ -296,18 +296,18 @@ void FiltersMenu::applyFilterAt(int start, int delta) {
 }
 
 void FiltersMenu::moveToFilter(int delta) {
-	const auto &list = _session->session().data().chatsFilters().list();
+	const auto list = _session->session().data().chatsFilters().shownList();
 	const auto count = int(list.size());
 	// Move relative to the currently focused folder, so navigation continues
 	// from a locked one (which only takes focus, without becoming active); fall
 	// back to the active folder when nothing is focused.
 	auto current = 0;
 	for (auto i = 0; i != count; ++i) {
-		const auto it = _filters.find(list[i].id());
+		const auto it = _filters.find(list[i]->id());
 		if (it != end(_filters) && it->second->hasFocus()) {
 			current = i;
 			break;
-		} else if (list[i].id() == _activeFilterId) {
+		} else if (list[i]->id() == _activeFilterId) {
 			current = i;
 		}
 	}
@@ -316,7 +316,7 @@ void FiltersMenu::moveToFilter(int delta) {
 
 void FiltersMenu::moveToFilterEdge(int delta) {
 	const auto count = int(
-		_session->session().data().chatsFilters().list().size());
+		_session->session().data().chatsFilters().shownList().size());
 	applyFilterAt((delta > 0) ? 0 : (count - 1), delta);
 }
 
@@ -367,9 +367,10 @@ void FiltersMenu::refresh() {
 	if (!reorderAll) {
 		_reorder->addPinnedInterval(0, 1);
 	}
+	const auto shown = filters->shownList();
 	_reorder->addPinnedInterval(
 		premiumFrom,
-		std::max(1, int(filters->list().size()) - maxLimit));
+		std::max(1, int(shown.size()) - maxLimit));
 
 	// Remember which folder holds keyboard focus so the roving Tab-stop can be
 	// re-established on its replacement after the rebuild: the new buttons are
@@ -385,18 +386,18 @@ void FiltersMenu::refresh() {
 
 	auto now = base::flat_map<int, base::unique_qptr<Ui::SideBarButton>>();
 	const auto &currentFilter = _session->activeChatsFilterCurrent();
-	for (const auto &filter : filters->list()) {
+	for (const auto filter : shown) {
 		const auto nextIsLocked = (now.size() >= premiumFrom);
-		if (nextIsLocked && (currentFilter == filter.id())) {
-			_session->setActiveChatsFilter(FilterId(0));
+		if (nextIsLocked && (currentFilter == filter->id())) {
+			_session->setActiveChatsFilter(filters->defaultId());
 		}
 		auto button = prepareButton(
 			_list,
-			filter.id(),
-			filter.title(),
-			Ui::ComputeFilterIcon(filter),
+			filter->id(),
+			filter->title(),
+			Ui::ComputeFilterIcon(*filter),
 			nextIsLocked);
-		now.emplace(filter.id(), std::move(button));
+		now.emplace(filter->id(), std::move(button));
 	}
 	_filters = std::move(now);
 	// Re-establish the list's Tab-stop on the folder that was focused (if it
@@ -808,28 +809,28 @@ void FiltersMenu::applyReorder(
 	}
 
 	const auto filters = &_session->session().data().chatsFilters();
-	const auto &list = filters->list();
 	if (!premium() && !_session->session().account().mtsLinkSession()) {
-		if (list[0].id() != FilterId()) {
+		if (filters->list()[0].id() != FilterId()) {
 			filters->moveAllToFront();
 		}
 	}
+	const auto list = filters->shownList();
 	Assert(oldPosition >= 0 && oldPosition < list.size());
 	Assert(newPosition >= 0 && newPosition < list.size());
-	const auto id = list[oldPosition].id();
+	const auto id = list[oldPosition]->id();
 	const auto i = _filters.find(id);
 	Assert(i != end(_filters));
 	Assert(i->second == widget);
 
 	auto order = ranges::views::all(
 		list
-	) | ranges::views::transform(
-		&Data::ChatFilter::id
-	) | ranges::to_vector;
+	) | ranges::views::transform([](not_null<const Data::ChatFilter*> f) {
+		return f->id();
+	}) | ranges::to_vector;
 	base::reorder(order, oldPosition, newPosition);
 
 	_ignoreRefresh = true;
-	filters->saveOrder(order);
+	filters->saveOrder(filters->orderWithHidden(std::move(order)));
 	_ignoreRefresh = false;
 }
 

@@ -3093,8 +3093,9 @@ void Widget::escape() {
 			controller()->content()->dialogsCancelled();
 		} else if (controller()->isPrimary()) {
 			const auto filters = &session().data().chatsFilters();
-			const auto &list = filters->list();
-			const auto first = list.empty() ? FilterId() : list.front().id();
+			const auto first = filters->list().empty()
+				? FilterId()
+				: filters->defaultId();
 			if (controller()->activeChatsFilterCurrent() != first) {
 				controller()->setActiveChatsFilter(first);
 			}

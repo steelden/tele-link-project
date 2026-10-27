@@ -173,6 +173,15 @@ public:
 	[[nodiscard]] FilterId defaultId() const;
 	[[nodiscard]] FilterId lookupId(int index) const;
 
+	// MTS Link: "All chats" is hidden by the setting (if there are folders).
+	[[nodiscard]] bool allHidden() const;
+	// The folders shown: without "All chats" when it is hidden.
+	[[nodiscard]] std::vector<not_null<const ChatFilter*>> shownList() const;
+	// The order of all the folders by the order of the shown ones: the hidden
+	// "All chats" keeps its place.
+	[[nodiscard]] std::vector<FilterId> orderWithHidden(
+		std::vector<FilterId> shown) const;
+
 	bool loadNextExceptions(bool chatsListLoaded);
 
 	void refreshHistory(not_null<History*> history);
@@ -243,6 +252,7 @@ private:
 	std::vector<ChatFilter> _list;
 	base::flat_map<FilterId, std::unique_ptr<Dialogs::MainList>> _chatsLists;
 	rpl::event_stream<> _listChanged;
+	rpl::lifetime _hideAllLifetime;
 	rpl::event_stream<FilterId> _isChatlistChanged;
 	rpl::event_stream<TagColorChanged> _tagColorChanged;
 	mtpRequestId _loadRequestId = 0;

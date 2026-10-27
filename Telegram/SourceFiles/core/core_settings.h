@@ -39,6 +39,8 @@ namespace Core {
 
 inline constexpr auto kScreenReaderModeDisabledKey
 	= "screen-reader-mode-disabled"_cs;
+inline constexpr auto kHideAllChatsFilterKey
+	= "mtslink-hide-all-chats-filter"_cs;
 
 struct WindowPosition {
 	int32 moncrc = 0;
@@ -269,6 +271,10 @@ public:
 	void setCountUnreadMessages(bool value) {
 		_countUnreadMessages = value;
 	}
+	// MTS Link: the "All chats" folder is hidden, only the folders shown.
+	[[nodiscard]] bool hideAllChatsFilter();
+	[[nodiscard]] rpl::producer<bool> hideAllChatsFilterValue();
+	void setHideAllChatsFilter(bool value);
 	void setNotifyAboutPinned(bool notify) {
 		_notifyAboutPinned = notify;
 	}

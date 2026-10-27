@@ -1331,6 +1331,34 @@ void Settings::clearPref(std::string_view key) {
 	_saveDelayed.fire({});
 }
 
+namespace {
+
+// MTS Link: the changes of the hidden "All chats" folder (not a member: the
+// layout of the settings is kept).
+[[nodiscard]] rpl::event_stream<bool> &HideAllChatsFilterChanges() {
+	static auto result = rpl::event_stream<bool>();
+	return result;
+}
+
+} // namespace
+
+bool Settings::hideAllChatsFilter() {
+	return readPref<bool>(kHideAllChatsFilterKey);
+}
+
+rpl::producer<bool> Settings::hideAllChatsFilterValue() {
+	return rpl::single(
+		hideAllChatsFilter()
+	) | rpl::then(HideAllChatsFilterChanges().events());
+}
+
+void Settings::setHideAllChatsFilter(bool value) {
+	if (hideAllChatsFilter() != value) {
+		writePref<bool>(kHideAllChatsFilterKey, value);
+		HideAllChatsFilterChanges().fire_copy(value);
+	}
+}
+
 void Settings::writePrefGeneric(
 		std::string_view key,
 		const QByteArray &value) {
