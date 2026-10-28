@@ -561,7 +561,8 @@ void RequestDependentMessageItem(
 	if (!IsServerMsgId(msgId)) {
 		return;
 	}
-	if (MtsLink::hasChatId(item->history()->peer->id)) {
+	if (MtsLink::isThreadPeer(item->history()->peer->id)) {
+		// MTS Link: the roots of the discussions are loaded with them.
 		return;
 	}
 	const auto fullId = item->fullId();

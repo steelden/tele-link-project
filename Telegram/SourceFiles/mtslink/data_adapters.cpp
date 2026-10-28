@@ -5067,6 +5067,11 @@ HistoryItem *addMessage(
 		const auto replyMsgId = (it != MtsLinkIdToMsgMap.constEnd())
 			? it.value().second
 			: MsgId(uuidToBareId(src.repliedMessageId) & 0x7FFFFFFFLL);
+		if (it == MtsLinkIdToMsgMap.constEnd()) {
+			// The replied message is not loaded: loaded by its id later
+			// (the quote of the reply was "Loading..." forever).
+			registerMessageId(chatPeerId, replyMsgId, src.repliedMessageId);
+		}
 		fields.replyTo = FullReplyTo{
 			.messageId = FullMsgId(chatPeerId, replyMsgId),
 		};
@@ -5373,6 +5378,10 @@ bool addOlderMessages(
 			const auto replyMsgId = (it != MtsLinkIdToMsgMap.constEnd())
 				? it.value().second
 				: MsgId(uuidToBareId(src.repliedMessageId) & 0x7FFFFFFFLL);
+			if (it == MtsLinkIdToMsgMap.constEnd()) {
+				// The replied message is not loaded: loaded by its id later.
+				registerMessageId(chatPeerId, replyMsgId, src.repliedMessageId);
+			}
 			fields.replyTo = FullReplyTo{
 				.messageId = FullMsgId(chatPeerId, replyMsgId),
 			};
