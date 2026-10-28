@@ -9024,12 +9024,12 @@ int HistoryWidget::countInitialScrollTop() {
 				}
 			}
 		}
-		if (!isMtsLink) {
-			if (const auto top = unreadBarTop()) {
-				return *top;
-			} else if (unread) {
-				return itemTopForHighlight(unread);
-			}
+		// The first unread above the last screen: the unread bar on the top,
+		// as in Telegram.
+		if (const auto top = unreadBarTop()) {
+			return *top;
+		} else if (unread) {
+			return itemTopForHighlight(unread);
 		}
 		return ScrollMax;
 	}
