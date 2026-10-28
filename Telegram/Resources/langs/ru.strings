@@ -7142,6 +7142,15 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_show_unread_counter" = "Показывать счётчик непрочитанных";
 "lng_mtslink_thread_pin" = "Закрепить обсуждение";
 "lng_mtslink_thread_unpin" = "Открепить обсуждение";
+"lng_mtslink_bg_theme" = "Вернуть фон темы";
+"lng_mtslink_bg_import" = "Импортировать обои из zip";
+"lng_mtslink_bg_import_progress" = "Импорт обоев: {ready} из {total}";
+"lng_mtslink_bg_remove_imported" = "Удалить все импортированные обои";
+"lng_mtslink_bg_remove_imported_sure" = "Удалить все импортированные обои?";
+"lng_mtslink_bg_imported#one" = "Импортированы обои: {count}";
+"lng_mtslink_bg_imported#few" = "Импортированы обои: {count}";
+"lng_mtslink_bg_imported#many" = "Импортированы обои: {count}";
+"lng_mtslink_bg_imported#other" = "Импортированы обои: {count}";
 "lng_call_invitation" = "Приглашение на групповой звонок";
 "lng_call_ongoing" = "Текущий групповой звонок";
 "lng_call_rate_label" = "Оцените качество звонка";

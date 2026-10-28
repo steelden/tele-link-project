@@ -1095,9 +1095,13 @@ void BackgroundPreviewBox::updateServiceBg(const std::vector<QColor> &bg) {
 
 void BackgroundPreviewBox::checkLoadedDocument() {
 	const auto document = _paper.document();
+	// MTS Link: a pattern of the resources, no document of the server.
+	const auto local = document
+		? std::nullopt
+		: Data::LocalWallPaperFileFor(_paper);
 	if (!_full.isNull()
-		|| !document
-		|| !_media->loaded(true)
+		|| (!document && !local)
+		|| (document && !_media->loaded(true))
 		|| _generating) {
 		return;
 	}
@@ -1137,6 +1141,15 @@ void BackgroundPreviewBox::checkLoadedDocument() {
 			});
 		});
 	};
+	if (local) {
+		_generating = base::binary_guard();
+		generateCallback(Ui::PreprocessBackgroundImage(
+			Ui::ReadBackgroundImage(
+				local->content.isEmpty() ? local->path : QString(),
+				local->content,
+				local->gzipSvg).image));
+		return;
+	}
 	_generating = Data::ReadBackgroundImageAsync(
 		_media.get(),
 		Ui::PreprocessBackgroundImage,

@@ -105,6 +105,11 @@ public:
 		const QString &slug);
 	[[nodiscard]] static WallPaper FromEmojiId(const QString &emojiId);
 	[[nodiscard]] static WallPaper ConstructDefault();
+	// MTS Link: an imported pattern over the colors.
+	[[nodiscard]] static WallPaper ConstructLocalPattern(
+		WallPaperId id,
+		std::vector<QColor> colors,
+		int intensity);
 
 private:
 	static constexpr auto kDefaultIntensity = 50;
@@ -139,6 +144,41 @@ private:
 [[nodiscard]] bool IsLegacy4DefaultWallPaper(const WallPaper &paper);
 [[nodiscard]] WallPaper DefaultWallPaper();
 [[nodiscard]] bool IsDefaultWallPaper(const WallPaper &paper);
+
+// MTS Link: the wallpapers imported by the user (tdata/mtslink_wallpapers):
+// the patterns (svg, tgv) over the colors and the photos (jpg, png, webp).
+struct LocalWallPaperFile {
+	QString path; // The name of the imported.
+	QByteArray content; // The imported: kept in the storage of the account.
+	bool gzipSvg = false;
+};
+// The file of an imported wallpaper.
+[[nodiscard]] std::optional<LocalWallPaperFile> LocalWallPaperFileFor(
+	const WallPaper &paper);
+// The patterns over the colors in the light mode, the colors through the
+// patterns over the black in the dark one (a negative intensity).
+[[nodiscard]] std::vector<WallPaper> ImportedWallPapers(
+	not_null<Main::Session*> session,
+	bool dark);
+// Imports the wallpapers of a zip archive in the background: the progress
+// (the files read of the files), then the count of the imported; nothing is
+// imported when cancelled.
+void ImportWallPapers(
+	not_null<Main::Session*> session,
+	const QString &zipPath,
+	std::shared_ptr<std::atomic<bool>> cancelled,
+	Fn<void(int ready, int total)> progress,
+	Fn<void(int imported)> done);
+[[nodiscard]] bool IsImportedWallPaper(const WallPaper &paper);
+// The thumbnails of the imported are prepared in the background: the
+// gallery is built again when some of them are ready.
+[[nodiscard]] rpl::producer<> ImportedWallPaperThumbnailsReady();
+[[nodiscard]] bool HasImportedWallPapers(not_null<Main::Session*> session);
+// Removes all the imported, the count of the removed.
+int RemoveAllImportedWallPapers(not_null<Main::Session*> session);
+void RemoveImportedWallPaper(
+	not_null<Main::Session*> session,
+	const WallPaper &paper);
 [[nodiscard]] bool IsCloudWallPaper(const WallPaper &paper);
 
 [[nodiscard]] QImage GenerateDitheredGradient(const WallPaper &paper);

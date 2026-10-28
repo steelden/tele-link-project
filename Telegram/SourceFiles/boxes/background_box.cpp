@@ -32,6 +32,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_overview.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
+#include "ui/layers/generic_box.h"
+#include "ui/widgets/labels.h"
+#include "ui/wrap/slide_wrap.h"
+#include "ui/painter.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_info.h"
 
@@ -120,6 +124,12 @@ private:
 	void resizeToContentAndPreload();
 	void updatePapers();
 	void requestPapers();
+public:
+	// After an import.
+	void refreshPapers() {
+		updatePapers();
+	}
+private:
 	void pushCustomPapers();
 	void sortPapers();
 	void paintPaper(
@@ -199,6 +209,53 @@ void BackgroundBox::prepare() {
 		chooseFromFile();
 	});
 
+	if (!_forPeer) {
+		// MTS Link: back to the background of the current theme.
+		const auto reset = container->add(object_ptr<Ui::SettingsButton>(
+			container,
+			tr::lng_mtslink_bg_theme(),
+			st::infoProfileButton));
+		object_ptr<Info::Profile::FloatingIcon>(
+			reset,
+			st::backgroundThemeResetIcon,
+			st::infoSharedMediaButtonIconPosition);
+		reset->setClickedCallback([=] {
+			Window::Theme::Background()->reset();
+			closeBox();
+		});
+
+		// MTS Link: many patterns (svg, tgv) and photos at once, from a zip.
+		const auto import = container->add(object_ptr<Ui::SettingsButton>(
+			container,
+			tr::lng_mtslink_bg_import(),
+			st::infoProfileButton));
+		object_ptr<Info::Profile::FloatingIcon>(
+			import,
+			st::backgroundImportIcon,
+			st::infoSharedMediaButtonIconPosition);
+		import->setClickedCallback([=] {
+			importWallPapers();
+		});
+
+		_hasImported = std::make_shared<rpl::variable<bool>>(
+			Data::HasImportedWallPapers(&_controller->session()));
+		const auto removeAll = container->add(
+			object_ptr<Ui::SlideWrap<Ui::SettingsButton>>(
+				container,
+				object_ptr<Ui::SettingsButton>(
+					container,
+					tr::lng_mtslink_bg_remove_imported(),
+					st::infoBlockButton)));
+		object_ptr<Info::Profile::FloatingIcon>(
+			removeAll->entity(),
+			st::infoIconDeleteRed,
+			st::infoSharedMediaButtonIconPosition);
+		removeAll->toggleOn(_hasImported->value());
+		removeAll->entity()->setClickedCallback([=] {
+			removeAllImported();
+		});
+	}
+
 	Ui::AddSkip(container);
 	Ui::AddDivider(container);
 
@@ -219,6 +276,132 @@ void BackgroundBox::prepare() {
 	) | rpl::on_next([=](const Data::WallPaper &paper) {
 		removePaper(paper);
 	}, _inner->lifetime());
+
+	// MTS Link: the thumbnails of the imported are ready in the background.
+	Data::ImportedWallPaperThumbnailsReady(
+	) | rpl::on_next([=] {
+		_controller->session().data().refreshLocalWallpapers(
+			Window::Theme::IsNightMode());
+		_inner->refreshPapers();
+	}, _inner->lifetime());
+}
+
+void BackgroundBox::removeAllImported() {
+	const auto session = &_controller->session();
+	const auto remove = [=, weak = base::make_weak(this)](Fn<void()> &&close) {
+		close();
+		Data::RemoveAllImportedWallPapers(session);
+		session->data().refreshLocalWallpapers(Window::Theme::IsNightMode());
+		if (const auto strong = weak.get()) {
+			strong->_inner->refreshPapers();
+			*strong->_hasImported = false;
+		}
+	};
+	_controller->show(Ui::MakeConfirmBox({
+		.text = tr::lng_mtslink_bg_remove_imported_sure(),
+		.confirmed = remove,
+		.confirmText = tr::lng_selected_delete(),
+		.confirmStyle = &st::attentionBoxButton,
+	}));
+}
+
+void BackgroundBox::importWallPapers() {
+	// A zip of the patterns (svg, tgv) and the photos (jpg, png, webp).
+	const auto filter = u"Zip archives (*.zip);;"_q
+		+ FileDialog::AllFilesFilter();
+	FileDialog::GetOpenPath(
+		this,
+		tr::lng_mtslink_bg_import(tr::now),
+		filter,
+		crl::guard(this, [=](FileDialog::OpenResult &&result) {
+			if (result.paths.isEmpty()) {
+				return;
+			}
+			// The progress box as the one of the import of the sticker packs:
+			// the import is in the background, closed it cancels it.
+			struct State {
+				rpl::variable<QString> status;
+				rpl::variable<float64> progress = 0.;
+				std::shared_ptr<std::atomic<bool>> cancelled
+					= std::make_shared<std::atomic<bool>>(false);
+				bool finished = false;
+			};
+			const auto state = std::make_shared<State>();
+			state->status = tr::lng_contacts_loading(tr::now);
+			auto box = Box([=](not_null<Ui::GenericBox*> box) {
+				box->setTitle(tr::lng_mtslink_bg_import());
+				box->addRow(object_ptr<Ui::FlatLabel>(
+					box,
+					state->status.value(),
+					st::boxLabel));
+				// A simple progress line.
+				const auto bar = box->addRow(
+					object_ptr<Ui::RpWidget>(box),
+					st::boxRowPadding + QMargins(0, st::boxLittleSkip, 0, 0));
+				bar->resize(bar->width(), st::boxLittleSkip);
+				state->progress.value() | rpl::on_next([=] {
+					bar->update();
+				}, bar->lifetime());
+				bar->paintRequest() | rpl::on_next([=] {
+					auto p = QPainter(bar);
+					auto hq = PainterHighQualityEnabler(p);
+					const auto radius = bar->height() / 2.;
+					p.setPen(Qt::NoPen);
+					p.setBrush(st::shadowFg);
+					p.drawRoundedRect(bar->rect(), radius, radius);
+					const auto width = int(std::round(
+						bar->width() * state->progress.current()));
+					if (width > 0) {
+						p.setBrush(st::activeButtonBg);
+						p.drawRoundedRect(
+							QRect(0, 0, width, bar->height()),
+							radius,
+							radius);
+					}
+				}, bar->lifetime());
+				box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+				box->boxClosing() | rpl::on_next([=] {
+					if (!state->finished) {
+						*state->cancelled = true;
+					}
+				}, box->lifetime());
+			});
+			const auto progressBox = base::make_weak(box.data());
+			_controller->show(std::move(box));
+			Data::ImportWallPapers(
+				&_controller->session(),
+				result.paths.front(),
+				state->cancelled,
+				[=](int ready, int total) {
+					state->status = tr::lng_mtslink_bg_import_progress(
+						tr::now,
+						lt_ready,
+						QString::number(ready),
+						lt_total,
+						QString::number(total));
+					state->progress = float64(ready) / std::max(total, 1);
+				},
+				crl::guard(this, [=](int count) {
+					state->finished = true;
+					if (const auto strong = progressBox.get()) {
+						strong->closeBox();
+					}
+					if (*state->cancelled) {
+						return;
+					}
+					_controller->session().data().refreshLocalWallpapers(
+						Window::Theme::IsNightMode());
+					_inner->refreshPapers();
+					if (_hasImported) {
+						*_hasImported = Data::HasImportedWallPapers(
+							&_controller->session());
+					}
+					_controller->showToast(tr::lng_mtslink_bg_imported(
+						tr::now,
+						lt_count,
+						count));
+				}));
+		}));
 }
 
 void BackgroundBox::chooseFromFile() {
@@ -363,12 +546,12 @@ void BackgroundBox::removePaper(const Data::WallPaper &paper) {
 		if (weak) {
 			weak->_inner->removePaper(paper);
 		}
+		// MTS Link: only the imported are removed, their files.
 		session->data().removeWallpaper(paper);
-		session->api().request(MTPaccount_SaveWallPaper(
-			paper.mtpInput(session),
-			MTP_bool(true),
-			paper.mtpSettings()
-		)).send();
+		Data::RemoveImportedWallPaper(session, paper);
+		if (weak && weak->_hasImported) {
+			*weak->_hasImported = Data::HasImportedWallPapers(session);
+		}
 	};
 	_controller->show(Ui::MakeConfirmBox({
 		.text = tr::lng_background_sure_delete(),
@@ -436,13 +619,10 @@ void BackgroundBox::Inner::requestPapers() {
 		_session->data().cloudThemes().refreshChatThemes();
 		return;
 	}
-	_api.request(MTPaccount_GetWallPapers(
-		MTP_long(_session->data().wallpapersHash())
-	)).done([=](const MTPaccount_WallPapers &result) {
-		if (_session->data().updateWallpapers(result)) {
-			updatePapers();
-		}
-	}).send();
+	// MTS Link: the built in and the imported wallpapers, the Telegram
+	// server never answers. Again at each opening: the variants of the mode.
+	_session->data().refreshLocalWallpapers(Window::Theme::IsNightMode());
+	updatePapers();
 }
 
 auto BackgroundBox::Inner::resolveResetCustomPaper() const
@@ -513,6 +693,8 @@ void BackgroundBox::Inner::sortPapers() {
 		const auto &data = paper.data;
 		return std::make_tuple(
 			_insertedResetId && (_insertedResetId == data.id()),
+			// MTS Link: the built in ones always first.
+			!Data::IsImportedWallPaper(data),
 			data.id() == _currentId,
 			dark ? data.isDark() : !data.isDark(),
 			Data::IsDefaultWallPaper(data),
@@ -705,10 +887,7 @@ void BackgroundBox::Inner::paintPaper(
 		const auto checkTop = y + st::backgroundSize.height() - st::overviewCheckSkip - st::overviewCheck.size;
 		_check->paint(p, checkLeft, checkTop, width());
 	} else if (!forChannel()
-		&& Data::IsCloudWallPaper(paper.data)
-		&& !Data::IsDefaultWallPaper(paper.data)
-		&& !Data::IsLegacy2DefaultWallPaper(paper.data)
-		&& !Data::IsLegacy3DefaultWallPaper(paper.data)
+		&& Data::IsImportedWallPaper(paper.data)
 		&& !v::is_null(over)
 		&& (&paper == &_papers[getSelectionIndex(over)])) {
 		const auto deleteSelected = v::is<DeleteSelected>(over);
@@ -746,10 +925,7 @@ void BackgroundBox::Inner::mouseMoveEvent(QMouseEvent *e) {
 		const auto inDelete = !forChannel()
 			&& (x >= deleteLeft)
 			&& (y < deleteBottom)
-			&& Data::IsCloudWallPaper(data)
-			&& !Data::IsDefaultWallPaper(data)
-			&& !Data::IsLegacy2DefaultWallPaper(data)
-			&& !Data::IsLegacy3DefaultWallPaper(data)
+			&& Data::IsImportedWallPaper(data)
 			&& (_currentId != data.id());
 		return (result >= _papers.size())
 			? Selection()

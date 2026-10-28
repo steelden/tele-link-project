@@ -12,6 +12,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "storage/serialize_common.h"
 #include "ui/chat/chat_theme.h"
+#include "ui/image/image.h"
+#include "ui/image/image_prepare.h"
+#include "settings.h"
+#include "base/zlib_help.h"
+
+#include <QtCore/QRegularExpression>
+#include "main/main_account.h"
+#include "storage/storage_account.h"
+
+#include <QtCore/QDir>
+#include <QtCore/QFileInfo>
 #include "ui/color_int_conversion.h"
 #include "core/application.h"
 #include "main/main_session.h"
@@ -188,7 +199,8 @@ WallPaper::WallPaper(WallPaperId id) : _id(id) {
 void WallPaper::setLocalImageAsThumbnail(std::shared_ptr<Image> image) {
 	Expects(IsDefaultWallPaper(*this)
 		|| IsLegacy1DefaultWallPaper(*this)
-		|| IsCustomWallPaper(*this));
+		|| IsCustomWallPaper(*this)
+		|| LocalWallPaperFileFor(*this).has_value());
 	Expects(_thumbnail == nullptr);
 
 	_thumbnail = std::move(image);
@@ -715,6 +727,465 @@ WallPaper WallPaper::ConstructDefault() {
 	});
 	result._flags |= WallPaperFlag::Default | WallPaperFlag::Pattern;
 	return result;
+}
+
+WallPaper WallPaper::ConstructLocalPattern(
+		WallPaperId id,
+		std::vector<QColor> colors,
+		int intensity) {
+	auto result = WallPaper(id).withPatternIntensity(
+		intensity
+	).withBackgroundColors(std::move(colors));
+	result._flags |= WallPaperFlag::Pattern;
+	return result;
+}
+
+namespace {
+
+using ImportedFile = Storage::Account::MtsLinkWallPaperFile;
+
+// The ids of the imported: by the name of the file, the same in each run.
+constexpr auto kImportedIdBase = WallPaperId(0x4D54'534C'1000'0000ULL);
+
+base::flat_map<WallPaperId, LocalWallPaperFile> ImportedFiles;
+
+// The thumbnails by the names: the list is built at each opening, the
+// thumbnails of an import are prepared in the background.
+base::flat_map<QString, std::shared_ptr<Image>> ImportedThumbnails;
+constexpr auto kImportedThumbnailSize = QSize(360, 740);
+
+// The imported files of the account (by its folder): read once.
+QString ImportedBasePath;
+std::vector<ImportedFile> ImportedList;
+
+[[nodiscard]] WallPaperId ImportedId(const QString &name) {
+	// FNV-1a: stable between the runs, unlike qHash.
+	auto hash = uint32(2166136261U);
+	for (const auto ch : name.toUtf8()) {
+		hash = (hash ^ uint8(ch)) * 16777619U;
+	}
+	return kImportedIdBase | (hash & 0x0FFF'FFFFU);
+}
+
+[[nodiscard]] bool IsPatternFile(const QString &name) {
+	return name.endsWith(u".tgv"_q, Qt::CaseInsensitive)
+		|| name.endsWith(u".svg"_q, Qt::CaseInsensitive);
+}
+
+[[nodiscard]] bool IsPhotoFile(const QString &name) {
+	return name.endsWith(u".jpg"_q, Qt::CaseInsensitive)
+		|| name.endsWith(u".jpeg"_q, Qt::CaseInsensitive)
+		|| name.endsWith(u".png"_q, Qt::CaseInsensitive)
+		|| name.endsWith(u".webp"_q, Qt::CaseInsensitive);
+}
+
+[[nodiscard]] QByteArray GzipBytes(const QByteArray &bytes) {
+	auto stream = z_stream();
+	if (deflateInit2(
+			&stream,
+			Z_BEST_COMPRESSION,
+			Z_DEFLATED,
+			15 + 16, // The gzip header.
+			8,
+			Z_DEFAULT_STRATEGY) != Z_OK) {
+		return QByteArray();
+	}
+	auto result = QByteArray(int(deflateBound(&stream, bytes.size())) + 32, 0);
+	stream.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(bytes.data()));
+	stream.avail_in = uInt(bytes.size());
+	stream.next_out = reinterpret_cast<Bytef*>(result.data());
+	stream.avail_out = uInt(result.size());
+	const auto done = (deflate(&stream, Z_FINISH) == Z_STREAM_END);
+	result.resize(int(stream.total_out));
+	deflateEnd(&stream);
+	return done ? result : QByteArray();
+}
+
+// The clipping of the svg (the parts over the edges cut by the clip paths
+// and the masks of the rectangles): Qt Svg draws the rectangles of the clip
+// as the filled ones, the squares over the edges of the pattern.
+[[nodiscard]] QByteArray StripSvgClips(const QByteArray &svg) {
+	if (!svg.contains("<clipPath") && !svg.contains("<mask")) {
+		return svg;
+	}
+	static const auto kBlocks = QRegularExpression(
+		u"<(clipPath|mask)\\b[\\s\\S]*?</\\1\\s*>"_q);
+	static const auto kAttributes = QRegularExpression(
+		u"\\s(clip-path|mask)=\"[^\"]*\""_q);
+	auto text = QString::fromUtf8(svg);
+	text.remove(kBlocks);
+	text.remove(kAttributes);
+	return text.toUtf8();
+}
+
+// The name of the imported file: the svg is kept as tgv.
+[[nodiscard]] QString ImportedName(const QString &name) {
+	return name.endsWith(u".svg"_q, Qt::CaseInsensitive)
+		? (QFileInfo(name).completeBaseName() + u".tgv"_q)
+		: name;
+}
+
+// The svg is kept gzipped, as the patterns of Telegram.
+[[nodiscard]] std::optional<ImportedFile> PrepareImported(
+		const QString &name,
+		QByteArray bytes) {
+	if (name.endsWith(u".tgv"_q, Qt::CaseInsensitive)) {
+		const auto unpacked = Images::UnpackGzip(bytes);
+		const auto stripped = StripSvgClips(unpacked);
+		if (stripped.size() != unpacked.size()) {
+			bytes = GzipBytes(stripped);
+		}
+		return bytes.isEmpty()
+			? std::nullopt
+			: std::make_optional(ImportedFile{
+				.name = name,
+				.content = std::move(bytes),
+			});
+	} else if (name.endsWith(u".svg"_q, Qt::CaseInsensitive)) {
+		bytes = GzipBytes(StripSvgClips(bytes));
+		if (bytes.isEmpty()) {
+			return std::nullopt;
+		}
+		return ImportedFile{
+			.name = ImportedName(name),
+			.content = std::move(bytes),
+		};
+	} else if (IsPatternFile(name) || IsPhotoFile(name)) {
+		return ImportedFile{ .name = name, .content = std::move(bytes) };
+	}
+	return std::nullopt;
+}
+
+[[nodiscard]] bool AddImported(ImportedFile file) {
+	if (ranges::contains(ImportedList, file.name, &ImportedFile::name)) {
+		return false;
+	}
+	ImportedList.push_back(std::move(file));
+	return true;
+}
+
+std::vector<ImportedFile> &Imported(not_null<Main::Session*> session) {
+	auto &local = session->account().local();
+	if (ImportedBasePath == local.basePath()) {
+		return ImportedList;
+	}
+	ImportedBasePath = local.basePath();
+	ImportedList = local.readMtsLinkWallPapers();
+
+	// The patterns imported before the clips were cut: fixed once.
+	auto fixed = 0;
+	for (auto &file : ImportedList) {
+		if (file.name.endsWith(u".tgv"_q, Qt::CaseInsensitive)) {
+			const auto unpacked = Images::UnpackGzip(file.content);
+			const auto stripped = StripSvgClips(unpacked);
+			if (stripped.size() != unpacked.size()) {
+				if (auto packed = GzipBytes(stripped); !packed.isEmpty()) {
+					file.content = std::move(packed);
+					++fixed;
+				}
+			}
+		}
+	}
+	if (fixed) {
+		local.writeMtsLinkWallPapers(ImportedList);
+		LOG(("MtsLink Wallpapers: the clips of %1 removed").arg(fixed));
+	}
+
+	// The files of the first versions of the import, in a folder.
+	const auto folder = cWorkingDir() + u"tdata/mtslink_wallpapers/"_q;
+	if (QDir(folder).exists()) {
+		auto moved = 0;
+		const auto files = QDir(folder).entryList(QDir::Files, QDir::Name);
+		for (const auto &name : files) {
+			auto file = QFile(folder + name);
+			if (file.open(QIODevice::ReadOnly)) {
+				if (const auto prepared = PrepareImported(name, file.readAll())) {
+					moved += AddImported(*prepared) ? 1 : 0;
+				}
+			}
+		}
+		local.writeMtsLinkWallPapers(ImportedList);
+		QDir(folder).removeRecursively();
+		LOG(("MtsLink Wallpapers: %1 moved from the folder").arg(moved));
+	}
+	return ImportedList;
+}
+
+} // namespace
+
+std::optional<LocalWallPaperFile> LocalWallPaperFileFor(
+		const WallPaper &paper) {
+	const auto i = ImportedFiles.find(paper.id());
+	return (i != end(ImportedFiles))
+		? std::make_optional(i->second)
+		: std::nullopt;
+}
+
+namespace {
+
+rpl::event_stream<> ThumbnailsReady;
+bool ThumbnailsLoading = false;
+
+// The files the thumbnails of which could not be read: not read again.
+base::flat_set<QString> ThumbnailsFailed;
+
+// The thumbnails missing are prepared in the background, sent in batches.
+void LoadImportedThumbnails(not_null<Main::Session*> session) {
+	if (ThumbnailsLoading) {
+		return;
+	}
+	struct Task {
+		QString name;
+		QByteArray content;
+		bool gzipSvg = false;
+	};
+	auto tasks = std::vector<Task>();
+	for (const auto &file : Imported(session)) {
+		if (!ImportedThumbnails.contains(file.name)
+			&& !ThumbnailsFailed.contains(file.name)) {
+			tasks.push_back({
+				.name = file.name,
+				.content = file.content,
+				.gzipSvg = IsPatternFile(file.name),
+			});
+		}
+	}
+	if (tasks.empty()) {
+		return;
+	}
+	ThumbnailsLoading = true;
+	const auto weak = base::make_weak(session);
+	const auto maxSize = kImportedThumbnailSize * style::DevicePixelRatio();
+	crl::async([=, tasks = std::move(tasks)] {
+		constexpr auto kBatchDelay = crl::time(300);
+		auto batch = std::vector<std::pair<QString, QImage>>();
+		auto sent = crl::now();
+		const auto send = [&](bool last) {
+			crl::on_main(weak, [=, batch = std::move(batch)]() mutable {
+				for (auto &[name, image] : batch) {
+					if (image.isNull()) {
+						LOG(("MtsLink Wallpapers: could not read %1").arg(name));
+						ThumbnailsFailed.emplace(name);
+					} else {
+						ImportedThumbnails[name] = std::make_shared<Image>(
+							std::move(image));
+					}
+				}
+				if (last) {
+					ThumbnailsLoading = false;
+				}
+				ThumbnailsReady.fire({});
+			});
+			batch = {};
+			sent = crl::now();
+		};
+		for (const auto &task : tasks) {
+			batch.emplace_back(task.name, Images::Read({
+				.content = task.content,
+				.maxSize = maxSize,
+				.gzipSvg = task.gzipSvg,
+			}).image);
+			if (crl::now() - sent >= kBatchDelay) {
+				send(false);
+			}
+		}
+		send(true);
+	});
+}
+
+} // namespace
+
+rpl::producer<> ImportedWallPaperThumbnailsReady() {
+	return ThumbnailsReady.events();
+}
+
+std::vector<WallPaper> ImportedWallPapers(
+		not_null<Main::Session*> session,
+		bool dark) {
+	// The colors of the imported patterns, in turn.
+	static const auto kColors = std::array{
+		u"dbddbb~6ba587~d5d88d~88b884"_q,
+		u"8adbf2~888dec~e39fea~679ced"_q,
+		u"fec496~dd6cb9~962fbf~4f5bd5"_q,
+		u"b0cdeb~9fb0ea~bbead5~b2e3dd"_q,
+		u"efb7dc~f6d3b5~d7c2e8~c0dbf2"_q,
+		u"a1c4fd~c2e9fb~f5e3b3~8ec5fc"_q,
+		u"fccb90~d57eeb~f8a5c2~f9d976"_q,
+		u"b5e2a0~6fc28b~e4e6a3~9ad4a8"_q,
+	};
+	auto result = std::vector<WallPaper>();
+	auto patterns = 0;
+	ImportedFiles.clear();
+	for (const auto &imported : Imported(session)) {
+		const auto pattern = IsPatternFile(imported.name);
+		const auto file = LocalWallPaperFile{
+			.path = imported.name,
+			.content = imported.content,
+			.gzipSvg = pattern,
+		};
+		if (ThumbnailsFailed.contains(imported.name)) {
+			continue;
+		}
+		const auto id = ImportedId(imported.name);
+		ImportedFiles[id] = file;
+		auto paper = pattern
+			? WallPaper::ConstructLocalPattern(
+				id,
+				ColorsFromString(kColors[patterns++ % kColors.size()]),
+				dark ? -40 : 50)
+			: WallPaper(id);
+		// Without the thumbnail yet: the colors of a pattern are shown.
+		const auto i = ImportedThumbnails.find(imported.name);
+		if (i != end(ImportedThumbnails)) {
+			paper.setLocalImageAsThumbnail(i->second);
+		}
+		result.push_back(std::move(paper));
+	}
+	LoadImportedThumbnails(session);
+	return result;
+}
+
+bool IsImportedWallPaper(const WallPaper &paper) {
+	return ImportedFiles.contains(paper.id());
+}
+
+bool HasImportedWallPapers(not_null<Main::Session*> session) {
+	return !Imported(session).empty();
+}
+
+int RemoveAllImportedWallPapers(not_null<Main::Session*> session) {
+	auto &list = Imported(session);
+	const auto result = int(list.size());
+	list.clear();
+	ImportedFiles.clear();
+	ImportedThumbnails.clear();
+	session->account().local().writeMtsLinkWallPapers(list);
+	return result;
+}
+
+void RemoveImportedWallPaper(
+		not_null<Main::Session*> session,
+		const WallPaper &paper) {
+	const auto i = ImportedFiles.find(paper.id());
+	if (i == end(ImportedFiles)) {
+		return;
+	}
+	auto &list = Imported(session);
+	list.erase(
+		ranges::remove(list, i->second.path, &ImportedFile::name),
+		end(list));
+	ImportedFiles.erase(i);
+	session->account().local().writeMtsLinkWallPapers(list);
+}
+
+void ImportWallPapers(
+		not_null<Main::Session*> session,
+		const QString &zipPath,
+		std::shared_ptr<std::atomic<bool>> cancelled,
+		Fn<void(int ready, int total)> progress,
+		Fn<void(int imported)> done) {
+	struct Prepared {
+		ImportedFile file;
+		QImage thumbnail;
+	};
+	const auto weak = base::make_weak(session);
+	const auto maxSize = kImportedThumbnailSize * style::DevicePixelRatio();
+	auto existing = base::flat_set<QString>();
+	for (const auto &file : Imported(session)) {
+		existing.emplace(file.name);
+	}
+	crl::async([=] {
+		constexpr auto kMaxFileSize = 20 * 1024 * 1024;
+		auto prepared = std::vector<Prepared>();
+		const auto finish = [&] {
+			crl::on_main(weak, [=, prepared = std::move(prepared)]() mutable {
+				const auto strong = weak.get();
+				Imported(strong);
+				auto imported = 0;
+				for (auto &[file, thumbnail] : prepared) {
+					const auto name = file.name;
+					if (AddImported(std::move(file))) {
+						++imported;
+						ImportedThumbnails[name] = std::make_shared<Image>(
+							std::move(thumbnail));
+					}
+				}
+				if (imported) {
+					strong->account().local().writeMtsLinkWallPapers(
+						ImportedList);
+				}
+				LOG(("MtsLink Wallpapers: imported %1 from %2"
+					).arg(imported
+					).arg(zipPath));
+				done(imported);
+			});
+		};
+		auto file = QFile(zipPath);
+		if (!file.open(QIODevice::ReadOnly)) {
+			LOG(("MtsLink Wallpapers: could not open %1").arg(zipPath));
+			finish();
+			return;
+		}
+		const auto content = file.readAll();
+		const auto good = [](const QString &name) {
+			return !name.startsWith('.')
+				&& (IsPatternFile(name) || IsPhotoFile(name));
+		};
+		auto total = 0;
+		{
+			// The error of the reader stays after the end of the list: the
+			// counting reader is apart.
+			auto count = zlib::FileToRead(content);
+			if (count.goToFirstFile() == UNZ_OK) {
+				do {
+					const auto name = count.getCurrentFileName();
+					total += good(QFileInfo(name).fileName()) ? 1 : 0;
+				} while (count.goToNextFile() == UNZ_OK);
+			}
+		}
+		auto zip = zlib::FileToRead(content);
+		if (!total || zip.goToFirstFile() != UNZ_OK) {
+			LOG(("MtsLink Wallpapers: no wallpapers in %1").arg(zipPath));
+			finish();
+			return;
+		}
+		crl::on_main(weak, [=] { progress(0, total); });
+		auto ready = 0;
+		do {
+			if (*cancelled) {
+				LOG(("MtsLink Wallpapers: the import cancelled"));
+				prepared.clear();
+				break;
+			}
+			const auto name = QFileInfo(zip.getCurrentFileName()).fileName();
+			if (!good(name)) {
+				continue;
+			} else if (existing.contains(ImportedName(name))) {
+				++ready;
+				crl::on_main(weak, [=] { progress(ready, total); });
+				continue;
+			}
+			auto bytes = zip.readCurrentFileContent(kMaxFileSize);
+			if (!bytes.isEmpty() && zip.error() == UNZ_OK) {
+				if (auto ok = PrepareImported(name, std::move(bytes))) {
+					auto thumbnail = Images::Read({
+						.content = ok->content,
+						.maxSize = maxSize,
+						.gzipSvg = IsPatternFile(ok->name),
+					}).image;
+					if (!thumbnail.isNull()) {
+						prepared.push_back({
+							std::move(*ok),
+							std::move(thumbnail),
+						});
+					}
+				}
+			}
+			++ready;
+			crl::on_main(weak, [=] { progress(ready, total); });
+		} while (zip.goToNextFile() == UNZ_OK);
+		finish();
+	});
 }
 
 WallPaper ThemeWallPaper() {

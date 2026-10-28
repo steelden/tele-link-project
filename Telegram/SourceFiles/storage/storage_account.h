@@ -121,6 +121,15 @@ public:
 	// The discussions pinned locally (the first on top), encrypted.
 	void writeMtsLinkPinnedThreads(const std::vector<PeerId> &pinned);
 	[[nodiscard]] std::vector<PeerId> readMtsLinkPinnedThreads() const;
+	// The imported wallpapers (the name and the content of each), encrypted.
+	struct MtsLinkWallPaperFile {
+		QString name;
+		QByteArray content;
+	};
+	void writeMtsLinkWallPapers(
+		const std::vector<MtsLinkWallPaperFile> &files);
+	[[nodiscard]] auto readMtsLinkWallPapers() const
+		-> std::vector<MtsLinkWallPaperFile>;
 	[[nodiscard]] QString envConfigCachePath() const;
 	[[nodiscard]] QString basePath() const;
 

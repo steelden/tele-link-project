@@ -41,10 +41,14 @@ private:
 	[[nodiscard]] bool forChannel() const;
 
 	void chooseFromFile();
+	void importWallPapers();
+	void removeAllImported();
 
 	const not_null<Window::SessionController*> _controller;
 
 	QPointer<Inner> _inner;
+	// MTS Link: shows the removing of all the imported wallpapers.
+	std::shared_ptr<rpl::variable<bool>> _hasImported;
 	PeerData *_forPeer = nullptr;
 
 };

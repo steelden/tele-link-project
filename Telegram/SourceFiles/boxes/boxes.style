@@ -178,6 +178,8 @@ langsRadio: Radio(defaultRadio) {
 
 backgroundPadding: 10px;
 backgroundSize: size(108px, 193px);
+backgroundThemeResetIcon: icon {{ "menu/restore", windowBoldFg }};
+backgroundImportIcon: icon {{ "menu/download", windowBoldFg }};
 backgroundScroll: ScrollArea(boxScroll) {
 	deltax: 3px;
 	width: 10px;

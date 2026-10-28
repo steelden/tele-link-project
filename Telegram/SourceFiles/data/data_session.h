@@ -978,6 +978,12 @@ public:
 	MessageIdsList takeMimeForwardIds();
 
 	bool updateWallpapers(const MTPaccount_WallPapers &data);
+	// MTS Link: no wallpapers of the Telegram server: the built in ones of
+	// Telegram and the imported.
+	void setLocalWallpapers(bool dark);
+	// At each opening of the gallery (the light or the dark variants of the
+	// imported) and after an import.
+	void refreshLocalWallpapers(bool dark);
 	void removeWallpaper(const WallPaper &paper);
 	const std::vector<WallPaper> &wallpapers() const;
 	uint64 wallpapersHash() const;

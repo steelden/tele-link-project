@@ -5979,6 +5979,18 @@ void Session::setWallpapers(const QVector<MTPWallPaper> &data, uint64 hash) {
 	}
 }
 
+void Session::setLocalWallpapers(bool dark) {
+	setWallpapers({}, 0);
+	for (auto &paper : ImportedWallPapers(&session(), dark)) {
+		_wallpapers.push_back(std::move(paper));
+	}
+}
+
+void Session::refreshLocalWallpapers(bool dark) {
+	_wallpapers.clear();
+	setLocalWallpapers(dark);
+}
+
 void Session::removeWallpaper(const WallPaper &paper) {
 	const auto i = ranges::find(_wallpapers, paper.id(), &WallPaper::id);
 	if (i != end(_wallpapers)) {

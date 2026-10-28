@@ -292,6 +292,9 @@ base::flat_set<QString> Account::collectGoodNames() const {
 		"mtslink_pinned_threads0",
 		"mtslink_pinned_threads1",
 		"mtslink_pinned_threadss",
+		"mtslink_wallpapers0",
+		"mtslink_wallpapers1",
+		"mtslink_wallpaperss",
 		"mtslink_env_config",
 		"mtslink_active_chat",
 		"mtslink_active_filter",
@@ -1449,6 +1452,52 @@ std::vector<PeerId> Account::readMtsLinkPinnedThreads() const {
 			return {};
 		}
 		result.push_back(DeserializePeerId(peerId));
+	}
+	return result;
+}
+
+void Account::writeMtsLinkWallPapers(
+		const std::vector<MtsLinkWallPaperFile> &files) {
+	if (!_localKey) {
+		return;
+	}
+	auto size = qint64(sizeof(quint32));
+	for (const auto &file : files) {
+		size += Serialize::stringSize(file.name)
+			+ Serialize::bytearraySize(file.content);
+	}
+	FileWriteDescriptor out(u"mtslink_wallpapers"_q, _basePath);
+	EncryptedDescriptor data(size);
+	data.stream << quint32(files.size());
+	for (const auto &file : files) {
+		data.stream << file.name << file.content;
+	}
+	out.writeEncrypted(data, _localKey);
+}
+
+auto Account::readMtsLinkWallPapers() const
+-> std::vector<MtsLinkWallPaperFile> {
+	auto result = std::vector<MtsLinkWallPaperFile>();
+	if (!_localKey) {
+		return result;
+	}
+	FileReadDescriptor file;
+	if (!ReadEncryptedFile(
+			file,
+			u"mtslink_wallpapers"_q,
+			_basePath,
+			_localKey)) {
+		return result;
+	}
+	auto count = quint32();
+	file.stream >> count;
+	for (auto i = quint32(); i != count; ++i) {
+		auto entry = MtsLinkWallPaperFile();
+		file.stream >> entry.name >> entry.content;
+		if (!CheckStreamStatus(file.stream)) {
+			return {};
+		}
+		result.push_back(std::move(entry));
 	}
 	return result;
 }
