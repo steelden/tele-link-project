@@ -87,6 +87,8 @@ void AuthWidget::createWebView() {
 				.token = Webview::LegacyStorageIdToken(),
 			},
 			.allowThirdPartyCookies = true,
+			// Kerberos of the Windows account in the domain network.
+			.authServerAllowlist = AuthServerAllowlist(),
 		});
 
 	if (!_webView->valid()) {
@@ -104,6 +106,15 @@ void AuthWidget::createWebView() {
 				try { window.chrome.webview.postMessage(JSON.stringify(obj)); }
 				catch(e) {}
 			};
+			// Kerberos accepted: the identity provider shows the Vue component
+			// <kerberos-form> ("Sign in as ..."), checked before it is mounted.
+			document.addEventListener('DOMContentLoaded', function() {
+				if (document.querySelector('kerberos-form')
+					|| document.documentElement.innerHTML.indexOf(
+						'<kerberos-form') >= 0) {
+					post({ type: 'kerberos-form', url: location.href });
+				}
+			});
 			var origError = console.error;
 			console.error = function() {
 				var args = Array.prototype.slice.call(arguments);
@@ -262,6 +273,11 @@ void AuthWidget::createWebView() {
 	});
 
 	_webView->setMessageHandler([this](const QJsonDocument &message) {
+		const auto object = message.object();
+		if (object.value(u"type"_q).toString() == u"kerberos-form"_q) {
+			LOG(("MtsLink Auth: Kerberos accepted, %1").arg(
+				QUrl(object.value(u"url"_q).toString()).host()));
+		}
 		LOG(("MtsLink Auth WebView message: %1")
 			.arg(QString::fromUtf8(message.toJson(
 				QJsonDocument::Compact))));

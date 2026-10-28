@@ -162,4 +162,22 @@ bool EnvConfig::isLoaded() const {
 	return _loaded;
 }
 
+QString AuthServerAllowlist() {
+	static const auto result = [] {
+		const auto domain = qEnvironmentVariable("USERDNSDOMAIN").toLower();
+		auto labels = domain.split('.', Qt::SkipEmptyParts);
+		while (labels.size() > 2) {
+			labels.pop_front();
+		}
+		const auto allowlist = (labels.size() == 2)
+			? (u"*."_q + labels.join('.'))
+			: QString();
+		LOG(("MtsLink Auth: the domain '%1', the auth servers '%2'"
+			).arg(domain
+			).arg(allowlist));
+		return allowlist;
+	}();
+	return result;
+}
+
 } // namespace MtsLink

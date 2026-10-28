@@ -49,4 +49,9 @@ private:
 	bool _loaded = false;
 };
 
+// The hosts the browser answers by Kerberos of the Windows account for: of
+// the domain of the account (msk.example.com - *.example.com), the identity
+// provider of the organization is in it. Empty not in a domain account.
+[[nodiscard]] QString AuthServerAllowlist();
+
 } // namespace MtsLink

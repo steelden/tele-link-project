@@ -425,6 +425,8 @@ CallWindow::CallWindow(
 			.allowMediaPermissions = true,
 			.language = language,
 			.cookies = SessionCookies(),
+			// The same as of the sign in: the storage is shared.
+			.authServerAllowlist = AuthServerAllowlist(),
 		});
 	if (!_webview->valid()) {
 		LOG(("MtsLink Call: embedded browser is not available"));
