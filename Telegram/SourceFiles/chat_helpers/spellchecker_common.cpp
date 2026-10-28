@@ -539,6 +539,18 @@ void Start(not_null<Main::Session*> session) {
 	const auto guard = gsl::finally([=] {
 		onEnabled(settings->spellcheckerEnabled());
 	});
+	{
+		// Temporary: the spellchecker of MTS Link.
+		auto languages = QStringList();
+		for (const auto id : settings->dictionariesEnabled()) {
+			languages.push_back(QString::number(id));
+		}
+		LOG(("MtsLink Spellchecker: start, system %1, enabled %2, "
+			"dictionaries [%3]"
+			).arg(Logs::b(Platform::Spellchecker::IsSystemSpellchecker())
+			).arg(Logs::b(settings->spellcheckerEnabled())
+			).arg(languages.join(',')));
+	}
 
 	// The custom dictionary of user-added words is stored here on every
 	// platform, including those using the system spellchecker, so the

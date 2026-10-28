@@ -256,14 +256,16 @@ Session::Session(
 			DEBUG_LOG(("Init: Account stored data load finished."));
 		} }).dispatch();
 
-#ifndef TDESKTOP_DISABLE_SPELLCHECK
-		Spellchecker::Start(this);
-#endif // TDESKTOP_DISABLE_SPELLCHECK
-
 		_api->requestNotifySettings(MTP_inputNotifyUsers());
 		_api->requestNotifySettings(MTP_inputNotifyChats());
 		_api->requestNotifySettings(MTP_inputNotifyBroadcasts());
 	}
+
+#ifndef TDESKTOP_DISABLE_SPELLCHECK
+	// The spellchecker for MTS Link as well: without it the languages of the
+	// system spellchecker were never set, nothing was underlined.
+	Spellchecker::Start(this);
+#endif // TDESKTOP_DISABLE_SPELLCHECK
 
 	Core::App().downloadManager().trackSession(this);
 
