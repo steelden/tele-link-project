@@ -56,6 +56,29 @@ include(cmake/target_prepare_qrc.cmake)
 
 include(cmake/options.cmake)
 
+# TeleLink: the compiler processes of a project are limited. /MP without the
+# number runs one for each logical processor, with the precompiled headers
+# they exceed the memory (C1076, C3859). 4 GB for each process by default.
+if (MSVC)
+    cmake_host_system_information(RESULT total_memory_mb QUERY TOTAL_PHYSICAL_MEMORY)
+    cmake_host_system_information(RESULT logical_cores QUERY NUMBER_OF_LOGICAL_CORES)
+    math(EXPR default_processes "${total_memory_mb} / 4096")
+    if (default_processes GREATER logical_cores)
+        set(default_processes ${logical_cores})
+    endif()
+    if (default_processes LESS 1)
+        set(default_processes 1)
+    endif()
+    set(TELELINK_COMPILE_PROCESSES ${default_processes} CACHE STRING
+        "The compiler processes of a project (/MP), 4 GB of the memory each")
+    get_target_property(common_compile_options common_options INTERFACE_COMPILE_OPTIONS)
+    list(TRANSFORM common_compile_options
+        REPLACE "^/MP$" "/MP${TELELINK_COMPILE_PROCESSES}")
+    set_target_properties(common_options PROPERTIES
+        INTERFACE_COMPILE_OPTIONS "${common_compile_options}")
+    message(STATUS "TeleLink: ${TELELINK_COMPILE_PROCESSES} compiler processes of a project")
+endif()
+
 include(cmake/external/qt/package.cmake)
 
 set(desktop_app_skip_libs
