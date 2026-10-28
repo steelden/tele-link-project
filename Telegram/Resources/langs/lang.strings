@@ -5551,8 +5551,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_context_select_msg_bulk" = "Select up to this message";
 "lng_context_deselect_msg" = "Deselect";
 "lng_context_report_msg" = "Report";
-"lng_context_pin_msg" = "Pin";
-"lng_context_unpin_msg" = "Unpin";
+"lng_context_pin_msg" = "Pin message";
+"lng_context_unpin_msg" = "Unpin message";
 "lng_context_cancel_upload" = "Cancel Upload";
 "lng_context_upload_edit_caption" = "Edit Caption";
 "lng_context_copy_selected" = "Copy Selected Text";
@@ -6654,6 +6654,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_show_threads_mark" = "Show the threads mark";
 "lng_mtslink_hide_unread_counter" = "Hide the unread counter";
 "lng_mtslink_show_unread_counter" = "Show the unread counter";
+"lng_mtslink_thread_pin" = "Pin thread";
+"lng_mtslink_thread_unpin" = "Unpin thread";
 "lng_call_invitation" = "Group call invitation";
 "lng_call_ongoing" = "Ongoing group call";
 

@@ -34,6 +34,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "lottie/lottie_icon.h"
 #include "main/main_session.h"
+#include "mtslink/data_adapters.h"
 #include "storage/localstorage.h"
 #include "support/support_helper.h"
 #include "ui/empty_userpic.h"
@@ -157,13 +158,25 @@ int PaintRightButtonImpl(QPainter &p, const PaintContext &context) {
 	return 0;
 }
 
+// MTS Link: the discussions pinned locally have the pin of another color.
+[[nodiscard]] const style::ThreeStateIcon &PinnedIcon(
+		not_null<const Dialogs::Entry*> entry) {
+	const auto history = entry->asHistory();
+	return (history
+		&& MtsLink::isThreadPinnedLocally(
+			&history->session(),
+			history->peer->id))
+		? st::dialogsPinnedLocalIcon
+		: st::dialogsPinnedIcon;
+}
+
 int PaintBadges(
 		QPainter &p,
 		const PaintContext &context,
 		BadgesState badgesState,
 		int right,
 		int top,
-		bool displayPinnedIcon,
+		const style::ThreeStateIcon *pinnedIcon,
 		int pinnedIconTop,
 		bool narrow) {
 	const auto paintIconBadge = [&](
@@ -234,9 +247,9 @@ int PaintBadges(
 		++painted;
 	} else if (const auto used = PaintRightButton(p, context)) {
 		return used - st::dialogsUnreadPadding;
-	} else if (displayPinnedIcon) {
+	} else if (pinnedIcon) {
 		const auto &icon = ThreeStateIcon(
-			st::dialogsPinnedIcon,
+			*pinnedIcon,
 			context.active,
 			context.selected);
 		icon.paint(p, right - icon.width(), pinnedIconTop, context.width);
@@ -314,7 +327,7 @@ void PaintNarrowCounter(
 		badgesState,
 		context.st->padding.left() + context.st->photoSize,
 		top,
-		false,
+		nullptr,
 		0,
 		true);
 }
@@ -325,7 +338,7 @@ int PaintWideCounter(
 		BadgesState badgesState,
 		int texttop,
 		int availableWidth,
-		bool displayPinnedIcon) {
+		const style::ThreeStateIcon *pinnedIcon) {
 	const auto top = texttop
 		+ st::dialogsTextFont->ascent
 		- st::dialogsUnreadFont->ascent
@@ -336,7 +349,7 @@ int PaintWideCounter(
 		badgesState,
 		context.width - context.st->padding.right(),
 		top,
-		displayPinnedIcon,
+		pinnedIcon,
 		texttop,
 		false);
 	return availableWidth - used;
@@ -613,7 +626,7 @@ void PaintRow(
 			badgesState,
 			texttop,
 			namewidth,
-			false);
+			nullptr);
 		const auto rect = QRect(
 			nameleft,
 			texttop,
@@ -632,7 +645,7 @@ void PaintRow(
 			badgesState,
 			texttop,
 			namewidth,
-			displayPinnedIcon);
+			displayPinnedIcon ? &PinnedIcon(entry) : nullptr);
 		const auto rect = QRect(
 			nameleft,
 			texttop,
@@ -675,7 +688,7 @@ void PaintRow(
 		} else if (entry->isPinnedDialog(context.filter)
 			&& (context.filter || !entry->fixedOnTopIndex())) {
 			auto &icon = ThreeStateIcon(
-				st::dialogsPinnedIcon,
+				PinnedIcon(entry),
 				context.active,
 				context.selected);
 			icon.paint(
@@ -776,7 +789,7 @@ void PaintRow(
 			badgesState,
 			texttop,
 			namewidth,
-			pinnedIcon);
+			pinnedIcon ? &PinnedIcon(entry) : nullptr);
 
 		auto &color = context.active
 			? st::dialogsTextFgServiceActive
@@ -811,7 +824,7 @@ void PaintRow(
 	} else if (entry->isPinnedDialog(context.filter)
 		&& (context.filter || !entry->fixedOnTopIndex())) {
 		auto &icon = ThreeStateIcon(
-			st::dialogsPinnedIcon,
+			PinnedIcon(entry),
 			context.active,
 			context.selected);
 		icon.paint(
@@ -1202,7 +1215,7 @@ void RowPainter::Paint(
 			badgesState,
 			texttop,
 			namewidth,
-			displayPinnedIcon);
+			displayPinnedIcon ? &PinnedIcon(entry) : nullptr);
 		const auto &color = context.active
 			? st::dialogsTextFgServiceActive
 			: context.selected
@@ -1321,8 +1334,6 @@ void RowPainter::Paint(
 	const auto badgesState = context.displayUnreadInfo
 		? entry->chatListBadgesState()
 		: BadgesState();
-	const auto displayPinnedIcon = false;
-
 	const auto paintItemCallback = [&](int nameleft, int namewidth) {
 		const auto texttop = context.st->textTop;
 		const auto availableWidth = PaintWideCounter(
@@ -1331,7 +1342,7 @@ void RowPainter::Paint(
 			badgesState,
 			texttop,
 			namewidth,
-			displayPinnedIcon);
+			nullptr);
 
 		const auto itemRect = QRect(
 			nameleft,

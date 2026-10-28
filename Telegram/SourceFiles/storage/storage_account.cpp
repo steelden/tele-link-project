@@ -289,6 +289,9 @@ base::flat_set<QString> Account::collectGoodNames() const {
 		"mtslink_chat_hides0",
 		"mtslink_chat_hides1",
 		"mtslink_chat_hidess",
+		"mtslink_pinned_threads0",
+		"mtslink_pinned_threads1",
+		"mtslink_pinned_threadss",
 		"mtslink_env_config",
 		"mtslink_active_chat",
 		"mtslink_active_filter",
@@ -1406,6 +1409,46 @@ base::flat_map<PeerId, int> Account::readMtsLinkChatHides() const {
 			return {};
 		}
 		result.emplace(DeserializePeerId(peerId), flags);
+	}
+	return result;
+}
+
+void Account::writeMtsLinkPinnedThreads(const std::vector<PeerId> &pinned) {
+	if (!_localKey) {
+		return;
+	}
+	const auto size = sizeof(quint32) + pinned.size() * sizeof(quint64);
+	FileWriteDescriptor file(u"mtslink_pinned_threads"_q, _basePath);
+	EncryptedDescriptor data(size);
+	data.stream << quint32(pinned.size());
+	for (const auto peerId : pinned) {
+		data.stream << SerializePeerId(peerId);
+	}
+	file.writeEncrypted(data, _localKey);
+}
+
+std::vector<PeerId> Account::readMtsLinkPinnedThreads() const {
+	auto result = std::vector<PeerId>();
+	if (!_localKey) {
+		return result;
+	}
+	FileReadDescriptor file;
+	if (!ReadEncryptedFile(
+			file,
+			u"mtslink_pinned_threads"_q,
+			_basePath,
+			_localKey)) {
+		return result;
+	}
+	auto count = quint32();
+	file.stream >> count;
+	for (auto i = quint32(); i != count; ++i) {
+		auto peerId = quint64();
+		file.stream >> peerId;
+		if (!CheckStreamStatus(file.stream)) {
+			return {};
+		}
+		result.push_back(DeserializePeerId(peerId));
 	}
 	return result;
 }

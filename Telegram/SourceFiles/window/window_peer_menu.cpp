@@ -387,6 +387,7 @@ private:
 	void addToggleFolder();
 	void addToggleUnreadMark();
 	void addToggleArchive();
+	void addRefreshChat();
 	void addClearHistory();
 	void addDeleteChat();
 	void addLeaveChat();
@@ -919,6 +920,21 @@ void Filler::addUngroup() {
 	}, &st::menuIconExpand);
 }
 
+void Filler::addRefreshChat() {
+	// MTS Link: the messages of the chat requested again, the last item.
+	if (!_peer
+		|| _topic
+		|| _request.section == Section::SubsectionTabsMenu
+		|| !_request.key.history()
+		|| !MtsLink::hasChatId(_peer->id)) {
+		return;
+	}
+	const auto peer = _peer;
+	_addAction(tr::lng_mtslink_refresh_chat(tr::now), [=] {
+		MtsLink::refreshChat(&peer->session(), peer->id);
+	}, &st::menuIconRestore);
+}
+
 void Filler::addToggleArchive() {
 	if (!_peer
 		|| _topic
@@ -927,13 +943,8 @@ void Filler::addToggleArchive() {
 	}
 	const auto peer = _peer;
 	const auto history = _request.key.history();
-	// MTS Link: no archiving, "Refresh" (the messages requested again) in
-	// its place, "Unarchive" only for a chat in the archive already.
-	if (history && MtsLink::hasChatId(peer->id)) {
-		_addAction(tr::lng_mtslink_refresh_chat(tr::now), [=] {
-			MtsLink::refreshChat(&peer->session(), peer->id);
-		}, &st::menuIconRestore);
-	}
+	// MTS Link: no archiving, "Unarchive" only for a chat in the archive
+	// already.
 	if (!CanArchive(history, peer) || !IsArchived(history)) {
 		return;
 	}
@@ -2057,9 +2068,18 @@ void Filler::fillContextMenuActions() {
 				controller->showPeerHistory(parentPeerId, params, rootId);
 			}, &st::menuIconShowInChat);
 			const auto session = &_peer->session();
-			_addAction(tr::lng_mtslink_refresh_chat(tr::now), [=] {
-				MtsLink::refreshThread(session, parentPeerId, rootId);
-			}, &st::menuIconRestore);
+			const auto threadPeerId = _peer->id;
+			const auto pinned = MtsLink::isThreadPinnedLocally(
+				session,
+				threadPeerId);
+			_addAction(
+				(pinned
+					? tr::lng_mtslink_thread_unpin
+					: tr::lng_mtslink_thread_pin)(tr::now),
+				[=] {
+					MtsLink::toggleThreadPinnedLocally(session, threadPeerId);
+				},
+				pinned ? &st::menuIconUnpin : &st::menuIconPin);
 			MtsLink::fillThreadSubscriptionActions(
 				&_peer->session(),
 				parentPeerId,
@@ -2068,6 +2088,9 @@ void Filler::fillContextMenuActions() {
 					_addAction(text, std::move(callback), icon);
 				},
 				false);
+			_addAction(tr::lng_mtslink_refresh_chat(tr::now), [=] {
+				MtsLink::refreshThread(session, parentPeerId, rootId);
+			}, &st::menuIconRestore);
 		}
 		return;
 	}
@@ -2100,6 +2123,7 @@ void Filler::fillContextMenuActions() {
 	addDeleteChat();
 	addLeaveChat();
 	addDeleteTopic();
+	addRefreshChat();
 }
 
 void Filler::fillHistoryActions() {

@@ -417,6 +417,11 @@ dialogsPinnedIcon: ThreeStateIcon {
 	over: icon {{ "dialogs/dialogs_pinned", dialogsUnreadBgMutedOver }};
 	active: icon {{ "dialogs/dialogs_pinned", dialogsUnreadBgMutedActive }};
 }
+dialogsPinnedLocalIcon: ThreeStateIcon {
+	icon: icon {{ "dialogs/dialogs_pinned", dialogsUnreadBg }};
+	over: icon {{ "dialogs/dialogs_pinned", dialogsUnreadBgOver }};
+	active: icon {{ "dialogs/dialogs_pinned", dialogsUnreadBgActive }};
+}
 
 dialogsVerifiedColors: VerifiedBadge {
 	height: 20px;

@@ -508,22 +508,50 @@ void sortMainPinned(not_null<Main::Session*> session) {
 
 // MTS Link pins are global, so every folder pins the globally pinned
 // chats it contains, in the main list order.
+// The discussions pinned locally of the account (by its folder).
+QString PinnedThreadsPath;
+std::vector<PeerId> PinnedThreads;
+
+std::vector<PeerId> &pinnedThreads(not_null<Main::Session*> session) {
+	const auto &local = session->account().local();
+	if (PinnedThreadsPath != local.basePath()) {
+		PinnedThreadsPath = local.basePath();
+		PinnedThreads = local.readMtsLinkPinnedThreads();
+	}
+	return PinnedThreads;
+}
+
 void syncFolderPins(not_null<Main::Session*> session) {
 	using Flag = Data::ChatFilter::Flag;
 	sortMainPinned(session);
 	auto &filters = session->data().chatsFilters();
 	const auto &mainOrder = session->data().chatsList()->pinned()->order();
 	auto updates = std::vector<Data::ChatFilter>();
+	const auto &threads = pinnedThreads(session);
 	for (const auto &filter : filters.list()) {
-		if (!filter.id() || (filter.flags() & Flag::Threads)) {
+		if (!filter.id()) {
 			continue;
 		}
 		auto pinned = std::vector<not_null<History*>>();
-		for (const auto &key : mainOrder) {
-			if (const auto history = key.history()) {
-				if (filter.contains(history)) {
-					pinned.push_back(history);
+		if (!(filter.flags() & Flag::Threads)) {
+			for (const auto &key : mainOrder) {
+				if (const auto history = key.history()) {
+					if (filter.contains(history)) {
+						pinned.push_back(history);
+					}
 				}
+			}
+		}
+		// The discussions pinned locally: after the pins of the server.
+		for (const auto peerId : threads) {
+			const auto history = session->data().historyLoaded(peerId);
+			if (history
+				&& filter.contains(history)
+				&& !ranges::contains(
+					pinned,
+					history,
+					&not_null<History*>::get)) {
+				pinned.push_back(history);
 			}
 		}
 		if (pinned != filter.pinned()) {
@@ -10106,6 +10134,29 @@ void writeChatHides(not_null<Main::Session*> session) {
 		}
 	}
 	session->account().local().writeMtsLinkChatHides(hides);
+}
+
+bool isThreadPinnedLocally(
+		not_null<Main::Session*> session,
+		PeerId threadPeerId) {
+	return ranges::contains(pinnedThreads(session), threadPeerId);
+}
+
+void toggleThreadPinnedLocally(
+		not_null<Main::Session*> session,
+		PeerId threadPeerId) {
+	auto &list = pinnedThreads(session);
+	const auto i = ranges::find(list, threadPeerId);
+	if (i != end(list)) {
+		list.erase(i);
+	} else {
+		list.insert(begin(list), threadPeerId);
+	}
+	session->account().local().writeMtsLinkPinnedThreads(list);
+	scheduleFolderPinsSync(session);
+	if (const auto history = session->data().historyLoaded(threadPeerId)) {
+		history->updateChatListEntry();
+	}
 }
 
 bool hideThreadsMarkFor(not_null<Main::Session*> session, PeerId peerId) {

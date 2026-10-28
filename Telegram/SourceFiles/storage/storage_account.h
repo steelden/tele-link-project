@@ -118,6 +118,9 @@ public:
 	// The local flags of the chats (peer id -> flags), encrypted.
 	void writeMtsLinkChatHides(const base::flat_map<PeerId, int> &hides);
 	[[nodiscard]] base::flat_map<PeerId, int> readMtsLinkChatHides() const;
+	// The discussions pinned locally (the first on top), encrypted.
+	void writeMtsLinkPinnedThreads(const std::vector<PeerId> &pinned);
+	[[nodiscard]] std::vector<PeerId> readMtsLinkPinnedThreads() const;
 	[[nodiscard]] QString envConfigCachePath() const;
 	[[nodiscard]] QString basePath() const;
 

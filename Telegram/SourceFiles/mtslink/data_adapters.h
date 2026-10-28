@@ -168,6 +168,16 @@ void setShowThreadsMark(not_null<Main::Session*> session, bool show);
 	not_null<Main::Session*> session,
 	PeerId peerId);
 void setHideThreadsMarkFor(not_null<History*> history, bool hide);
+
+// The discussions pinned locally (not on the server): pinned in the folders
+// with them, after the chats pinned on the server, with a pin of another
+// color.
+[[nodiscard]] bool isThreadPinnedLocally(
+	not_null<Main::Session*> session,
+	PeerId threadPeerId);
+void toggleThreadPinnedLocally(
+	not_null<Main::Session*> session,
+	PeerId threadPeerId);
 void setHideUnreadCounterFor(not_null<History*> history, bool hide);
 
 // The order of the pinned chats: as on the server (manual), by the first
