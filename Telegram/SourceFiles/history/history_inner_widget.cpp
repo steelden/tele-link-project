@@ -399,7 +399,7 @@ HistoryInner::HistoryInner(
 , _threadButtonManager(
 	std::make_unique<HistoryView::ReplyButton::Manager>(
 		[=](QRect updated) { update(updated); },
-		tr::lng_replies_view_thread(tr::now)))
+		tr::lng_mtslink_thread_button(tr::now)))
 , _touchSelectTimer([=] { onTouchSelect(); })
 , _touchScrollTimer([=] { onTouchScrollTimer(); })
 , _middleClickAutoscroll(

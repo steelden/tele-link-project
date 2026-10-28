@@ -7142,6 +7142,7 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_show_unread_counter" = "Показывать счётчик непрочитанных";
 "lng_mtslink_thread_pin" = "Закрепить обсуждение";
 "lng_mtslink_thread_unpin" = "Открепить обсуждение";
+"lng_mtslink_thread_button" = "Обсуждение";
 "lng_mtslink_bg_theme" = "Вернуть фон темы";
 "lng_mtslink_bg_import" = "Импортировать обои из zip";
 "lng_mtslink_bg_import_progress" = "Импорт обоев: {ready} из {total}";

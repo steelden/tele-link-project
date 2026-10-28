@@ -6656,6 +6656,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_show_unread_counter" = "Show the unread counter";
 "lng_mtslink_thread_pin" = "Pin thread";
 "lng_mtslink_thread_unpin" = "Unpin thread";
+"lng_mtslink_thread_button" = "Thread";
 "lng_mtslink_bg_theme" = "Restore the theme background";
 "lng_mtslink_bg_import" = "Import wallpapers from a zip";
 "lng_mtslink_bg_import_progress" = "Importing the wallpapers: {ready} of {total}";
