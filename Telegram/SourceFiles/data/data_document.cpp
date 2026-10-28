@@ -1297,10 +1297,12 @@ void DocumentData::save(
 				autoLoading,
 				cacheTag());
 		} else if (!_access && !_url.isEmpty()) {
+			// MTS Link: the big files to the file only, as by MTP.
 			_loader = std::make_unique<webFileLoader>(
 				&session(),
 				_url,
 				toFile,
+				(saveToCache() ? LoadToCacheAsWell : LoadToFileOnly),
 				fromCloud,
 				autoLoading,
 				cacheTag());

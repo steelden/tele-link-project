@@ -673,6 +673,27 @@ webFileLoader::webFileLoader(
 webFileLoader::webFileLoader(
 	not_null<Main::Session*> session,
 	const QString &url,
+	const QString &to,
+	LoadToCacheSetting toCache,
+	LoadFromCloudSetting fromCloud,
+	bool autoLoading,
+	uint8 cacheTag)
+: FileLoader(
+	session,
+	to,
+	0,
+	0,
+	UnknownFileLocation,
+	toCache,
+	fromCloud,
+	autoLoading,
+	cacheTag)
+, _url(url) {
+}
+
+webFileLoader::webFileLoader(
+	not_null<Main::Session*> session,
+	const QString &url,
 	const QString &path,
 	WebRequestType type)
 : FileLoader(

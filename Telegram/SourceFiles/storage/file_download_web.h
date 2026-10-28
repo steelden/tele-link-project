@@ -25,6 +25,16 @@ public:
 		LoadFromCloudSetting fromCloud,
 		bool autoLoading,
 		uint8 cacheTag);
+	// MTS Link: a document to the file, the big ones streamed to it (the
+	// loading in the memory is limited by kMaxFileInMemory).
+	webFileLoader(
+		not_null<Main::Session*> session,
+		const QString &url,
+		const QString &to,
+		LoadToCacheSetting toCache,
+		LoadFromCloudSetting fromCloud,
+		bool autoLoading,
+		uint8 cacheTag);
 	webFileLoader(
 		not_null<Main::Session*> session,
 		const QString &url,
