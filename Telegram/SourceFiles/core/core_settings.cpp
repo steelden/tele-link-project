@@ -1352,6 +1352,16 @@ rpl::producer<bool> Settings::hideAllChatsFilterValue() {
 	) | rpl::then(HideAllChatsFilterChanges().events());
 }
 
+bool Settings::standardMenuReactions() {
+	return readPref<bool>(kStandardMenuReactionsKey);
+}
+
+void Settings::setStandardMenuReactions(bool value) {
+	if (standardMenuReactions() != value) {
+		writePref<bool>(kStandardMenuReactionsKey, value);
+	}
+}
+
 void Settings::setHideAllChatsFilter(bool value) {
 	if (hideAllChatsFilter() != value) {
 		writePref<bool>(kHideAllChatsFilterKey, value);

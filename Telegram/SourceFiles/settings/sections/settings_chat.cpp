@@ -1644,6 +1644,28 @@ void SetupMessages(
 
 	Ui::AddSkip(inner, st::settingsSendTypeSkip);
 
+	// MTS Link: the reactions of the message menu.
+	{
+		const auto groupMenu = std::make_shared<Ui::RadioenumGroup<bool>>(
+			Core::App().settings().standardMenuReactions());
+		const auto addMenu = [&](bool standard, const QString &text) {
+			inner->add(
+				object_ptr<Ui::Radioenum<bool>>(
+					inner,
+					groupMenu,
+					standard,
+					text,
+					st::settingsSendType),
+				st::settingsSendTypePadding);
+		};
+		addMenu(false, tr::lng_mtslink_menu_reactions_frequent(tr::now));
+		addMenu(true, tr::lng_mtslink_menu_reactions_standard(tr::now));
+		groupMenu->setChangedCallback([=](bool standard) {
+			Core::App().settings().setStandardMenuReactions(standard);
+		});
+		Ui::AddSkip(inner, st::settingsSendTypeSkip);
+	}
+
 	const auto cornerReply = inner->add(
 		object_ptr<Ui::Checkbox>(
 			inner,

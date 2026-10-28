@@ -7137,6 +7137,8 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_filters_hide_all_about" = "В списке папок останутся только ваши папки. Работает, если создана хотя бы одна папка.";
 "lng_mtslink_notifications" = "Уведомления";
 "lng_mtslink_hide_threads_mark" = "Скрыть отметку комментариев";
+"lng_mtslink_menu_reactions_frequent" = "Часто используемые реакции в меню";
+"lng_mtslink_menu_reactions_standard" = "Стандартные реакции в меню";
 "lng_mtslink_show_threads_mark" = "Показывать отметку комментариев";
 "lng_mtslink_hide_unread_counter" = "Скрыть счётчик непрочитанных";
 "lng_mtslink_show_unread_counter" = "Показывать счётчик непрочитанных";

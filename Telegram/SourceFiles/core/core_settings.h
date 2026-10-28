@@ -41,6 +41,8 @@ inline constexpr auto kScreenReaderModeDisabledKey
 	= "screen-reader-mode-disabled"_cs;
 inline constexpr auto kHideAllChatsFilterKey
 	= "mtslink-hide-all-chats-filter"_cs;
+inline constexpr auto kStandardMenuReactionsKey
+	= "mtslink-standard-menu-reactions"_cs;
 
 struct WindowPosition {
 	int32 moncrc = 0;
@@ -275,6 +277,10 @@ public:
 	[[nodiscard]] bool hideAllChatsFilter();
 	[[nodiscard]] rpl::producer<bool> hideAllChatsFilterValue();
 	void setHideAllChatsFilter(bool value);
+	// MTS Link: the reactions of the message menu are the standard ones, not
+	// the frequently used emoji first.
+	[[nodiscard]] bool standardMenuReactions();
+	void setStandardMenuReactions(bool value);
 	void setNotifyAboutPinned(bool notify) {
 		_notifyAboutPinned = notify;
 	}

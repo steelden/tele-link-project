@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/group/calls_group_messages.h"
 #include "chat_helpers/stickers_lottie.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
@@ -325,6 +326,28 @@ PossibleItemReactionsRef LookupPossibleReactions(
 		constexpr auto kPopularCount = 32;
 		result.customAllowed = true;
 		result.allEmoji = true;
+		if (!limited && !Core::App().settings().standardMenuReactions()) {
+			// The frequently used emoji first, as in the emoji panel.
+			auto front = begin(result.recent);
+			for (const auto &recent : Core::App().settings().recentEmoji()) {
+				const auto emoji = std::get_if<EmojiPtr>(&recent.id.data);
+				if (!emoji) {
+					continue;
+				}
+				const auto i = ranges::find_if(
+					front,
+					end(result.recent),
+					[&](not_null<const Reaction*> reaction) {
+						const auto &text = reaction->id.emoji();
+						return !text.isEmpty()
+							&& (Ui::Emoji::Find(text) == *emoji);
+					});
+				if (i != end(result.recent)) {
+					std::rotate(front, i, i + 1);
+					++front;
+				}
+			}
+		}
 		if (!limited && result.recent.size() > kPopularCount) {
 			result.recent.erase(
 				begin(result.recent) + kPopularCount,
@@ -1599,6 +1622,12 @@ void Reactions::send(
 					if (!chosen.empty()) {
 						const auto &last = chosen.back();
 						if (!last.emoji().isEmpty()) {
+							// Frequently used: the reactions of the menu.
+							if (const auto emoji = Ui::Emoji::Find(
+									last.emoji())) {
+								Core::App().settings().incrementRecentEmoji(
+									{ emoji });
+							}
 							const auto eid = MtsLink::emojiToId(
 								last.emoji());
 							mts->sending()->addReaction(
