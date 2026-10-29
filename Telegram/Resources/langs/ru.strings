@@ -5592,7 +5592,7 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_replies_header#few" = "{count} сообщения";
 "lng_replies_header#many" = "{count} сообщений";
 "lng_replies_header#other" = "{count} сообщения";
-"lng_replies_header_none" = "Комментарии";
+"lng_replies_header_none" = "Сообщения загружаются";
 "lng_replies_view_topic" = "Просмотреть в теме";
 "lng_comments_header#one" = "{count} комментарий";
 "lng_comments_header#few" = "{count} комментария";
@@ -7137,6 +7137,7 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_filters_hide_all_about" = "В списке папок останутся только ваши папки. Работает, если создана хотя бы одна папка.";
 "lng_mtslink_notifications" = "Уведомления";
 "lng_mtslink_hide_threads_mark" = "Скрыть отметку комментариев";
+"lng_mtslink_thread_no_comments" = "Нет сообщений";
 "lng_mtslink_menu_reactions_frequent" = "Часто используемые реакции в меню";
 "lng_mtslink_menu_reactions_standard" = "Стандартные реакции в меню";
 "lng_mtslink_show_threads_mark" = "Показывать отметку комментариев";

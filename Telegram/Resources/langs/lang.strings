@@ -5185,7 +5185,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_replies_view_thread" = "View Thread";
 "lng_replies_header#one" = "{count} reply";
 "lng_replies_header#other" = "{count} replies";
-"lng_replies_header_none" = "Replies";
+"lng_replies_header_none" = "Loading messages";
 "lng_replies_view_topic" = "View in Topic";
 "lng_comments_header#one" = "{count} comment";
 "lng_comments_header#other" = "{count} comments";
@@ -6651,6 +6651,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_filters_hide_all_about" = "Only your folders are shown in the list of folders. Works if you have at least one folder.";
 "lng_mtslink_notifications" = "Notifications";
 "lng_mtslink_hide_threads_mark" = "Hide the threads mark";
+"lng_mtslink_thread_no_comments" = "No messages";
 "lng_mtslink_menu_reactions_frequent" = "Frequently used reactions in the menu";
 "lng_mtslink_menu_reactions_standard" = "Standard reactions in the menu";
 "lng_mtslink_show_threads_mark" = "Show the threads mark";

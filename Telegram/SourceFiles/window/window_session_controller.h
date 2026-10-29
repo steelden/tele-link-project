@@ -134,6 +134,8 @@ bool operator!=(const PeerThemeOverride &a, const PeerThemeOverride &b);
 class DateClickHandler : public ClickHandler {
 public:
 	DateClickHandler(Dialogs::Key chat, QDate date);
+	// MTS Link: in the thread of the message.
+	DateClickHandler(Dialogs::Key chat, QDate date, MsgId repliesRootId);
 
 	void setDate(QDate date);
 	void onClick(ClickContext context) const override;
@@ -142,6 +144,7 @@ private:
 	Dialogs::Key _chat;
 	base::weak_ptr<Data::ForumTopic> _weak;
 	QDate _date;
+	MsgId _repliesRootId = 0;
 
 };
 
@@ -581,6 +584,8 @@ public:
 		bool mediaPhoto = false;
 		bool mediaVideo = false;
 		Fn<void(FullMsgId, Fn<void()>)> customJump;
+		// MTS Link: the jump in the thread of the message.
+		MsgId repliesRootId = 0;
 	};
 	void showCalendar(ShowCalendarDescriptor &&descriptor);
 

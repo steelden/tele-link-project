@@ -3445,6 +3445,16 @@ void ApiWrap::resolveJumpToTime(
 		Dialogs::Key chat,
 		TimeId when,
 		Fn<void(not_null<PeerData*>, MsgId)> callback) {
+	if (const auto peer = chat.peer()
+		; peer
+		&& !chat.topic()
+		&& MtsLink::hasChatId(peer->id)
+		&& !MtsLink::isThreadPeer(peer->id)) {
+		MtsLink::resolveJumpToTime(_session, peer->id, when, [=](MsgId id) {
+			callback(peer, id);
+		});
+		return;
+	}
 	if (const auto peer = chat.peer()) {
 		const auto topic = chat.topic();
 		const auto sublist = chat.sublist();

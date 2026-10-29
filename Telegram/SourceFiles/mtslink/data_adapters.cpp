@@ -8822,55 +8822,177 @@ void navigateToChat(
 	if (!messageId.isEmpty()) {
 		const auto bareId = uuidToBareId(messageId);
 		const auto msgId = MsgId(bareId & 0x7FFFFFFFLL);
-		const auto item = controller->session().data().message(
-			peerId, msgId);
-		if (item) {
-			controller->showPeerHistory(peerId, way, msgId);
-		} else {
-			const auto mts = controller->session().account().mtsLinkSession();
-			if (mts) {
-				const auto weak = my.sessionWindow;
-				const auto conn = std::make_shared<QMetaObject::Connection>();
-				*conn = QObject::connect(
-					mts->messages(),
-					&Api::Messages::aroundMessagesLoaded,
-					[weak, peerId, msgId, chatId, messageId, conn](
-							const ChatId &cid,
-							const MessageId &targetId,
-							const QList<Api::MessageData> &messages,
-							const QList<Api::MemberProfile> &profiles) {
-						if (cid != chatId || targetId != messageId) {
-							return;
-						}
-						QObject::disconnect(*conn);
-						const auto ctrl = weak.get();
-						if (!ctrl) {
-							return;
-						}
-						for (const auto &p : profiles) {
-							applyUserData(&ctrl->session(), p);
-						}
-						for (const auto &src : messages) {
-							addMessage(&ctrl->session(), src);
-						}
-						const auto w = Window::SectionShow::Way::ClearStack;
-						const auto loaded = ctrl->session().data().message(
-							peerId, msgId);
-						if (loaded) {
-							ctrl->showPeerHistory(peerId, w, msgId);
-						} else {
-							ctrl->showPeerHistory(peerId, w);
-						}
-					});
-				mts->messages()->loadAround(chatId, messageId, 50);
-			} else {
-				controller->showPeerHistory(peerId, way);
-			}
-		}
+		// Not loaded: the history widget loads around it (the slice replaces
+		// the shown messages, loaded up and down from it).
+		registerMessageId(peerId, msgId, messageId);
+		controller->showPeerHistory(peerId, way, msgId);
 	} else {
 		controller->showPeerHistory(peerId, way);
 	}
 }
+
+namespace {
+
+// The ids of the messages are UUIDv6: the time of the message in them, the
+// messages are loaded from the id of the time.
+[[nodiscard]] QString TimeCursorId(TimeId when) {
+	constexpr auto kGregorianOffset = 0x01B21DD213814000ULL;
+	const auto ticks = uint64(when) * 10'000'000ULL + kGregorianOffset;
+	return u"%1-%2-6%3-8000-000000000000"_q
+		.arg(uint(ticks >> 28), 8, 16, QChar('0'))
+		.arg(uint((ticks >> 12) & 0xFFFF), 4, 16, QChar('0'))
+		.arg(uint(ticks & 0xFFF), 3, 16, QChar('0'));
+}
+
+} // namespace
+} // namespace
+
+void resolveJumpToTime(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		TimeId when,
+		Fn<void(MsgId)> done) {
+	const auto mts = session->account().mtsLinkSession();
+	const auto chatId = peerIdToChatId(peerId);
+	if (!mts || chatId.isEmpty()) {
+		done(MsgId());
+		return;
+	}
+	const auto cursor = TimeCursorId(when);
+	const auto weak = base::make_weak(session);
+	const auto conn = std::make_shared<QMetaObject::Connection>();
+	*conn = QObject::connect(
+		mts->messages(),
+		&Api::Messages::aroundMessagesLoaded,
+		[=](
+				const ChatId &cid,
+				const MessageId &targetId,
+				const QList<Api::MessageData> &messages,
+				const QList<Api::MemberProfile> &profiles) {
+			if (cid != chatId || targetId != cursor) {
+				return;
+			}
+			QObject::disconnect(*conn);
+			const auto strong = weak.get();
+			if (!strong) {
+				return;
+			}
+			for (const auto &p : profiles) {
+				applyUserData(strong, p);
+			}
+			if (messages.isEmpty()) {
+				// Before the first message of the chat nothing is around the
+				// time: the first message after it.
+				const auto mts = strong->account().mtsLinkSession();
+				if (!mts) {
+					done(MsgId());
+					return;
+				}
+				mts->messages()->loadAfter(chatId, cursor, 1, [=](
+						QList<Api::MessageData> messages,
+						QList<Api::MemberProfile> profiles) {
+					const auto strong = weak.get();
+					if (!strong) {
+						return;
+					}
+					for (const auto &p : profiles) {
+						applyUserData(strong, p);
+					}
+					const auto target = messages.isEmpty()
+						? nullptr
+						: &*ranges::min_element(
+							messages,
+							ranges::less(),
+							&Api::MessageData::createdAt);
+					const auto msgId = target
+						? MsgId(uuidToBareId(target->id) & 0x7FFFFFFFLL)
+						: MsgId();
+					if (msgId) {
+						registerMessageId(peerId, msgId, target->id);
+					}
+					done(msgId);
+				});
+				return;
+			}
+			// The oldest not older than the time, else the newest.
+			const auto from = qint64(when) * 1000;
+			const Api::MessageData *target = nullptr;
+			const Api::MessageData *newest = nullptr;
+			// Only found here: the history widget loads around it (the slice
+			// replaces the shown messages, loaded up and down from it).
+			for (const auto &src : messages) {
+				if (src.createdAt >= from
+					&& (!target || src.createdAt < target->createdAt)) {
+					target = &src;
+				}
+				if (!newest || src.createdAt > newest->createdAt) {
+					newest = &src;
+				}
+			}
+			if (!target) {
+				target = newest;
+			}
+			const auto msgId = target
+				? MsgId(uuidToBareId(target->id) & 0x7FFFFFFFLL)
+				: MsgId();
+			if (msgId) {
+				registerMessageId(peerId, msgId, target->id);
+			}
+			done(msgId);
+		});
+	mts->messages()->loadAround(chatId, cursor, 50);
+}
+
+void resolveThreadJumpToTime(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		MsgId rootId,
+		TimeId when,
+		Fn<void(MsgId)> done) {
+	const auto mts = session->account().mtsLinkSession();
+	const auto chatId = peerIdToChatId(peerId);
+	const auto parentId = msgIdToMtsLinkId(peerId, rootId);
+	if (!mts || chatId.isEmpty() || parentId.isEmpty()) {
+		done(MsgId());
+		return;
+	}
+	// A few: the deleted ones are not in the answer.
+	constexpr auto kLimit = 10;
+	const auto weak = base::make_weak(session);
+	mts->messages()->loadThreadPage(
+		chatId,
+		parentId,
+		TimeCursorId(when),
+		true,
+		kLimit,
+		[=](
+				QList<Api::MessageData> messages,
+				QList<Api::MemberProfile> profiles) {
+			const auto strong = weak.get();
+			if (!strong) {
+				return;
+			}
+			for (const auto &p : profiles) {
+				applyUserData(strong, p);
+			}
+			// The thread list loads the pages till it (as a reply link).
+			const auto target = messages.isEmpty()
+				? nullptr
+				: &*ranges::min_element(
+					messages,
+					ranges::less(),
+					&Api::MessageData::createdAt);
+			const auto msgId = target
+				? MsgId(uuidToBareId(target->id) & 0x7FFFFFFFLL)
+				: MsgId();
+			if (msgId) {
+				registerMessageId(peerId, msgId, target->id);
+			}
+			done(msgId);
+		});
+}
+
+namespace {
 
 bool tryNavigateDirectUrl(
 		const QUrl &parsed,

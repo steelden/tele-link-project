@@ -520,6 +520,22 @@ void fetchThreadLastRead(
 	PeerId peerId,
 	MsgId rootId);
 
+// The first message not older than the time (the jump to a date of the
+// calendar): loaded around it, 0 if the chat has nothing.
+void resolveJumpToTime(
+	not_null<Main::Session*> session,
+	PeerId peerId,
+	TimeId when,
+	Fn<void(MsgId)> done);
+// The same in a thread: the first reply not older than the time, 0 if the
+// thread has nothing after it.
+void resolveThreadJumpToTime(
+	not_null<Main::Session*> session,
+	PeerId peerId,
+	MsgId rootId,
+	TimeId when,
+	Fn<void(MsgId)> done);
+
 void setPendingTempMessage(PeerId peerId, MsgId msgId);
 void addPendingThreadSend(const QString &clientId);
 [[nodiscard]] bool takePendingThreadSend(const QString &clientId);

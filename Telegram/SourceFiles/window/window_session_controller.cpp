@@ -362,6 +362,16 @@ DateClickHandler::DateClickHandler(Dialogs::Key chat, QDate date)
 , _date(date) {
 }
 
+DateClickHandler::DateClickHandler(
+	Dialogs::Key chat,
+	QDate date,
+	MsgId repliesRootId)
+: _chat(chat)
+, _weak(chat.topic())
+, _date(date)
+, _repliesRootId(repliesRootId) {
+}
+
 void DateClickHandler::setDate(QDate date) {
 	_date = date;
 }
@@ -369,7 +379,15 @@ void DateClickHandler::setDate(QDate date) {
 void DateClickHandler::onClick(ClickContext context) const {
 	const auto my = context.other.value<ClickHandlerContext>();
 	if (const auto window = my.sessionWindow.get()) {
-		if (!_chat.topic()) {
+		if (_repliesRootId) {
+			window->showCalendar({
+				.chat = _chat,
+				.date = _date,
+				.mediaPhoto = true,
+				.mediaVideo = true,
+				.repliesRootId = _repliesRootId,
+			});
+		} else if (!_chat.topic()) {
 			window->showCalendar({ _chat, _date, true, true });
 		} else if (const auto strong = _weak.get()) {
 			window->showCalendar({ strong, _date, true, true });
@@ -3017,6 +3035,7 @@ void SessionController::showCalendar(ShowCalendarDescriptor &&descriptor) {
 		? currentPeerDate
 		: QDate::currentDate();
 	const auto performJump = descriptor.customJump;
+	const auto repliesRootId = descriptor.repliesRootId;
 	struct ButtonState {
 		enum class Type {
 			None,
@@ -3137,7 +3156,27 @@ void SessionController::showCalendar(ShowCalendarDescriptor &&descriptor) {
 				}
 			}
 		};
-		if ((!topic && !sublist) || weakThread) {
+		if (repliesRootId) {
+			// In the thread: the thread list loads the pages till the reply.
+			const auto when = TimeId(date.startOfDay().toSecsSinceEpoch());
+			MtsLink::resolveThreadJumpToTime(
+				&session(),
+				history->peer->id,
+				repliesRootId,
+				when,
+				[=](MsgId id) {
+					if (const auto strong = weak.get()) {
+						if (id) {
+							strong->showRepliesForMessage(
+								history,
+								repliesRootId,
+								id,
+								SectionShow::Way::Forward);
+						}
+						strong->hideLayer(anim::type::normal);
+					}
+				});
+		} else if ((!topic && !sublist) || weakThread) {
 			session().api().resolveJumpToDate(chat, date, open);
 		}
 	};

@@ -4230,6 +4230,9 @@ void ChatWidget::setReplies(std::shared_ptr<Data::RepliesList> replies) {
 					: tr::lng_contacts_loading)
 				: areComments
 				? tr::lng_comments_header_none
+				: count.has_value()
+				// MTS Link: loaded, the thread is empty.
+				? tr::lng_mtslink_thread_no_comments
 				: tr::lng_replies_header_none)();
 	}) | rpl::flatten_latest(
 	) | rpl::on_next([=](const QString &text) {
@@ -5453,9 +5456,13 @@ void ChatWidget::listContentRefreshed() {
 void ChatWidget::listUpdateDateLink(
 		ClickHandlerPtr &link,
 		not_null<Element*> view) {
+	// MTS Link: the threads are not topics, the jump in the thread.
+	const auto repliesRootId = (!_topic && _repliesRootId)
+		? _repliesRootId
+		: MsgId();
 	const auto key = _topic
 		? Dialogs::Key(_topic)
-		: (mode() == Mode::History)
+		: (mode() == Mode::History || repliesRootId)
 		? Dialogs::Key(_history)
 		: Dialogs::Key();
 	if (!key) {
@@ -5464,7 +5471,12 @@ void ChatWidget::listUpdateDateLink(
 	}
 	const auto date = view->dateTime().date();
 	if (!link) {
-		link = std::make_shared<Window::DateClickHandler>(key, date);
+		link = repliesRootId
+			? std::make_shared<Window::DateClickHandler>(
+				key,
+				date,
+				repliesRootId)
+			: std::make_shared<Window::DateClickHandler>(key, date);
 	} else {
 		static_cast<Window::DateClickHandler*>(link.get())->setDate(date);
 	}

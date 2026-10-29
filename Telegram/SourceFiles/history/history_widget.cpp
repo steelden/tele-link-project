@@ -5493,7 +5493,12 @@ void HistoryWidget::loadMessagesDown() {
 			if (!items.empty()) {
 				history->addCreatedNewerSlice(items);
 			}
-			if (messages.size() < kLimit) {
+			// Till the bottom: the last message of the chat is shown (the
+			// short pages are not the bottom, the deleted messages are not
+			// in them and a failed request is empty).
+			const auto lastMessage = history->lastMessage();
+			const auto reached = !lastMessage || lastMessage->mainView();
+			if (reached) {
 				history->mtsLinkSetLoadedAtBottom(true);
 			}
 			if (_history != history) {
@@ -5503,7 +5508,10 @@ void HistoryWidget::loadMessagesDown() {
 			if (_list) {
 				_list->update();
 			}
-			preloadHistoryIfNeeded();
+			// Nothing new: no repeat at once, the scroll repeats it.
+			if (!items.empty()) {
+				preloadHistoryIfNeeded();
+			}
 		}));
 		return;
 	}
