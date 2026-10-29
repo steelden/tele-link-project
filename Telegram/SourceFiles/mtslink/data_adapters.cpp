@@ -1353,6 +1353,29 @@ TextWithEntities parseMentionedText(
 			atLineStart = false;
 		}
 
+		// The inline code as is: no mentions and links in it.
+		if (unescaped[pos] == '`') {
+			if (codeStart >= 0) {
+				entities.push_back(EntityInText(
+					EntityType::Code,
+					codeStart,
+					result.size() - codeStart));
+				codeStart = -1;
+				inCode = false;
+			} else {
+				codeStart = result.size();
+				inCode = true;
+			}
+			++pos;
+			continue;
+		}
+
+		if (inCode) {
+			result += unescaped[pos];
+			++pos;
+			continue;
+		}
+
 		if (pos + 3 < len
 			&& unescaped[pos] == '<'
 			&& unescaped[pos + 1] == '@'
@@ -1424,28 +1447,6 @@ TextWithEntities parseMentionedText(
 					}
 				}
 			}
-		}
-
-		if (unescaped[pos] == '`') {
-			if (codeStart >= 0) {
-				entities.push_back(EntityInText(
-					EntityType::Code,
-					codeStart,
-					result.size() - codeStart));
-				codeStart = -1;
-				inCode = false;
-			} else {
-				codeStart = result.size();
-				inCode = true;
-			}
-			++pos;
-			continue;
-		}
-
-		if (inCode) {
-			result += unescaped[pos];
-			++pos;
-			continue;
 		}
 
 		if (pos + 1 < len
@@ -1591,6 +1592,9 @@ TextWithEntities parseMentionedText(
 		}
 	}
 
+	// The links are not found in the code: the existing entities are
+	// skipped by the parsing if sorted.
+	ranges::stable_sort(entities, ranges::less(), &EntityInText::offset);
 	auto parsed = TextWithEntities{ result, entities };
 	TextUtilities::ParseEntities(parsed, TextParseLinks);
 	return parsed;
@@ -8438,6 +8442,16 @@ MtsLinkMessageContent convertMentionsForSending(
 	// format), ``` in the markdown for the clients without them.
 	struct CodeRange { int offset, length; };
 	QList<CodeRange> codeRanges;
+	// The code as is: no links and mentions in it.
+	QList<CodeRange> inlineCodeRanges;
+	const auto inAnyCode = [&](int offset, int length) {
+		const auto overlaps = [&](const CodeRange &c) {
+			return (offset < c.offset + c.length)
+				&& (offset + length > c.offset);
+		};
+		return ranges::any_of(codeRanges, overlaps)
+			|| ranges::any_of(inlineCodeRanges, overlaps);
+	};
 
 	struct BlockquoteRange { int offset, length; };
 	QList<BlockquoteRange> blockquoteRanges;
@@ -8487,6 +8501,9 @@ MtsLinkMessageContent convertMentionsForSending(
 				allMdMarkers[tag.offset + tag.length] += close;
 				codeRanges.push_back({ tag.offset, tag.length });
 			} else {
+				if (tag.id == u"`"_q) {
+					inlineCodeRanges.push_back({ tag.offset, tag.length });
+				}
 				const auto mit = mdMap.constFind(tag.id);
 				if (mit != mdMap.constEnd()) {
 					allMdMarkers[tag.offset] += *mit;
@@ -8500,6 +8517,9 @@ MtsLinkMessageContent convertMentionsForSending(
 		}
 	}
 
+	hits.erase(ranges::remove_if(hits, [&](const TagHit &hit) {
+		return inAnyCode(hit.offset, hit.length);
+	}), hits.end());
 	{
 		auto parsed = TextWithEntities{ text };
 		TextUtilities::ParseEntities(parsed, TextParseLinks);
@@ -8509,6 +8529,9 @@ MtsLinkMessageContent convertMentionsForSending(
 			}
 			const auto eo = entity.offset();
 			const auto el = entity.length();
+			if (inAnyCode(eo, el)) {
+				continue;
+			}
 			bool overlaps = false;
 			for (const auto &h : hits) {
 				if (eo < h.offset + h.length && eo + el > h.offset) {
