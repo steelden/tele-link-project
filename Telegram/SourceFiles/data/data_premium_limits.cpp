@@ -11,6 +11,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 
 namespace Data {
+namespace {
+
+// MTS Link has no limit of the text of the message (sent as a whole, not cut
+// in parts as in Telegram): the edit and the captions are not limited too.
+constexpr auto kMtsLinkTextLength = 1 << 24;
+
+} // namespace
 
 PremiumLimits::PremiumLimits(not_null<Main::Session*> session)
 : _session(session) {
@@ -161,9 +168,7 @@ int PremiumLimits::captionLengthPremium() const {
 	return appConfigLimit("caption_length_limit_premium", 2048);
 }
 int PremiumLimits::captionLengthCurrent() const {
-	return isPremium()
-		? captionLengthPremium()
-		: captionLengthDefault();
+	return kMtsLinkTextLength;
 }
 
 int PremiumLimits::messageLengthDefault() const {
@@ -175,9 +180,7 @@ int PremiumLimits::messageLengthPremium() const {
 }
 
 int PremiumLimits::messageLengthCurrent() const {
-	return isPremium()
-		? messageLengthPremium()
-		: messageLengthDefault();
+	return kMtsLinkTextLength;
 }
 
 int PremiumLimits::uploadMaxDefault() const {
