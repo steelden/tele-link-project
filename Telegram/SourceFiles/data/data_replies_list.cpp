@@ -33,7 +33,7 @@ namespace Data {
 namespace {
 
 constexpr auto kMessagesPerPage = 50;
-constexpr auto kReadRequestTimeout = crl::time(1000);
+constexpr auto kReadRequestTimeout = crl::time(100);
 constexpr auto kMaxMessagesToDeleteMyTopic = 10;
 
 [[nodiscard]] HistoryItem *GenerateDivider(
@@ -1667,11 +1667,35 @@ void RepliesList::sendReadTillRequest() {
 					}
 				}
 			}
+			// Reading the newest shown reply reads the newest one on the
+			// server too (deleted or not loaded yet), otherwise the server
+			// keeps the thread unread.
+			const auto lastChild = MtsLink::threadLastChildId(
+				_history->peer->id,
+				_rootId);
+			if (!mtsId.isEmpty()
+				&& !lastChild.isEmpty()
+				&& lastChild != mtsId
+				&& _skippedAfter == 0
+				&& !_list.empty()
+				&& _list.front() == tillId
+				&& MtsLink::isNewerMessageId(lastChild, mtsId)) {
+				LOG(("MtsLink Read: thread %1 the last child '%2' instead"
+					).arg(_rootId.bare
+					).arg(lastChild));
+				mtsId = lastChild;
+			}
 			// A message being sent has a local id (not on the server).
 			const auto tillItem = _history->owner().message(
 				_history->peer->id,
 				tillId);
 			const auto sending = tillItem && tillItem->isSending();
+			LOG(("MtsLink Read: thread %1 of %2 till %3 '%4'%5"
+				).arg(_rootId.bare
+				).arg(chatId
+				).arg(tillId.bare
+				).arg(mtsId
+				).arg(sending ? " (being sent, skipped)" : ""));
 			if (!chatId.isEmpty() && !mtsId.isEmpty() && !sending) {
 				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);

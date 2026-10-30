@@ -565,6 +565,12 @@ void loadMessagesFromCache(
 void saveChatListToCache(
 	not_null<Main::Session*> session,
 	const QList<Api::ChannelData> &channels);
+// The unread counter from the server event in the cached list (a chat read
+// before the exit was unread at the start till the server list).
+void updateCachedChatUnread(
+	not_null<Main::Session*> session,
+	const QString &chatId,
+	int count);
 void loadChatListFromCache(
 	not_null<Main::Session*> session);
 
@@ -691,6 +697,13 @@ void searchOrganizationMembers(
 [[nodiscard]] bool isGroupChat(PeerId peerId);
 // Compares the UUIDv6 message ids by time.
 [[nodiscard]] bool isNewerMessageId(const QString &a, const QString &b);
+// The newest reply of a thread on the server (from the threads list): read
+// with the newest shown one, a deleted or not loaded one kept it unread.
+void setThreadLastChildId(
+	PeerId parentPeerId,
+	MsgId rootId,
+	const QString &messageId);
+[[nodiscard]] QString threadLastChildId(PeerId parentPeerId, MsgId rootId);
 // The server rejects emoji in channel and group chat names.
 [[nodiscard]] bool containsEmoji(const QString &text);
 // Public channels can be found and joined by everyone in the organization.

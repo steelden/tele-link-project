@@ -2260,13 +2260,39 @@ QSet<PeerId> CachedThreadUnread;
 
 constexpr auto kMtsLinkThreadsListTag = uint64(0xBC0E'0000'0000'0000ULL);
 
+// The list in the cache, its unread counters are updated by the events (a
+// thread read before the exit was unread at the start till the server list).
+QJsonObject CachedThreadsList;
+
 void saveThreadsListToCache(
 		not_null<Main::Session*> session,
 		const QJsonObject &value) {
+	CachedThreadsList = value;
 	auto data = QJsonDocument(value).toJson(QJsonDocument::Compact);
 	session->data().cache().put(
 		{ kMtsLinkThreadsListTag, 0 },
 		std::move(data));
+}
+
+void updateCachedThreadUnread(
+		not_null<Main::Session*> session,
+		const QString &threadId,
+		int count) {
+	auto items = CachedThreadsList.value(u"items"_q).toArray();
+	for (auto i = 0; i != items.size(); ++i) {
+		auto item = items[i].toObject();
+		if (item.value(u"id"_q).toString() != threadId) {
+			continue;
+		} else if (item.value(u"unreadChildrenCount"_q).toInt() == count) {
+			return;
+		}
+		item[u"unreadChildrenCount"_q] = count;
+		items[i] = item;
+		auto value = CachedThreadsList;
+		value[u"items"_q] = items;
+		saveThreadsListToCache(session, value);
+		return;
+	}
 }
 
 void loadThreadsListFromCache(not_null<Main::Session*> session) {
@@ -2286,6 +2312,7 @@ void loadThreadsListFromCache(not_null<Main::Session*> session) {
 			if (value.isEmpty() || !mts) {
 				return;
 			}
+			CachedThreadsList = value;
 			mts->threads()->applyCachedList(value);
 		});
 	});
@@ -2333,6 +2360,21 @@ void applyThreadsList(
 			: base::unixtime::now();
 		history->setChatListTimeId(date);
 
+		if (thread.unreadChildrenCount > 0) {
+			LOG(("MtsLink Read: thread list '%1' of %2 (root %3, %4) "
+				"unread %5 of %6, the last child '%7'"
+				).arg(thread.id
+				).arg(thread.chatId
+				).arg(localMsgId(thread.id).bare
+				).arg(ThreadsListFromServer ? "server" : "cache"
+				).arg(thread.unreadChildrenCount
+				).arg(thread.childrenCount
+				).arg(thread.lastChildId));
+		}
+		setThreadLastChildId(
+			chatIdToPeerId(thread.chatId),
+			localMsgId(thread.id),
+			thread.lastChildId);
 		if (thread.unreadChildrenCount > 0
 			|| CachedThreadUnread.remove(peerId)) {
 			history->setUnreadCount(thread.unreadChildrenCount);
@@ -4382,6 +4424,14 @@ void applyDialogData(
 		history->setChatListTimeId(TimeId(1));
 	}
 	if (src.unreadCount >= 0 && src.lastMessageTimestamp) {
+		if (src.unreadCount > 0) {
+			LOG(("MtsLink Read: list %1 '%2' unread %3, last '%4' at %5"
+				).arg(src.id
+				).arg(src.name
+				).arg(src.unreadCount
+				).arg(src.lastMessageId
+				).arg(src.lastMessageTimestamp / 1000));
+		}
 		history->setUnreadCount(src.unreadCount);
 	}
 	session->data().notifySettings().apply(
@@ -4523,6 +4573,14 @@ void applyChannelData(
 		history->setChatListTimeId(TimeId(1));
 	}
 	if (src.unreadCount >= 0 && src.lastMessageTimestamp) {
+		if (src.unreadCount > 0) {
+			LOG(("MtsLink Read: list %1 '%2' unread %3, last '%4' at %5"
+				).arg(src.id
+				).arg(src.name
+				).arg(src.unreadCount
+				).arg(src.lastMessageId
+				).arg(src.lastMessageTimestamp / 1000));
+		}
 		history->setUnreadCount(src.unreadCount);
 	}
 	session->data().notifySettings().apply(
@@ -6230,6 +6288,7 @@ void handleChatEvent(
 			const auto rootId = localMsgId(parentId);
 			const auto entry = threadEntryHistory(session, peerId, rootId);
 			const auto count = value.value("unreadMessageCount").toInt();
+			updateCachedThreadUnread(session, parentId, count);
 			const auto pending = PendingThreadUnread.find(
 				qMakePair(peerId, rootId));
 			// Read in another client: the replies to a thread without
@@ -6270,6 +6329,7 @@ void handleChatEvent(
 			return;
 		}
 		const auto count = value.value("unreadMessageCount").toInt();
+		updateCachedChatUnread(session, eventChatId, count);
 		const auto wasReadRequest = consumeReadRequestSent(eventChatId);
 		// The server counter is the exact one: a chat read in another
 		// client comes here only (the thread counters have "parentId").
@@ -7240,6 +7300,18 @@ bool replacePendingWithReal(
 	}
 	session->data().requestItemTextRefresh(item);
 	item->invalidateChatListEntry();
+	if (!realMsg.parentId.isEmpty()) {
+		if (const auto mts = session->account().mtsLinkSession()
+			; mts && realMsg.authorId == mts->userId()) {
+			const auto chatId = peerIdToChatId(peerId);
+			LOG(("MtsLink Read: thread '%1' of %2 till the own '%3'"
+				).arg(realMsg.parentId
+				).arg(chatId
+				).arg(realMsg.id));
+			markReadRequestSent(chatId);
+			mts->sending()->readMessage(chatId, realMsg.id);
+		}
+	}
 	return true;
 }
 
@@ -8119,13 +8191,31 @@ void loadMessagesFromCache(
 	});
 }
 
+QList<Api::ChannelData> CachedChatList;
+
 void saveChatListToCache(
 		not_null<Main::Session*> session,
 		const QList<Api::ChannelData> &channels) {
+	CachedChatList = channels;
 	auto data = serializeChatList(channels);
 	session->data().cache().put(
 		chatListCacheKey(),
 		std::move(data));
+}
+
+void updateCachedChatUnread(
+		not_null<Main::Session*> session,
+		const QString &chatId,
+		int count) {
+	for (auto &chat : CachedChatList) {
+		if (chat.id != chatId) {
+			continue;
+		} else if (chat.unreadCount != count) {
+			chat.unreadCount = count;
+			saveChatListToCache(session, CachedChatList);
+		}
+		return;
+	}
 }
 
 void loadChatListFromCache(
@@ -8140,6 +8230,9 @@ void loadChatListFromCache(
 			const auto strong = weak.get();
 			LOG(("MtsLink Cache: loaded %1 chats from cache")
 				.arg(cached->size()));
+			if (CachedChatList.isEmpty()) {
+				CachedChatList = *cached;
+			}
 			applyChatList(strong, *cached);
 		});
 	});
@@ -9884,6 +9977,25 @@ bool containsEmoji(const QString &text) {
 		}
 	}
 	return false;
+}
+
+namespace {
+
+QHash<quint64, QString> ThreadLastChildIds;
+
+} // namespace
+
+void setThreadLastChildId(
+		PeerId parentPeerId,
+		MsgId rootId,
+		const QString &messageId) {
+	if (!messageId.isEmpty()) {
+		ThreadLastChildIds[makeMsgKey(parentPeerId, rootId)] = messageId;
+	}
+}
+
+QString threadLastChildId(PeerId parentPeerId, MsgId rootId) {
+	return ThreadLastChildIds.value(makeMsgKey(parentPeerId, rootId));
 }
 
 bool isNewerMessageId(const QString &a, const QString &b) {
