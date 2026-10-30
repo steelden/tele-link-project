@@ -46,6 +46,10 @@ public:
 	[[nodiscard]] WebRequestType requestType() const;
 	[[nodiscard]] bool streamLoading() const;
 
+	// MTS Link: the files of the documents by their urls, the saved path
+	// is remembered by the media key (downloaded again on each start).
+	void setFileLocationKey(MediaKey key);
+
 	int64 currentOffset() const override;
 
 private:
@@ -63,6 +67,7 @@ private:
 	void loadFailed();
 
 	const QString _url;
+	std::optional<MediaKey> _fileLocationKey;
 	int64 _ready = 0;
 	int64 _streamedOffset = 0;
 	WebRequestType _requestType = {};

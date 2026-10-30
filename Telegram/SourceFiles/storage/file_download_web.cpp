@@ -785,8 +785,12 @@ Storage::Cache::Key webFileLoader::cacheKey() const {
 	return Data::UrlCacheKey(_url);
 }
 
+void webFileLoader::setFileLocationKey(MediaKey key) {
+	_fileLocationKey = key;
+}
+
 std::optional<MediaKey> webFileLoader::fileLocationKey() const {
-	return std::nullopt;
+	return _fileLocationKey;
 }
 
 void webFileLoader::cancelHook() {

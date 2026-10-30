@@ -303,8 +303,10 @@ void DocumentMedia::checkStickerLarge() {
 void DocumentMedia::automaticLoad(
 		Data::FileOrigin origin,
 		const HistoryItem *item) {
+	// The saved file location is read from the local storage: after a
+	// restart the files were downloaded again with a new name each time.
 	if (_owner->status != FileReady
-		|| loaded()
+		|| loaded(true)
 		|| _owner->uploading()
 		|| _owner->cancelled()) {
 		return;

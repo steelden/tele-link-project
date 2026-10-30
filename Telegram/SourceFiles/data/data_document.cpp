@@ -1298,7 +1298,7 @@ void DocumentData::save(
 				cacheTag());
 		} else if (!_access && !_url.isEmpty()) {
 			// MTS Link: the big files to the file only, as by MTP.
-			_loader = std::make_unique<webFileLoader>(
+			auto loader = std::make_unique<webFileLoader>(
 				&session(),
 				_url,
 				toFile,
@@ -1306,6 +1306,9 @@ void DocumentData::save(
 				fromCloud,
 				autoLoading,
 				cacheTag());
+			// The saved file is found by the media key after a restart.
+			loader->setFileLocationKey(mediaKey());
+			_loader = std::move(loader);
 		} else {
 			_loader = std::make_unique<mtpFileLoader>(
 				&session(),
@@ -2098,7 +2101,19 @@ bool DocumentData::storyMedia() const {
 }
 
 void DocumentData::setContentUrl(const QString &url) {
+	if (_url == url) {
+		return;
+	}
 	_url = url;
+
+	// MTS Link: the saved file is found by the media key, as by MTP in
+	// setRemoteLocation(), else it is downloaded again after a restart.
+	if (!isNull() && !_url.isEmpty() && !_location.check()) {
+		_location = session().local().readFileLocation(mediaKey());
+		if (_location.inMediaCache()) {
+			setLoadedInMediaCacheLocation();
+		}
+	}
 }
 
 void DocumentData::setWebLocation(const WebFileLocation &location) {
