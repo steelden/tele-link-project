@@ -8,10 +8,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_reply_button.h"
 
 #include "history/view/history_view_cursor_state.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "ui/chat/chat_style.h"
 #include "ui/effects/ripple_animation.h"
+#include "ui/painter.h"
 #include "lang/lang_keys.h"
 #include "styles/style_chat.h"
+#include "styles/style_menu_icons.h"
 #include "styles/style_widgets.h"
 
 namespace HistoryView::ReplyButton {
@@ -48,7 +52,40 @@ constexpr auto kButtonHideDelay = crl::time(300);
 
 } // namespace
 
+[[nodiscard]] bool IconButtons() {
+	return Core::App().settings().iconCornerButtons();
+}
+
+[[nodiscard]] int IconInnerWidth() {
+	return st::replyCornerHeight * 2;
+}
+
+[[nodiscard]] int TextInnerWidth(const QString &text) {
+	const auto &padding = st::replyCornerTextPadding;
+	return padding.left()
+		+ st::msgDateTextStyle.font->width(text)
+		+ padding.right();
+}
+
 int ComputeInnerWidth() {
+	return IconButtons() ? IconInnerWidth() : ComputeTextInnerWidth();
+}
+
+namespace {
+
+rpl::event_stream<> StyleChangesStream;
+
+} // namespace
+
+void NotifyStyleChanged() {
+	StyleChangesStream.fire({});
+}
+
+rpl::producer<> StyleChanges() {
+	return StyleChangesStream.events();
+}
+
+int ComputeTextInnerWidth() {
 	struct Cached {
 		QString text;
 		int result = 0;
@@ -56,9 +93,7 @@ int ComputeInnerWidth() {
 	static auto cached = Cached();
 	const auto &text = tr::lng_fast_reply(tr::now);
 	if (cached.text != text) {
-		const auto &padding = st::replyCornerTextPadding;
-		const auto textWidth = st::msgDateTextStyle.font->width(text);
-		cached.result = padding.left() + textWidth + padding.right();
+		cached.result = TextInnerWidth(text);
 		cached.text = text;
 	}
 	return cached.result;
@@ -158,14 +193,15 @@ void Button::applyState(ButtonState state, Fn<void(QRect)> update) {
 	_state = state;
 }
 
-Manager::Manager(Fn<void(QRect)> buttonUpdate, const QString &text)
-: _outer([&] {
-	const auto &t = text.isEmpty() ? tr::lng_fast_reply(tr::now) : text;
-	const auto &p = st::replyCornerTextPadding;
-	const auto w = p.left() + st::msgDateTextStyle.font->width(t) + p.right();
-	return QRect(QPoint(), QSize(w, st::replyCornerHeight))
-		.marginsAdded(st::replyCornerShadow).size();
-}())
+Manager::Manager(
+	Fn<void(QRect)> buttonUpdate,
+	const QString &text,
+	const style::icon *icon)
+: _outer(QRect(QPoint(), QSize(
+	(IconButtons()
+		? IconInnerWidth()
+		: TextInnerWidth(text.isEmpty() ? tr::lng_fast_reply(tr::now) : text)),
+	st::replyCornerHeight)).marginsAdded(st::replyCornerShadow).size())
 , _inner(QRect(QPoint(), QSize(
 	_outer.width() - st::replyCornerShadow.left() - st::replyCornerShadow.right(),
 	st::replyCornerHeight)))
@@ -175,10 +211,12 @@ Manager::Manager(Fn<void(QRect)> buttonUpdate, const QString &text)
 	_inner.height())
 , _buttonShowTimer([=] { showButtonDelayed(); })
 , _buttonUpdate(std::move(buttonUpdate))
-, _text(st::msgDateTextStyle.font->width(
-	text.isEmpty() ? tr::lng_fast_reply(tr::now) : text)) {
-	_text.setText(st::msgDateTextStyle,
-		text.isEmpty() ? tr::lng_fast_reply(tr::now) : text);
+, _icon(IconButtons() ? (icon ? icon : &st::menuIconReply) : nullptr) {
+	if (!_icon) {
+		_text.setText(
+			st::msgDateTextStyle,
+			text.isEmpty() ? tr::lng_fast_reply(tr::now) : text);
+	}
 	_inner.translate(
 		QRect(QPoint(), _outer).center() - _inner.center());
 }
@@ -225,6 +263,12 @@ void Manager::updateButton(ButtonParameters parameters) {
 
 void Manager::showButtonDelayed() {
 	clearAppearAnimations();
+	LOG(("MtsLink CornerButtons: %1 at %2,%3, inner %4, outer %5"
+		).arg(_icon ? "icon" : "text"
+		).arg(_scheduledParameters->center.x()
+		).arg(_scheduledParameters->center.y()
+		).arg(_inner.width()
+		).arg(_outer.width()));
 	_button = std::make_unique<Button>(
 		_buttonUpdate,
 		*_scheduledParameters,
@@ -306,19 +350,42 @@ void Manager::paintButton(
 		}
 	}
 
-	const auto textLeft = position.x()
-		+ _inner.x()
-		+ st::replyCornerTextPadding.left();
-	const auto textTop = position.y()
-		+ _inner.y()
-		+ (_inner.height() - st::msgDateTextStyle.font->height) / 2;
 	const auto &incomingStyle = context.st->messageStyle(false, false);
-	p.setPen(incomingStyle.msgDateFg);
-	p.setFont(st::msgDateTextStyle.font);
-	_text.draw(p, {
-		.position = QPoint(textLeft, textTop),
-		.availableWidth = _text.maxWidth(),
-	});
+	if (!_icon) {
+		const auto textLeft = position.x()
+			+ _inner.x()
+			+ st::replyCornerTextPadding.left();
+		const auto textTop = position.y()
+			+ _inner.y()
+			+ (_inner.height() - st::msgDateTextStyle.font->height) / 2;
+		p.setPen(incomingStyle.msgDateFg);
+		p.setFont(st::msgDateTextStyle.font);
+		_text.draw(p, {
+			.position = QPoint(textLeft, textTop),
+			.availableWidth = _text.maxWidth(),
+		});
+		if (opacity != 1.) {
+			p.setOpacity(1.);
+		}
+		return;
+	}
+	// The menu icon (24px) smaller, in the pill of the date text height.
+	const auto size = _inner.height() - 4;
+	const auto ratio = size / float64(_icon->height());
+	const auto center = QPointF(position + _inner.center())
+		+ QPointF(0.5, 0.5);
+	{
+		auto hq = PainterHighQualityEnabler(p);
+		p.save();
+		p.translate(center);
+		p.scale(ratio, ratio);
+		_icon->paint(
+			p,
+			QPoint(-_icon->width() / 2, -_icon->height() / 2),
+			_icon->width(),
+			incomingStyle.msgDateFg->c);
+		p.restore();
+	}
 	if (opacity != 1.) {
 		p.setOpacity(1.);
 	}

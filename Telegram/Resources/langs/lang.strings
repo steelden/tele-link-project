@@ -6651,6 +6651,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_filters_hide_all_about" = "Only your folders are shown in the list of folders. Works if you have at least one folder.";
 "lng_mtslink_notifications" = "Notifications";
 "lng_mtslink_hide_threads_mark" = "Hide the threads mark";
+"lng_mtslink_corner_buttons" = "Reply and comments buttons";
+"lng_mtslink_corner_buttons_text" = "Text";
+"lng_mtslink_corner_buttons_icons" = "Icons";
 "lng_mtslink_thread_no_comments" = "No messages";
 "lng_mtslink_menu_reactions_frequent" = "Frequently used reactions in the menu";
 "lng_mtslink_menu_reactions_standard" = "Standard reactions in the menu";

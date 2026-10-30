@@ -5385,7 +5385,10 @@ ReplyButton::ButtonParameters Message::replyButtonParameters(
 	const auto reactionInnerRight = st::reactionCornerCenter.x()
 		+ st::reactionCornerSize.width() / 2;
 	const auto replyInnerWidth = ReplyButton::ComputeInnerWidth();
-	const auto outward = reactionInnerRight - replyInnerWidth;
+	// The right edge as of the text button (the icon one is narrower).
+	const auto textInnerWidth = ReplyButton::ComputeTextInnerWidth();
+	const auto outward = reactionInnerRight
+		- (textInnerWidth + replyInnerWidth) / 2;
 	const auto relativeCenter = QPoint(
 		hasRightLayout() ? -outward : (geometry.width() + outward),
 		st::replyCornerCenter.y());
@@ -5412,8 +5415,9 @@ ReplyButton::ButtonParameters Message::threadButtonParameters(
 	const auto reactionInnerRight = st::reactionCornerCenter.x()
 		+ st::reactionCornerSize.width() / 2;
 	const auto replyInnerWidth = ReplyButton::ComputeInnerWidth();
+	const auto textInnerWidth = ReplyButton::ComputeTextInnerWidth();
 	const auto outward = reactionInnerRight
-		- replyInnerWidth
+		- (textInnerWidth + replyInnerWidth) / 2
 		- (replyInnerWidth + threadButtonWidth) / 2;
 	const auto relativeCenter = QPoint(
 		hasRightLayout() ? -outward : (geometry.width() + outward),

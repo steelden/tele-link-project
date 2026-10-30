@@ -705,6 +705,14 @@ ListWidget::ListWidget(
 		}
 	}, lifetime());
 
+	// The text / icons of the corner button: in the shown list at once.
+	ReplyButton::StyleChanges(
+	) | rpl::on_next([=] {
+		_replyButtonManager = std::make_unique<ReplyButton::Manager>(
+			[=](QRect updated) { update(updated); });
+		update();
+	}, lifetime());
+
 	if (_reactionsManager) {
 		_reactionsManager->chosen(
 		) | rpl::on_next([=](ChosenReaction reaction) {

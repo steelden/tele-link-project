@@ -43,6 +43,8 @@ inline constexpr auto kHideAllChatsFilterKey
 	= "mtslink-hide-all-chats-filter"_cs;
 inline constexpr auto kStandardMenuReactionsKey
 	= "mtslink-standard-menu-reactions"_cs;
+inline constexpr auto kIconCornerButtonsKey
+	= "mtslink-icon-corner-buttons"_cs;
 
 struct WindowPosition {
 	int32 moncrc = 0;
@@ -281,6 +283,10 @@ public:
 	// the frequently used emoji first.
 	[[nodiscard]] bool standardMenuReactions();
 	void setStandardMenuReactions(bool value);
+	// MTS Link: the icons on the corner reply / comments buttons, not the
+	// text (applied on the next opening of a chat).
+	[[nodiscard]] bool iconCornerButtons();
+	void setIconCornerButtons(bool value);
 	void setNotifyAboutPinned(bool notify) {
 		_notifyAboutPinned = notify;
 	}

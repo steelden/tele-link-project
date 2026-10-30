@@ -44,6 +44,12 @@ struct ButtonParameters {
 };
 
 [[nodiscard]] int ComputeInnerWidth();
+// The width of the text reply button: the icon ones end at its right edge.
+[[nodiscard]] int ComputeTextInnerWidth();
+
+// The text / icons choice changed: the managers are created again.
+void NotifyStyleChanged();
+[[nodiscard]] rpl::producer<> StyleChanges();
 
 enum class ButtonState {
 	Hidden,
@@ -98,8 +104,11 @@ class Manager final
 	: public base::has_weak_ptr
 	, public ClickHandlerHost {
 public:
+	// The text and the icon (if chosen in the settings) of the reply by
+	// default.
 	Manager(Fn<void(QRect)> buttonUpdate,
-		const QString &text = QString());
+		const QString &text = QString(),
+		const style::icon *icon = nullptr);
 	~Manager();
 
 	void updateButton(ButtonParameters parameters);
@@ -146,6 +155,7 @@ private:
 	std::vector<std::unique_ptr<Button>> _buttonHiding;
 
 	Ui::Text::String _text;
+	const style::icon *_icon = nullptr;
 	std::unique_ptr<Ui::RippleAnimation> _ripple;
 	QPoint _lastPointer;
 

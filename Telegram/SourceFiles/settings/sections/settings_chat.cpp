@@ -47,6 +47,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "history/view/history_view_quick_action.h"
+#include "history/view/history_view_reply_button.h"
 #include "lang/lang_keys.h"
 #include "lottie/lottie_icon.h"
 #include "window/themes/window_theme.h"
@@ -1773,6 +1774,39 @@ void SetupMessages(
 					base::options::lookup<int>("sticker-size").set(
 						(size == kDefault) ? 0 : size);
 					controller->session().data().requestStickerViewsRefresh();
+				},
+			}));
+		});
+	}
+
+	// MTS Link: the corner reply / comments buttons with a text or an icon.
+	{
+		const auto current = std::make_shared<rpl::variable<bool>>(
+			Core::App().settings().iconCornerButtons());
+		const auto text = [](bool icons) {
+			return icons
+				? tr::lng_mtslink_corner_buttons_icons(tr::now)
+				: tr::lng_mtslink_corner_buttons_text(tr::now);
+		};
+		const auto button = AddButtonWithLabel(
+			container,
+			tr::lng_mtslink_corner_buttons(),
+			current->value() | rpl::map(text),
+			st::settingsButton,
+			{ &st::menuIconReply });
+		button->addClickHandler([=] {
+			const auto options = std::vector<QString>{
+				text(false),
+				text(true),
+			};
+			controller->show(Box(SingleChoiceBox, SingleChoiceBoxArgs{
+				.title = tr::lng_mtslink_corner_buttons(),
+				.options = options,
+				.initialSelection = current->current() ? 1 : 0,
+				.callback = [=](int index) {
+					*current = (index == 1);
+					Core::App().settings().setIconCornerButtons(index == 1);
+					HistoryView::ReplyButton::NotifyStyleChanged();
 				},
 			}));
 		});

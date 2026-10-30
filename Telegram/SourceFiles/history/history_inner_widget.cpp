@@ -399,7 +399,8 @@ HistoryInner::HistoryInner(
 , _threadButtonManager(
 	std::make_unique<HistoryView::ReplyButton::Manager>(
 		[=](QRect updated) { update(updated); },
-		tr::lng_mtslink_thread_button(tr::now)))
+		tr::lng_mtslink_thread_button(tr::now),
+		&st::menuIconDiscussion))
 , _touchSelectTimer([=] { onTouchSelect(); })
 , _touchScrollTimer([=] { onTouchScrollTimer(); })
 , _middleClickAutoscroll(
@@ -460,6 +461,20 @@ HistoryInner::HistoryInner(
 	) | rpl::on_next([=](ChosenReaction reaction) {
 		_reactionsManager->updateButton({});
 		reactionChosen(reaction);
+	}, lifetime());
+
+	// The text / icons of the corner buttons: in the shown chat at once.
+	HistoryView::ReplyButton::StyleChanges(
+	) | rpl::on_next([=] {
+		_replyButtonManager = std::make_unique<
+			HistoryView::ReplyButton::Manager>(
+				[=](QRect updated) { update(updated); });
+		_threadButtonManager = std::make_unique<
+			HistoryView::ReplyButton::Manager>(
+				[=](QRect updated) { update(updated); },
+				tr::lng_mtslink_thread_button(tr::now),
+				&st::menuIconDiscussion);
+		update();
 	}, lifetime());
 
 	session().data().peerDecorationsUpdated(

@@ -1352,6 +1352,16 @@ rpl::producer<bool> Settings::hideAllChatsFilterValue() {
 	) | rpl::then(HideAllChatsFilterChanges().events());
 }
 
+bool Settings::iconCornerButtons() {
+	return readPref<bool>(kIconCornerButtonsKey);
+}
+
+void Settings::setIconCornerButtons(bool value) {
+	if (iconCornerButtons() != value) {
+		writePref<bool>(kIconCornerButtonsKey, value);
+	}
+}
+
 bool Settings::standardMenuReactions() {
 	return readPref<bool>(kStandardMenuReactionsKey);
 }
