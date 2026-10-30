@@ -381,7 +381,9 @@ struct State {
 		if (MtsLink::hasChatId(item->history()->peer->id)) {
 			const auto context = PreparedContextAt(weak.get(), session);
 			auto &entry = context->cacheReacted(item, reaction);
-			if (entry.data.current().state == WhoReadState::Unknown) {
+			// Requested again on each menu: the cached list is shown at
+			// once and replaced by the answer (the reactions change).
+			if (!entry.requestId) {
 				const auto peerId = item->history()->peer->id;
 				const auto chatId = MtsLink::peerIdToChatId(peerId);
 				const auto messageId = MtsLink::msgIdToMtsLinkId(
@@ -415,9 +417,31 @@ struct State {
 						struct Accumulator {
 							PeersWithReactions result;
 							int remaining = 0;
+							bool failed = false;
 						};
 						const auto acc = std::make_shared<Accumulator>();
 						acc->remaining = emojiIds.size();
+						// Not a request of MTP: only "in progress".
+						entry.requestId = -1;
+						const auto finish = [=] {
+							if (--acc->remaining > 0) {
+								return;
+							}
+							ranges::sort(
+								acc->result.list,
+								[&](const PeerWithReaction &a,
+									const PeerWithReaction &b) {
+									const auto pa = session->data().peer(a.peerWithDate.peer);
+									const auto pb = session->data().peer(b.peerWithDate.peer);
+									return pa->name().compare(pb->name(), Qt::CaseInsensitive) < 0;
+								});
+							auto &entry = context->cacheReacted(item, reaction);
+							entry.requestId = 0;
+							// Failed: the cached list is kept.
+							if (!acc->failed) {
+								entry.data = std::move(acc->result);
+							}
+						};
 						for (int idx = 0; idx < emojiIds.size(); ++idx) {
 							QJsonObject param;
 							param["chatId"] = chatId;
@@ -455,18 +479,11 @@ struct State {
 										});
 									}
 									acc->result.fullReactionsCount += int(profiles.size());
-									if (--acc->remaining <= 0) {
-										ranges::sort(
-											acc->result.list,
-											[&](const PeerWithReaction &a,
-												const PeerWithReaction &b) {
-												const auto pa = session->data().peer(a.peerWithDate.peer);
-												const auto pb = session->data().peer(b.peerWithDate.peer);
-												return pa->name().compare(pb->name(), Qt::CaseInsensitive) < 0;
-											});
-										auto &entry = context->cacheReacted(item, reaction);
-										entry.data = std::move(acc->result);
-									}
+									finish();
+								},
+								[=](const QString &) {
+									acc->failed = true;
+									finish();
 								});
 						}
 					}
