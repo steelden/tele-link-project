@@ -655,6 +655,33 @@ std::optional<MTPMessageReactions> buildMtpReactions(
 		MTP_vector<MTPMessageReactor>());
 }
 
+// The images of a photo of MTS Link: "_s" (64px) is the first quick one,
+// "_m" (256px) the preview (the shared media grid, the profile), the full one.
+void applyPhotoImages(
+		not_null<PhotoData*> photo,
+		const QString &fileId,
+		int width,
+		int height) {
+	const auto location = [&](const QString &suffix) {
+		return ImageWithLocation{
+			.location = ImageLocation(
+				DownloadLocation{
+					PlainUrlLocation{ privateCdnThumbBase() + fileId + suffix }
+				},
+				width,
+				height),
+		};
+	};
+	photo->updateImages(
+		QByteArray(),
+		location(u"_s.jpg"_q),
+		location(u"_m.jpg"_q),
+		location(u".jpg"_q),
+		ImageWithLocation{},
+		ImageWithLocation{},
+		crl::time(0));
+}
+
 void reapplyPhotoUrls(
 		not_null<HistoryItem*> item,
 		const Api::FileData &file) {
@@ -670,24 +697,7 @@ void reapplyPhotoUrls(
 		return;
 	}
 
-	const auto thumbUrl = privateCdnThumbBase() + file.id + u"_s.jpg"_q;
-	const auto fullUrl = privateCdnThumbBase() + file.id + u".jpg"_q;
-
-	const auto thumbLocation = ImageLocation(
-		DownloadLocation{ PlainUrlLocation{ thumbUrl } },
-		file.width, file.height);
-	const auto fullLocation = ImageLocation(
-		DownloadLocation{ PlainUrlLocation{ fullUrl } },
-		file.width, file.height);
-
-	photo->updateImages(
-		QByteArray(),
-		ImageWithLocation{},
-		ImageWithLocation{ .location = thumbLocation },
-		ImageWithLocation{ .location = fullLocation },
-		ImageWithLocation{},
-		ImageWithLocation{},
-		crl::time(0));
+	applyPhotoImages(photo, file.id, file.width, file.height);
 	photo->clearFailed(Data::PhotoSize::Small);
 	photo->clearFailed(Data::PhotoSize::Thumbnail);
 	photo->clearFailed(Data::PhotoSize::Large);
@@ -766,28 +776,11 @@ MTPMessageMedia buildPhotoMedia(
 		not_null<Main::Session*> session,
 		const Api::FileData &file,
 		TimeId date) {
-	const auto thumbUrl = privateCdnThumbBase() + file.id + u"_s.jpg"_q;
-	const auto fullUrl = privateCdnThumbBase() + file.id + u".jpg"_q;
-
 	const auto photoId = PhotoId(uuidToBareId(file.id));
 	PhotoFiles.insert(photoId, file);
 
-	const auto thumbLocation = ImageLocation(
-		DownloadLocation{ PlainUrlLocation{ thumbUrl } },
-		file.width, file.height);
-	const auto fullLocation = ImageLocation(
-		DownloadLocation{ PlainUrlLocation{ fullUrl } },
-		file.width, file.height);
-
 	const auto photo = session->data().photo(photoId);
-	photo->updateImages(
-		QByteArray(),
-		ImageWithLocation{},
-		ImageWithLocation{ .location = thumbLocation },
-		ImageWithLocation{ .location = fullLocation },
-		ImageWithLocation{},
-		ImageWithLocation{},
-		crl::time(0));
+	applyPhotoImages(photo, file.id, file.width, file.height);
 
 
 	using Flag = MTPDmessageMediaPhoto::Flag;
@@ -927,7 +920,7 @@ MTPMessageMedia buildFileMedia(
 		&& (file.mime.startsWith(u"image/"_q)
 			|| file.mime.startsWith(u"video/"_q));
 	if (hasVisualThumb) {
-		const auto thumbUrl = privateCdnThumbBase() + file.id + u"_s.jpg"_q;
+		const auto thumbUrl = privateCdnThumbBase() + file.id + u"_m.jpg"_q;
 		thumbnail = ImageWithLocation{
 			.location = ImageLocation(
 				DownloadLocation{ PlainUrlLocation{ thumbUrl } },
@@ -7205,31 +7198,10 @@ bool replacePendingWithReal(
 		if (!realMsg.files.isEmpty()) {
 			const auto &f = realMsg.files.first();
 			if (const auto photo = media->photo()) {
-				const auto thumbUrl = privateCdnThumbBase()
-					+ f.id + u"_s.jpg"_q;
-				const auto fullUrl = privateCdnThumbBase()
-					+ f.id + u".jpg"_q;
 				const auto w = f.width > 0 ? f.width : 100;
 				const auto h = f.height > 0 ? f.height : 100;
 				photo->clearImages();
-				photo->updateImages(
-					QByteArray(),
-					ImageWithLocation{},
-					ImageWithLocation{
-						.location = ImageLocation(
-							DownloadLocation{
-								PlainUrlLocation{ thumbUrl } },
-							w, h),
-					},
-					ImageWithLocation{
-						.location = ImageLocation(
-							DownloadLocation{
-								PlainUrlLocation{ fullUrl } },
-							w, h),
-					},
-					ImageWithLocation{},
-					ImageWithLocation{},
-					crl::time(0));
+				applyPhotoImages(photo, f.id, w, h);
 			} else if (const auto doc = media->document()) {
 				LOG(("MtsLink Files: sent document %1 mime=%2 size=%3x%4 "
 					"thumbnail=%5"
@@ -11254,6 +11226,7 @@ void putToImageCache(
 		const QByteArray &bytes) {
 	for (const auto &url : {
 		privateCdnThumbBase() + fileId + u"_s.jpg"_q,
+		privateCdnThumbBase() + fileId + u"_m.jpg"_q,
 		privateCdnThumbBase() + fileId + u".jpg"_q,
 	}) {
 		LOG(("MtsLink Stickers: image cache %1 (%2 bytes)"
