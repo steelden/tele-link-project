@@ -4660,6 +4660,17 @@ void ChatWidget::scrollToBottom() {
 	}
 }
 
+bool ChatWidget::mtsLinkThreadReadAtBottom() const {
+	const auto atBottom = _scroll
+		&& (_scroll->scrollTop() >= _scroll->scrollTopMax())
+		&& _inner->loadedAtBottomKnown()
+		&& _inner->loadedAtBottom();
+	const auto unread = (_replies && _replies->unreadCountKnown())
+		? _replies->unreadCountCurrent()
+		: 0;
+	return atBottom && !unread;
+}
+
 void ChatWidget::scrollToCurrentVoiceMessage(
 		FullMsgId fromId,
 		FullMsgId toId) {

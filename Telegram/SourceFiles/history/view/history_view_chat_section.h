@@ -127,6 +127,8 @@ public:
 	Dialogs::RowDescriptor activeChat() const override;
 	bool preventsClose(Fn<void()> &&continueCallback) const override;
 	void scrollToBottom();
+	// The thread is shown at its bottom and has nothing unread.
+	[[nodiscard]] bool mtsLinkThreadReadAtBottom() const;
 
 	bool hasTopBarShadow() const override {
 		return true;

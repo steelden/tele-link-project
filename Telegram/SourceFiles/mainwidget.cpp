@@ -1447,6 +1447,14 @@ bool MainWidget::handleMtsLinkThreadReClick(PeerId parentPeerId) {
 	const auto id = chatWidget->id();
 	if (id.history->peer->id != parentPeerId || !id.repliesRootId) {
 		return false;
+	} else if (chatWidget->mtsLinkThreadReadAtBottom()) {
+		// Read to the end: the click leads to the thread message in its
+		// chat, as the click on the thread title.
+		auto params = Window::SectionShow(
+			Window::SectionShow::Way::ClearStack);
+		params.mtsLinkOpenChat = true;
+		_controller->showPeerHistory(parentPeerId, params, id.repliesRootId);
+		return true;
 	}
 	chatWidget->scrollToBottom();
 	return true;
