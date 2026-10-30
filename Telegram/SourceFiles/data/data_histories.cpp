@@ -799,6 +799,13 @@ void Histories::sendReadRequest(not_null<History*> history, State &state) {
 				history->peer,
 				tillId);
 			const auto sending = tillItem && tillItem->isSending();
+			// Temporary: the read of a message unknown on the server.
+			if (mtsId.isEmpty() || chatId.isEmpty()) {
+				LOG(("MtsLink Read: not sent, chat '%1', till %2, grouped %3"
+					).arg(chatId
+					).arg(tillId.bare
+					).arg(tillItem ? tillItem->groupId().value : 0));
+			}
 			if (!chatId.isEmpty() && !mtsId.isEmpty() && !sending) {
 				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);

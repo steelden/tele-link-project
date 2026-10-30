@@ -3624,6 +3624,11 @@ void connectToSession(
 	restoreDefaultNotify(mainSession);
 }
 
+void registerExtraFileMessageId(
+	PeerId peerId,
+	MsgId extraId,
+	const QString &mtsLinkId);
+
 BareId uuidToBareId(const QString &uuid) {
 	const auto hash = QCryptographicHash::hash(
 		uuid.toUtf8(),
@@ -5281,6 +5286,7 @@ HistoryItem *addMessage(
 			const auto extraId = MsgId(
 				(uuidToBareId(src.id + QString::number(fi))
 					& 0x7FFFFFFFLL));
+			registerExtraFileMessageId(chatPeerId, extraId, src.id);
 			auto extraFields = HistoryItemCommonFields{
 				.id = extraId,
 				.flags = flags,
@@ -5483,6 +5489,7 @@ bool addOlderMessages(
 				const auto extraId = MsgId(
 					(uuidToBareId(src.id + QString::number(fi))
 						& 0x7FFFFFFFLL));
+				registerExtraFileMessageId(chatPeerId, extraId, src.id);
 				auto extraFields = HistoryItemCommonFields{
 					.id = extraId,
 					.flags = flags,
@@ -6972,6 +6979,15 @@ std::vector<not_null<HistoryItem*>> sliceItems(
 void registerMessageId(PeerId peerId, MsgId msgId, const QString &mtsLinkId) {
 	MsgIdToMtsLinkIdMap.insert(makeMsgKey(peerId, msgId), mtsLinkId);
 	MtsLinkIdToMsgMap.insert(mtsLinkId, {peerId, msgId});
+}
+
+// The second and next files of a message (the album items) are the same
+// message on the server: read, reply, react by its id.
+void registerExtraFileMessageId(
+		PeerId peerId,
+		MsgId extraId,
+		const QString &mtsLinkId) {
+	MsgIdToMtsLinkIdMap.insert(makeMsgKey(peerId, extraId), mtsLinkId);
 }
 
 void setPendingTempMessage(PeerId peerId, MsgId msgId) {
