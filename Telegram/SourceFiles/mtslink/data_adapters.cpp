@@ -7122,7 +7122,8 @@ bool replacePendingWithReal(
 		PeerId peerId,
 		const Api::MessageData &realMsg,
 		const QString &clientId) {
-	// The local message of this send (by the client id), or the first one.
+	// The local message of this send (by the client id), or the first own
+	// one of the same thread.
 	const auto sent = PendingSends.take(clientId);
 	const auto it = PendingTempMessages.find(peerId);
 	const auto inList = (it != PendingTempMessages.end()) && !it->isEmpty();
@@ -7134,7 +7135,33 @@ bool replacePendingWithReal(
 		// GIF / file sent to a thread kept its upload progress forever).
 		tempMsgId = sent.localId;
 	} else if (inList) {
-		tempMsgId = it->first();
+		// Not by the client id: only an own message of the same thread (a
+		// message of someone else replaced a stale local one, it was lost
+		// and the local one of another thread was shown in its thread).
+		const auto mts = session->account().mtsLinkSession();
+		const auto own = mts && (realMsg.authorId == mts->userId());
+		const auto sameThread = [&](MsgId localId) {
+			const auto root = threadRootFor(peerId, localId);
+			const auto parentId = root
+				? msgIdToMtsLinkId(peerId, root)
+				: QString();
+			return (parentId == realMsg.parentId);
+		};
+		const auto i = own
+			? ranges::find_if(*it, sameThread)
+			: it->end();
+		LOG(("MtsLink Pending: %1 (parent '%2', client '%3', own %4) not "
+			"by the client id, %5 local, the local %6"
+			).arg(realMsg.id
+			).arg(realMsg.parentId
+			).arg(clientId
+			).arg(Logs::b(own)
+			).arg(it->size()
+			).arg((i != it->end()) ? i->bare : 0));
+		if (i == it->end()) {
+			return false;
+		}
+		tempMsgId = *i;
 	} else {
 		return false;
 	}
