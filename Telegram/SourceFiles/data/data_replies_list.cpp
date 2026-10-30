@@ -1351,6 +1351,16 @@ void RepliesList::applyMtsLinkRootUnread() {
 		? int(views->commentsMaxId.bare - views->commentsInboxReadTillId.bare)
 		: -1;
 	const auto entryUnread = MtsLink::threadEntryUnreadCount(peerId, _rootId);
+	LOG(("MtsLink ThreadOpen: %1 root unread %2 (max %3, read %4, "
+		"replies %5), entry unread %6, loaded %7, skipped before %8"
+		).arg(_rootId.bare
+		).arg(rootUnread
+		).arg(views ? views->commentsMaxId.bare : -1
+		).arg(views ? views->commentsInboxReadTillId.bare : -1
+		).arg(views ? views->replies.count : -1
+		).arg(entryUnread
+		).arg(_list.size()
+		).arg(_skippedBefore ? *_skippedBefore : -1));
 	if (rootUnread < 0 && entryUnread < 0) {
 		return;
 	}

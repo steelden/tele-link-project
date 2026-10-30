@@ -1282,7 +1282,9 @@ void ListWidget::showAtUnreadOnOpen(const Window::SectionShow &params) {
 		clearUnreadBar();
 		checkUnreadBarCreation();
 		const auto top = scrollTopForPosition(position);
-		if (_bar.element && !_bar.hidden) {
+		// The bar is hidden when nothing is read (the first reply): at the
+		// first unread too, not at the end (all were read at once).
+		if (_bar.element) {
 			// Not right at the top edge (under the top bar shadow), a part
 			// of the read messages is seen above the bar.
 			const auto shift = (_visibleBottom - _visibleTop) / 6;

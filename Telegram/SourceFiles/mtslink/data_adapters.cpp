@@ -7500,6 +7500,12 @@ void fetchThreadLastRead(
 		[session, peerId, rootId](const QJsonObject &result) {
 			const auto obj = result.value("value").toObject();
 			const auto lastReadId = obj.value("id").toString();
+			LOG(("MtsLink ThreadOpen: %1 the last read '%2' at %3, %4"
+				).arg(rootId.bare
+				).arg(lastReadId
+				).arg(qint64(obj.value("createdAt").toDouble()) / 1000
+				).arg(QString::fromUtf8(QJsonDocument(result).toJson(
+					QJsonDocument::Compact)).left(300)));
 			if (lastReadId.isEmpty()) {
 				return;
 			}
