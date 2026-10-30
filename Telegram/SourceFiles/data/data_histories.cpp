@@ -289,12 +289,6 @@ void Histories::readInboxTill(
 			&& history->unreadCount() == 0) {
 			return;
 		}
-		LOG(("MtsLink Read: %1 till %2 at %3 (read at %4, unread %5)"
-			).arg(MtsLink::peerIdToChatId(history->peer->id)
-			).arg(tillId.bare
-			).arg(date
-			).arg(readDate
-			).arg(history->unreadCount()));
 		constexpr auto kMtsLinkReadDelay = crl::time(100);
 		state.willReadTill = tillId;
 		state.willReadWhen = crl::now() + kMtsLinkReadDelay;
@@ -805,11 +799,6 @@ void Histories::sendReadRequest(not_null<History*> history, State &state) {
 				history->peer,
 				tillId);
 			const auto sending = tillItem && tillItem->isSending();
-			LOG(("MtsLink Read: %1 send till %2 '%3'%4"
-				).arg(chatId
-				).arg(tillId.bare
-				).arg(mtsId
-				).arg(sending ? " (being sent, skipped)" : ""));
 			if (!chatId.isEmpty() && !mtsId.isEmpty() && !sending) {
 				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);

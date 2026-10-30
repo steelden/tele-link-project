@@ -135,9 +135,6 @@ void Sending::readMessage(
 		const MessageId &messageId) {
 	const auto key = chatId + ':' + messageId;
 	if (_sentReads.contains(key)) {
-		LOG(("MtsLink Read: %1 till '%2' sent already").arg(
-			chatId,
-			messageId));
 		return;
 	}
 	_sentReads.insert(key);
@@ -149,20 +146,12 @@ void Sending::readMessage(
 		param,
 		[=](const QJsonObject &result) {
 			const auto type = result.value(u"type"_q).toString();
-			LOG(("MtsLink Read: %1 till '%2' answer '%3'").arg(
-				chatId,
-				messageId,
-				type));
 			if (type == u"RpcError"_q || type == u"BusinessError"_q) {
 				_sentReads.remove(key);
 			}
 		},
-		[=](const QString &error) {
+		[=](const QString &) {
 			// Lost with the connection: sent again.
-			LOG(("MtsLink Read: %1 till '%2' failed: %3").arg(
-				chatId,
-				messageId,
-				error));
 			_sentReads.remove(key);
 		});
 }

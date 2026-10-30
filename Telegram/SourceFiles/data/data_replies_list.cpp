@@ -1351,16 +1351,6 @@ void RepliesList::applyMtsLinkRootUnread() {
 		? int(views->commentsMaxId.bare - views->commentsInboxReadTillId.bare)
 		: -1;
 	const auto entryUnread = MtsLink::threadEntryUnreadCount(peerId, _rootId);
-	LOG(("MtsLink ThreadOpen: %1 root unread %2 (max %3, read %4, "
-		"replies %5), entry unread %6, loaded %7, skipped before %8"
-		).arg(_rootId.bare
-		).arg(rootUnread
-		).arg(views ? views->commentsMaxId.bare : -1
-		).arg(views ? views->commentsInboxReadTillId.bare : -1
-		).arg(views ? views->replies.count : -1
-		).arg(entryUnread
-		).arg(_list.size()
-		).arg(_skippedBefore ? *_skippedBefore : -1));
 	if (rootUnread < 0 && entryUnread < 0) {
 		return;
 	}
@@ -1690,9 +1680,6 @@ void RepliesList::sendReadTillRequest() {
 				&& !_list.empty()
 				&& _list.front() == tillId
 				&& MtsLink::isNewerMessageId(lastChild, mtsId)) {
-				LOG(("MtsLink Read: thread %1 the last child '%2' instead"
-					).arg(_rootId.bare
-					).arg(lastChild));
 				mtsId = lastChild;
 			}
 			// A message being sent has a local id (not on the server).
@@ -1700,12 +1687,6 @@ void RepliesList::sendReadTillRequest() {
 				_history->peer->id,
 				tillId);
 			const auto sending = tillItem && tillItem->isSending();
-			LOG(("MtsLink Read: thread %1 of %2 till %3 '%4'%5"
-				).arg(_rootId.bare
-				).arg(chatId
-				).arg(tillId.bare
-				).arg(mtsId
-				).arg(sending ? " (being sent, skipped)" : ""));
 			if (!chatId.isEmpty() && !mtsId.isEmpty() && !sending) {
 				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);

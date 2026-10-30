@@ -263,12 +263,6 @@ void Manager::updateButton(ButtonParameters parameters) {
 
 void Manager::showButtonDelayed() {
 	clearAppearAnimations();
-	LOG(("MtsLink CornerButtons: %1 at %2,%3, inner %4, outer %5"
-		).arg(_icon ? "icon" : "text"
-		).arg(_scheduledParameters->center.x()
-		).arg(_scheduledParameters->center.y()
-		).arg(_inner.width()
-		).arg(_outer.width()));
 	_button = std::make_unique<Button>(
 		_buttonUpdate,
 		*_scheduledParameters,

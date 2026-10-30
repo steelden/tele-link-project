@@ -2360,17 +2360,6 @@ void applyThreadsList(
 			: base::unixtime::now();
 		history->setChatListTimeId(date);
 
-		if (thread.unreadChildrenCount > 0) {
-			LOG(("MtsLink Read: thread list '%1' of %2 (root %3, %4) "
-				"unread %5 of %6, the last child '%7'"
-				).arg(thread.id
-				).arg(thread.chatId
-				).arg(localMsgId(thread.id).bare
-				).arg(ThreadsListFromServer ? "server" : "cache"
-				).arg(thread.unreadChildrenCount
-				).arg(thread.childrenCount
-				).arg(thread.lastChildId));
-		}
 		setThreadLastChildId(
 			chatIdToPeerId(thread.chatId),
 			localMsgId(thread.id),
@@ -4424,14 +4413,6 @@ void applyDialogData(
 		history->setChatListTimeId(TimeId(1));
 	}
 	if (src.unreadCount >= 0 && src.lastMessageTimestamp) {
-		if (src.unreadCount > 0) {
-			LOG(("MtsLink Read: list %1 '%2' unread %3, last '%4' at %5"
-				).arg(src.id
-				).arg(src.name
-				).arg(src.unreadCount
-				).arg(src.lastMessageId
-				).arg(src.lastMessageTimestamp / 1000));
-		}
 		history->setUnreadCount(src.unreadCount);
 	}
 	session->data().notifySettings().apply(
@@ -4573,14 +4554,6 @@ void applyChannelData(
 		history->setChatListTimeId(TimeId(1));
 	}
 	if (src.unreadCount >= 0 && src.lastMessageTimestamp) {
-		if (src.unreadCount > 0) {
-			LOG(("MtsLink Read: list %1 '%2' unread %3, last '%4' at %5"
-				).arg(src.id
-				).arg(src.name
-				).arg(src.unreadCount
-				).arg(src.lastMessageId
-				).arg(src.lastMessageTimestamp / 1000));
-		}
 		history->setUnreadCount(src.unreadCount);
 	}
 	session->data().notifySettings().apply(
@@ -7210,14 +7183,6 @@ bool replacePendingWithReal(
 		const auto i = own
 			? ranges::find_if(*it, sameThread)
 			: it->end();
-		LOG(("MtsLink Pending: %1 (parent '%2', client '%3', own %4) not "
-			"by the client id, %5 local, the local %6"
-			).arg(realMsg.id
-			).arg(realMsg.parentId
-			).arg(clientId
-			).arg(Logs::b(own)
-			).arg(it->size()
-			).arg((i != it->end()) ? i->bare : 0));
 		if (i == it->end()) {
 			return false;
 		}
@@ -7304,10 +7269,6 @@ bool replacePendingWithReal(
 		if (const auto mts = session->account().mtsLinkSession()
 			; mts && realMsg.authorId == mts->userId()) {
 			const auto chatId = peerIdToChatId(peerId);
-			LOG(("MtsLink Read: thread '%1' of %2 till the own '%3'"
-				).arg(realMsg.parentId
-				).arg(chatId
-				).arg(realMsg.id));
 			markReadRequestSent(chatId);
 			mts->sending()->readMessage(chatId, realMsg.id);
 		}
@@ -7500,12 +7461,6 @@ void fetchThreadLastRead(
 		[session, peerId, rootId](const QJsonObject &result) {
 			const auto obj = result.value("value").toObject();
 			const auto lastReadId = obj.value("id").toString();
-			LOG(("MtsLink ThreadOpen: %1 the last read '%2' at %3, %4"
-				).arg(rootId.bare
-				).arg(lastReadId
-				).arg(qint64(obj.value("createdAt").toDouble()) / 1000
-				).arg(QString::fromUtf8(QJsonDocument(result).toJson(
-					QJsonDocument::Compact)).left(300)));
 			if (lastReadId.isEmpty()) {
 				return;
 			}
