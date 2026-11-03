@@ -381,6 +381,9 @@ void editTelegramBotToken(
 	std::shared_ptr<Ui::Show> show,
 	Fn<void()> saved = nullptr);
 
+// The box for a meeting link or ID, opened as the link in a chat.
+void showOpenMeetingBox(std::shared_ptr<Ui::Show> show);
+
 // The saved GIFs (the GIFs panel): local only, kept in the session cache.
 void restoreSavedGifs(not_null<Main::Session*> session);
 // Sends a GIF of the panel by its MTS Link file, false if it is not known.

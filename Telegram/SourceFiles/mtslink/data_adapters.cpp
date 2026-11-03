@@ -12290,6 +12290,41 @@ void editTelegramBotToken(
 	}));
 }
 
+void showOpenMeetingBox(std::shared_ptr<Ui::Show> show) {
+	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(tr::lng_mtslink_open_meeting());
+		// The usual meeting link fits in one line.
+		box->setWidth(style::ConvertScale(420));
+		const auto field = box->addRow(object_ptr<Ui::InputField>(
+			box,
+			st::defaultInputField,
+			Ui::InputField::Mode::NoNewlines,
+			tr::lng_mtslink_open_meeting_placeholder()));
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			tr::lng_mtslink_open_meeting_about(),
+			st::boxLabel));
+		box->setFocusCallback([=] { field->setFocusFast(); });
+		const auto open = [=] {
+			const auto text = field->getLastText().trimmed();
+			static const auto onlyId = QRegularExpression(u"^\\d+$"_q);
+			// Only the ID: the link of the organization, as in the chats.
+			const auto url = onlyId.match(text).hasMatch()
+				? QUrl(u"https://my.mts-link.ru/j/MTC/"_q + text)
+				: QUrl::fromUserInput(text);
+			LOG(("MtsLink Navigate: open meeting '%1'").arg(url.toString()));
+			if (text.isEmpty() || !tryOpenConferenceUrl(url)) {
+				field->showError();
+				return;
+			}
+			box->closeBox();
+		};
+		field->submits() | rpl::on_next(open, field->lifetime());
+		box->addButton(tr::lng_mtslink_open_meeting_open(), open);
+		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	}));
+}
+
 void importTelegramStickerPack(
 		not_null<Main::Session*> session,
 		std::shared_ptr<Ui::Show> show) {

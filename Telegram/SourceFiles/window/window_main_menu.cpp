@@ -778,10 +778,10 @@ void MainMenu::setupMenu() {
 			controller->show(PrepareContactsBox(controller));
 		});
 		addAction(
-			tr::lng_menu_calls(),
-			{ &st::menuIconPhone }
+			tr::lng_mtslink_open_meeting(),
+			{ &st::menuIconVideoChat }
 		)->setClickedCallback([=] {
-			::Calls::ShowCallsBox(controller);
+			MtsLink::showOpenMeetingBox(controller->uiShow());
 		});
 		addAction(
 			tr::lng_saved_messages(),
