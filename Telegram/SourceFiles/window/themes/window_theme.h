@@ -249,7 +249,6 @@ private:
 	void keepApplied(const Object &object, bool write);
 	[[nodiscard]] bool isNonDefaultThemeOrBackground();
 	[[nodiscard]] bool isNonDefaultBackground();
-	void checkUploadWallPaper();
 	[[nodiscard]] QImage postprocessBackgroundImage(QImage image);
 	void refreshThemeWatcher();
 
@@ -296,9 +295,6 @@ private:
 	bool _tileForRevert = false;
 
 	std::vector<AdjustableColor> _adjustableColors;
-	FullMsgId _wallPaperUploadId;
-	mtpRequestId _wallPaperRequestId = 0;
-	rpl::lifetime _wallPaperUploadLifetime;
 
 	rpl::lifetime _lifetime;
 

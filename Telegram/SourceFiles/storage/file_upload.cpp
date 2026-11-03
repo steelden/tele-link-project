@@ -308,6 +308,13 @@ FullMsgId Uploader::currentUploadId() const {
 void Uploader::upload(
 		FullMsgId itemId,
 		const std::shared_ptr<FilePrepareResult> &file) {
+	// Temporary: an upload by MTP, never finished in MTS Link.
+	LOG(("MtsLink Upload: queued %1/%2, type %3, file '%4', queue %5"
+		).arg(itemId.peer.value
+		).arg(itemId.msg.bare
+		).arg(int(file->type)
+		).arg(file->filename
+		).arg(_queue.size()));
 	auto preparing = false;
 	if (file->type == SendMediaType::Photo) {
 		const auto photo = session().data().processPhoto(

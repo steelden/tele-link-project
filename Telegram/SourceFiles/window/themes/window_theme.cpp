@@ -574,7 +574,6 @@ void ChatBackground::start() {
 		return session != _session;
 	}) | rpl::on_next([=](Main::Session *session) {
 		_session = session;
-		checkUploadWallPaper();
 	}, _lifetime);
 
 	rpl::combine(
@@ -655,65 +654,6 @@ void ChatBackground::refreshThemeWatcher() {
 	}
 }
 
-void ChatBackground::checkUploadWallPaper() {
-	if (!_session) {
-		_wallPaperUploadLifetime = rpl::lifetime();
-		_wallPaperUploadId = FullMsgId();
-		_wallPaperRequestId = 0;
-		return;
-	}
-	if (const auto id = base::take(_wallPaperUploadId)) {
-		_session->uploader().cancel(id);
-	}
-	if (const auto id = base::take(_wallPaperRequestId)) {
-		_session->api().request(id).cancel();
-	}
-	if (!Data::IsCustomWallPaper(_paper)
-		|| _original.isNull()
-		|| _editingTheme.has_value()) {
-		return;
-	}
-
-	const auto ready = PrepareWallPaper(_session->mainDcId(), _original);
-	const auto documentId = ready->id;
-	_wallPaperUploadId = FullMsgId(
-		_session->userPeerId(),
-		_session->data().nextLocalMessageId());
-	_session->uploader().upload(_wallPaperUploadId, ready);
-	if (_wallPaperUploadLifetime) {
-		return;
-	}
-	_wallPaperUploadLifetime = _session->uploader().documentReady(
-	) | rpl::on_next([=](const Storage::UploadedMedia &data) {
-		if (data.fullId != _wallPaperUploadId) {
-			return;
-		}
-		_wallPaperUploadId = FullMsgId();
-		_wallPaperRequestId = _session->api().request(
-			MTPaccount_UploadWallPaper(
-				MTP_flags(0),
-				data.info.file,
-				MTP_string("image/jpeg"),
-				_paper.mtpSettings()
-			)
-		).done([=](const MTPWallPaper &result) {
-			result.match([&](const MTPDwallPaper &data) {
-				_session->data().documentConvert(
-					_session->data().document(documentId),
-					data.vdocument());
-			}, [&](const MTPDwallPaperNoFile &data) {
-				LOG(("API Error: "
-					"Got wallPaperNoFile after account.UploadWallPaper."));
-			});
-			if (const auto paper = Data::WallPaper::Create(_session, result)) {
-				setPaper(*paper);
-				writeNewBackgroundSettings();
-				_updates.fire({ BackgroundUpdate::Type::New, tile() });
-			}
-		}).send();
-	});
-}
-
 QImage ChatBackground::postprocessBackgroundImage(QImage image) {
 	return PostprocessBackgroundImage(std::move(image), _paper);
 }
@@ -782,7 +722,6 @@ void ChatBackground::set(const Data::WallPaper &paper, QImage image) {
 		_updates.fire({ BackgroundUpdate::Type::TestingTheme, tile() });
 		_updates.fire({ BackgroundUpdate::Type::ApplyingTheme, tile() });
 	}
-	checkUploadWallPaper();
 }
 
 void ChatBackground::setPreparedAfterPaper(QImage image) {
