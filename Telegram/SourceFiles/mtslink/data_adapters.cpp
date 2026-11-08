@@ -7051,6 +7051,12 @@ void sendTracked(not_null<Main::Session*> session, const QString &clientId) {
 	}
 	const auto &send = i.value();
 	const auto weak = base::make_weak(session);
+	// Temporary: the second file of a few sent at once was not sent.
+	LOG(("MtsLink Sending: %1 to %2, files '%3', local %4"
+		).arg(clientId
+		).arg(send.chatId
+		).arg(send.fileIds.join(',')
+		).arg(send.localId.bare));
 	mts->sending()->sendMessage(
 		send.chatId,
 		send.text,
@@ -7063,6 +7069,13 @@ void sendTracked(not_null<Main::Session*> session, const QString &clientId) {
 		[=](const QJsonObject &result) {
 			const auto strong = weak.get();
 			const auto type = result.value(u"type"_q).toString();
+			// Temporary: the answer to the send.
+			LOG(("MtsLink Sending: %1 answer %2 %3"
+				).arg(clientId
+				).arg(type
+				).arg(QString::fromUtf8(QJsonDocument(
+					result.value(u"value"_q).toObject()).toJson(
+						QJsonDocument::Compact)).left(300)));
 			if (!strong || type != u"BusinessError"_q) {
 				return;
 			}

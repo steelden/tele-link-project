@@ -3411,6 +3411,9 @@ void ComposeControls::updateFieldPlaceholder() {
 			return tr::lng_edit_message_text();
 		} else if (!peer) {
 			return tr::lng_message_ph();
+		} else if (_topicRootId) {
+			// MTS Link: the messages of a thread are its comments.
+			return tr::lng_mtslink_comment_ph();
 		} else if (const auto stars = ephemeralReply
 			? 0
 			: peer->starsPerMessageChecked()) {

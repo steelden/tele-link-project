@@ -58,6 +58,9 @@ const char kOptionDialogsMuteIcon[] = "dialogs-mute-icon";
 
 namespace {
 
+// The share of the accent color in the background of a thread row.
+constexpr auto kThreadRowTint = 0.08;
+
 base::options::toggle DialogsMuteIcon({
 	.id = kOptionDialogsMuteIcon,
 	.name = "Mute icon in dialogs",
@@ -497,7 +500,27 @@ void PaintRow(
 	if (swipeTranslation) {
 		p.translate(swipeMirrored ? swipeTranslation : -swipeTranslation, 0);
 	}
-	p.fillRect(geometry, bg);
+	// Temporary: whether the thread rows are painted here.
+	if (history) {
+		static auto logged = base::flat_set<PeerId>();
+		if (logged.emplace(history->peer->id).second) {
+			LOG(("MtsLink ThreadLook: row %1 '%2' thread %3 active %4"
+				).arg(history->peer->id.value
+				).arg(history->peer->name()
+				).arg(MtsLink::isThreadPeer(history->peer->id) ? 1 : 0
+				).arg(context.active ? 1 : 0));
+		}
+	}
+	// MTS Link: a thread is tinted, to be told from the chats.
+	if (!context.active
+		&& history
+		&& MtsLink::isThreadPeer(history->peer->id)) {
+		p.fillRect(
+			geometry,
+			anim::color(QBrush(bg).color(), st::windowBgActive->c, kThreadRowTint));
+	} else {
+		p.fillRect(geometry, bg);
+	}
 	if (!(flags & Flag::TopicJumpRipple)) {
 		auto ripple = context.active
 			? st::dialogsRippleBgActive

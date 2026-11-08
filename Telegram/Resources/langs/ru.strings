@@ -7139,6 +7139,7 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_hide_threads_mark" = "Скрыть отметку комментариев";
 "lng_mtslink_corner_buttons" = "Кнопки ответа и комментариев";
 "lng_mtslink_open_meeting" = "Открыть встречу";
+"lng_mtslink_comment_ph" = "Комментарий...";
 "lng_mtslink_open_meeting_placeholder" = "Ссылка на встречу или ID";
 "lng_mtslink_open_meeting_about" = "Вставьте ссылку на встречу (https://my.mts-link.ru/j/...) или только её ID.";
 "lng_mtslink_open_meeting_open" = "Открыть";

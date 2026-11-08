@@ -6653,6 +6653,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_hide_threads_mark" = "Hide the threads mark";
 "lng_mtslink_corner_buttons" = "Reply and comments buttons";
 "lng_mtslink_open_meeting" = "Open meeting";
+"lng_mtslink_comment_ph" = "Comment...";
 "lng_mtslink_open_meeting_placeholder" = "Meeting link or ID";
 "lng_mtslink_open_meeting_about" = "Paste the meeting link (https://my.mts-link.ru/j/...) or only its ID.";
 "lng_mtslink_open_meeting_open" = "Open";

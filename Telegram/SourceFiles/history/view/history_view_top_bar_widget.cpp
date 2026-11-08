@@ -644,13 +644,21 @@ void TopBarWidget::paintTopBar(Painter &p) {
 			p.setOpacity(1.);
 		}
 	} else if (_activeChat.section == Section::Replies) {
-		p.setPen(st::dialogsNameFg);
+		// MTS Link: the chat the thread is in (the back button leads to
+		// it), colored: a thread, not the chat itself.
+		p.setPen(st::windowActiveTextFg);
 		p.setFont(st::semiboldFont);
+		// Temporary: the color of the thread title.
+		LOG(("MtsLink ThreadLook: title color %1"
+			).arg(st::windowActiveTextFg->c.name()));
+		const auto title = peer
+			? peer->name()
+			: tr::lng_manage_discussion_group(tr::now);
 		p.drawTextLeft(
 			nameleft,
 			nametop,
 			width(),
-			tr::lng_manage_discussion_group(tr::now));
+			st::semiboldFont->elided(title, namewidth));
 
 		p.setFont(st::dialogsTextFont);
 		if (!paintConnectingState(p, statusleft, statustop, width())
@@ -1483,7 +1491,9 @@ void TopBarWidget::updateMembersShowArea() {
 		if (showSelectedState()
 			|| !peer
 			|| _activeChat.section == Section::ChatsList
+			|| _activeChat.section == Section::Replies
 			|| _activeChat.key.topic()) {
+			// No members list for a thread (its status is the count).
 			return false;
 		} else if (const auto chat = peer->asChat()) {
 			return chat->amIn();

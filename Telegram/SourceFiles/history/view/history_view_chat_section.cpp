@@ -4219,9 +4219,8 @@ void ChatWidget::setReplies(std::shared_ptr<Data::RepliesList> replies) {
 		return (count && (*count > sub))
 			? (isTopic
 				? tr::lng_forum_messages
-				: areComments
-				? tr::lng_comments_header
-				: tr::lng_replies_header)(
+				// MTS Link: the messages of a thread are its comments.
+				: tr::lng_comments_header)(
 					lt_count_decimal,
 					rpl::single(*count - sub) | tr::to_count())
 			: (isTopic
