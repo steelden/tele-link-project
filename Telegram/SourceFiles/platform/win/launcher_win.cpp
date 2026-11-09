@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/update_checker.h"
 
 #include <windows.h>
+#include <dbghelp.h>
 #include <shellapi.h>
 #include <VersionHelpers.h>
 
@@ -110,6 +111,77 @@ void InstallTestAgentCrashHandling() {
 #endif // _DEBUG
 }
 
+// TeleLink: the crash reports are disabled in the build, a crash closed
+// the app silently. A minidump is written to "crashes" near the exe, without
+// a debugger (dbghelp is loaded only when the crash happens).
+LONG WINAPI WriteCrashDump(EXCEPTION_POINTERS *info) {
+	auto path = std::wstring(MAX_PATH, L'\0');
+	const auto length = GetModuleFileNameW(
+		nullptr,
+		path.data(),
+		DWORD(path.size()));
+	path.resize(length);
+	path = path.substr(0, path.find_last_of(L"\\/") + 1) + L"crashes";
+	CreateDirectoryW(path.c_str(), nullptr);
+
+	auto now = SYSTEMTIME();
+	GetLocalTime(&now);
+	wchar_t name[64] = { 0 };
+	swprintf_s(
+		name,
+		L"\\TeleLink_%04d-%02d-%02d_%02d-%02d-%02d.dmp",
+		now.wYear,
+		now.wMonth,
+		now.wDay,
+		now.wHour,
+		now.wMinute,
+		now.wSecond);
+	path += name;
+
+	using WriteDump = BOOL(WINAPI*)(
+		HANDLE,
+		DWORD,
+		HANDLE,
+		MINIDUMP_TYPE,
+		PMINIDUMP_EXCEPTION_INFORMATION,
+		PMINIDUMP_USER_STREAM_INFORMATION,
+		PMINIDUMP_CALLBACK_INFORMATION);
+	const auto dbghelp = LoadLibraryW(L"dbghelp.dll");
+	const auto write = dbghelp
+		? reinterpret_cast<WriteDump>(
+			GetProcAddress(dbghelp, "MiniDumpWriteDump"))
+		: nullptr;
+	const auto file = write
+		? CreateFileW(
+			path.c_str(),
+			GENERIC_WRITE,
+			0,
+			nullptr,
+			CREATE_ALWAYS,
+			FILE_ATTRIBUTE_NORMAL,
+			nullptr)
+		: INVALID_HANDLE_VALUE;
+	if (file != INVALID_HANDLE_VALUE) {
+		auto exception = MINIDUMP_EXCEPTION_INFORMATION{
+			.ThreadId = GetCurrentThreadId(),
+			.ExceptionPointers = info,
+			.ClientPointers = FALSE,
+		};
+		write(
+			GetCurrentProcess(),
+			GetCurrentProcessId(),
+			file,
+			MINIDUMP_TYPE(MiniDumpWithIndirectlyReferencedMemory
+				| MiniDumpWithDataSegs
+				| MiniDumpWithThreadInfo),
+			&exception,
+			nullptr,
+			nullptr);
+		CloseHandle(file);
+	}
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+
 } // namespace
 
 Launcher::Launcher(int argc, char *argv[])
@@ -117,6 +189,7 @@ Launcher::Launcher(int argc, char *argv[])
 }
 
 void Launcher::initHook() {
+	SetUnhandledExceptionFilter(WriteCrashDump);
 	if (cTestAgent()) {
 		InstallTestAgentCrashHandling();
 	}
