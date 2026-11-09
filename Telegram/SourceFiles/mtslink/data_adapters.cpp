@@ -376,6 +376,57 @@ struct PendingThreadUnreadInfo {
 	QString parentUuid;
 };
 QMap<QPair<PeerId, MsgId>, PendingThreadUnreadInfo> PendingThreadUnread;
+
+// The notified messages by the chat and the thread root (0 for the chat
+// itself), oldest first: hidden when read (in another client too), as
+// Telegram hides the notifications of a chat read elsewhere.
+QMap<QPair<PeerId, MsgId>, QVector<MsgId>> NotifiedMessages;
+
+void RememberNotified(not_null<HistoryItem*> item, MsgId rootId) {
+	auto &ids = NotifiedMessages[qMakePair(item->history()->peer->id, rootId)];
+	if (!ids.contains(item->id)) {
+		ids.push_back(item->id);
+	}
+}
+
+// Hides the notifications of the messages read till "lastReadId" (the
+// server message id, the ids are time ordered), of all when it is empty.
+void ClearReadNotified(
+		not_null<Main::Session*> session,
+		PeerId peerId,
+		MsgId rootId,
+		const QString &lastReadId) {
+	const auto i = NotifiedMessages.find(qMakePair(peerId, rootId));
+	if (i == NotifiedMessages.end()) {
+		return;
+	}
+	auto &ids = i.value();
+	auto hidden = 0;
+	for (auto k = ids.begin(); k != ids.end();) {
+		const auto mtsId = msgIdToMtsLinkId(peerId, *k);
+		const auto read = lastReadId.isEmpty()
+			|| (!mtsId.isEmpty() && !isNewerMessageId(mtsId, lastReadId));
+		if (!read) {
+			++k;
+			continue;
+		}
+		if (const auto item = session->data().message(peerId, *k)) {
+			item->notificationThread()->removeNotification(item);
+			Core::App().notifications().clearFromItem(item);
+		}
+		++hidden;
+		k = ids.erase(k);
+	}
+	LOG(("MtsLink Notify: read %1 root %2 till '%3', hidden %4, left %5"
+		).arg(peerId.value
+		).arg(rootId.bare
+		).arg(lastReadId
+		).arg(hidden
+		).arg(ids.size()));
+	if (ids.isEmpty()) {
+		NotifiedMessages.erase(i);
+	}
+}
 constexpr auto kPreviewRetryLimit = 20;
 QHash<PeerId, MsgId> PendingChatThreadScroll;
 bool FolderPinsSyncScheduled = false;
@@ -5586,6 +5637,13 @@ void handleNotificationEvent(
 				continue;
 			}
 			markReadRequestSent(chatId);
+			// Read here or in another client: the notifications of the
+			// messages read are hidden, of the newer ones stay.
+			ClearReadNotified(
+				session,
+				peerId,
+				threadId.isEmpty() ? MsgId() : localMsgId(threadId),
+				lastReadMsgId);
 			const auto readBareId = uuidToBareId(lastReadMsgId);
 			const auto readMsgId = MsgId(readBareId & 0x7FFFFFFFLL);
 			if (!threadId.isEmpty()) {
@@ -6028,6 +6086,7 @@ void handleChatEvent(
 					newItem->notificationThread()->pushNotification(
 						notification);
 					Core::App().notifications().schedule(notification);
+					RememberNotified(newItem, MsgId());
 				}
 				// Someone calls: the incoming call window, in channels only
 				// the notification opens the window to join the call.
@@ -6126,6 +6185,7 @@ void handleChatEvent(
 					newItem->notificationThread()->pushNotification(
 						notification);
 					Core::App().notifications().schedule(notification);
+					RememberNotified(newItem, parentMsgId);
 				}
 			}
 			// A thread missing from the list is a thread without the
@@ -6274,6 +6334,9 @@ void handleChatEvent(
 			const auto entry = threadEntryHistory(session, peerId, rootId);
 			const auto count = value.value("unreadMessageCount").toInt();
 			updateCachedThreadUnread(session, parentId, count);
+			if (!count) {
+				ClearReadNotified(session, peerId, rootId, QString());
+			}
 			const auto pending = PendingThreadUnread.find(
 				qMakePair(peerId, rootId));
 			// Read in another client: the replies to a thread without
@@ -6315,6 +6378,9 @@ void handleChatEvent(
 		}
 		const auto count = value.value("unreadMessageCount").toInt();
 		updateCachedChatUnread(session, eventChatId, count);
+		if (!count) {
+			ClearReadNotified(session, peerId, MsgId(), QString());
+		}
 		const auto wasReadRequest = consumeReadRequestSent(eventChatId);
 		// The server counter is the exact one: a chat read in another
 		// client comes here only (the thread counters have "parentId").
