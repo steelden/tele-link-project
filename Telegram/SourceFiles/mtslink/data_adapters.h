@@ -427,6 +427,22 @@ HistoryItem *addMessage(
 	bool threadOnly = false,
 	std::vector<not_null<HistoryItem*>> *batchItems = nullptr);
 
+// The last comment of a thread for its row in the chats list (the third
+// line): loaded, from the cache, or from the server (a few at once).
+// A thread row in the chat list: three lines (the chat, the thread
+// message, the last comment) or two (the chat, the thread message).
+[[nodiscard]] bool threadRowsThreeLines();
+void setThreadRowsThreeLines(not_null<Main::Session*> session, bool three);
+
+[[nodiscard]] HistoryItem *threadLastComment(
+	not_null<Main::Session*> session,
+	PeerId threadPeerId);
+void saveThreadLastComment(
+	not_null<Main::Session*> session,
+	const QString &chatId,
+	const QString &parentId,
+	const Api::MessageData &message);
+
 [[nodiscard]] bool addOlderMessages(
 	not_null<Main::Session*> session,
 	const ChatId &chatId,

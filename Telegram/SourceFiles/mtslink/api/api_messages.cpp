@@ -499,15 +499,19 @@ void Messages::loadThreadPage(
 		bool after,
 		int limit,
 		ThreadPageDone done) {
+	auto param = QJsonObject{
+		{ "chatId", chatId },
+		{ "parentId", parentId },
+		{ "limit", limit },
+	};
+	// Without "from": the newest messages of the thread.
+	if (!fromMessageId.isEmpty()) {
+		param["from"] = fromMessageId;
+		param["direction"] = after ? u"After"_q : u"Before"_q;
+	}
 	_rpc->call(
 		"Chat.GetMessagesV2",
-		QJsonObject{
-			{ "chatId", chatId },
-			{ "parentId", parentId },
-			{ "from", fromMessageId },
-			{ "direction", after ? u"After"_q : u"Before"_q },
-			{ "limit", limit },
-		},
+		param,
 		[=](const QJsonObject &result) {
 			const auto value = result.value("value").toObject();
 			auto messages = QList<MessageData>();

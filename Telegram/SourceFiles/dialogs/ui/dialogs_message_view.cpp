@@ -418,7 +418,9 @@ void MessageView::paint(
 	}
 	_lastPaintGeometry = geometry;
 	p.setFont(st::dialogsTextFont);
-	p.setPen(context.active
+	p.setPen(context.baseText
+		? st::windowFg
+		: context.active
 		? st::dialogsTextFgActive
 		: context.selected
 		? st::dialogsTextFgOver

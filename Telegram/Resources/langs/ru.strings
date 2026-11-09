@@ -7089,6 +7089,9 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_pinned_sort" = "Порядок закреплённых чатов";
 "lng_mtslink_name_order" = "Имена в списке чатов";
 "lng_mtslink_threads_mark" = "Отмечать чаты с непрочитанными комментариями";
+"lng_mtslink_thread_rows" = "Обсуждения в списке";
+"lng_mtslink_thread_rows_two" = "2 строки";
+"lng_mtslink_thread_rows_three" = "3 строки";
 "lng_mtslink_name_order_first" = "Имя Фамилия";
 "lng_mtslink_name_order_last" = "Фамилия Имя";
 "lng_mtslink_pinned_sort_manual" = "Не сортировать";

@@ -1097,7 +1097,12 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 			}
 		}
 
-		context.st = (forum || monoforum) ? &st::forumDialogRow : _st.get();
+		const auto threadRow = history
+			&& MtsLink::isThreadPeer(history->peer->id)
+			&& MtsLink::threadRowsThreeLines();
+		context.st = (forum || monoforum || threadRow)
+			? &st::forumDialogRow
+			: _st.get();
 
 		const auto videoUserpic = validateVideoUserpic(row);
 		const auto cacheRatio = style::DevicePixelRatio();

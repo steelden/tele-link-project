@@ -119,6 +119,12 @@ QHash<QString, PeerId> ChatToPeerMap;
 QHash<PeerId, ChatType> PeerToChatTypeMap;
 QHash<quint64, QString> MsgIdToMtsLinkIdMap;
 QHash<PeerId, QString> OldestLoadedMsgMap;
+// The last comments of the threads (by the thread peer), for the rows.
+QHash<PeerId, MsgId> ThreadLastComments;
+// The last comment id asked (in the cache, then on the server) by thread.
+QHash<PeerId, QString> ThreadLastCommentAsked;
+constexpr auto kMtsLinkThreadLastCommentTag
+	= uint64(0xBC0F'0000'0000'0000ULL);
 QHash<uint64, QString> UserBareIdToUuidMap;
 QHash<PeerId, std::vector<uint64>> ChatMembersMap;
 QHash<PeerId, QVector<MsgId>> PendingTempMessages;
@@ -6149,6 +6155,11 @@ void handleChatEvent(
 			const auto threadIt = ThreadReverseMap.constFind(
 				{ chatPeerId, parentMsgId });
 			if (threadIt != ThreadReverseMap.constEnd()) {
+				// The last comment in the thread row.
+				if (newItem) {
+					ThreadLastComments.insert(threadIt.value(), newItem->id);
+					saveThreadLastComment(session, msg.chatId, msg.parentId, msg);
+				}
 				// The counter itself comes in ChatUnreadMessageCountUpdated
 				// with the "parentId" of the thread.
 				addThreadEntryUnread(
@@ -10025,6 +10036,150 @@ QString threadLastChildId(PeerId parentPeerId, MsgId rootId) {
 	return ThreadLastChildIds.value(makeMsgKey(parentPeerId, rootId));
 }
 
+namespace {
+
+[[nodiscard]] Storage::Cache::Key threadLastCommentCacheKey(
+		const QString &chatId,
+		const QString &parentId) {
+	const auto hash = QCryptographicHash::hash(
+		(chatId + ':' + parentId).toUtf8(),
+		QCryptographicHash::Md5);
+	uint64 low = 0;
+	memcpy(&low, hash.constData(), sizeof(low));
+	return { kMtsLinkThreadLastCommentTag, low };
+}
+
+void applyThreadLastComment(
+		not_null<Main::Session*> session,
+		PeerId threadPeerId,
+		const Api::MessageData &message,
+		const QList<Api::MemberProfile> &profiles) {
+	for (const auto &p : profiles) {
+		applyUserData(session, p);
+	}
+	if (const auto item = addMessage(session, message, true)) {
+		ThreadLastComments.insert(threadPeerId, item->id);
+		if (const auto history = session->data().historyLoaded(
+				threadPeerId)) {
+			history->updateChatListEntry();
+		}
+	}
+}
+
+// The sends are limited by the connection itself (its rate limit).
+void loadThreadLastComment(
+		not_null<Main::Session*> session,
+		PeerId threadPeerId) {
+	const auto mts = session->account().mtsLinkSession();
+	const auto [parentPeerId, rootId] = threadParentInfo(threadPeerId);
+	const auto chatId = peerIdToChatId(parentPeerId);
+	const auto parentId = msgIdToMtsLinkId(parentPeerId, rootId);
+	if (!mts || chatId.isEmpty() || parentId.isEmpty()) {
+		return;
+	}
+	const auto weak = base::make_weak(session);
+	mts->messages()->loadThreadPage(chatId, parentId, {}, false, 1, [=](
+			QList<Api::MessageData> messages,
+			QList<Api::MemberProfile> profiles) {
+		const auto strong = weak.get();
+		if (!strong || messages.isEmpty()) {
+			return;
+		}
+		strong->data().cache().put(
+			threadLastCommentCacheKey(chatId, parentId),
+			serializeMessages({ messages.front() }, profiles));
+		applyThreadLastComment(
+			strong,
+			threadPeerId,
+			messages.front(),
+			profiles);
+	});
+}
+
+} // namespace
+
+void saveThreadLastComment(
+		not_null<Main::Session*> session,
+		const QString &chatId,
+		const QString &parentId,
+		const Api::MessageData &message) {
+	if (chatId.isEmpty() || parentId.isEmpty()) {
+		return;
+	}
+	session->data().cache().put(
+		threadLastCommentCacheKey(chatId, parentId),
+		serializeMessages({ message }, {}));
+}
+
+HistoryItem *threadLastComment(
+		not_null<Main::Session*> session,
+		PeerId threadPeerId) {
+	const auto [parentPeerId, rootId] = threadParentInfo(threadPeerId);
+	if (!parentPeerId || !rootId) {
+		return nullptr;
+	}
+	const auto lastChildId = threadLastChildId(parentPeerId, rootId);
+	if (const auto id = ThreadLastComments.value(threadPeerId)) {
+		const auto item = session->data().message(parentPeerId, id);
+		const auto itemId = item
+			? msgIdToMtsLinkId(parentPeerId, id)
+			: QString();
+		// Not older than the last comment known from the threads list.
+		if (item
+			&& (lastChildId.isEmpty()
+				|| itemId.isEmpty()
+				|| !isNewerMessageId(lastChildId, itemId))) {
+			return item;
+		}
+	}
+	if (lastChildId.isEmpty()
+		|| lastChildId == u"00000000-0000-0000-0000-000000000000"_q) {
+		return nullptr;
+	}
+	const auto known = localMsgId(lastChildId);
+	if (const auto item = session->data().message(parentPeerId, known)) {
+		ThreadLastComments.insert(threadPeerId, known);
+		return item;
+	}
+	if (ThreadLastCommentAsked.value(threadPeerId) == lastChildId) {
+		return nullptr;
+	}
+	ThreadLastCommentAsked.insert(threadPeerId, lastChildId);
+	const auto chatId = peerIdToChatId(parentPeerId);
+	const auto parentId = msgIdToMtsLinkId(parentPeerId, rootId);
+	if (chatId.isEmpty() || parentId.isEmpty()) {
+		return nullptr;
+	}
+	// The cache first, the server when it has an older one or nothing.
+	const auto weak = base::make_weak(session);
+	session->data().cache().get(
+		threadLastCommentCacheKey(chatId, parentId),
+		[=](QByteArray &&data) {
+			crl::on_main(weak, [=, data = std::move(data)] {
+				const auto strong = weak.get();
+				const auto cached = deserializeMessages(data);
+				if (cached
+					&& !cached->messages.isEmpty()
+					&& cached->messages.front().id == lastChildId) {
+					applyThreadLastComment(
+						strong,
+						threadPeerId,
+						cached->messages.front(),
+						cached->profiles);
+					return;
+				}
+				LOG(("MtsLink ThreadRow: last comment of %1 from the server "
+					"(cache %2)"
+					).arg(threadPeerId.value
+					).arg((cached && !cached->messages.isEmpty())
+						? u"old"_q
+						: u"none"_q));
+				loadThreadLastComment(strong, threadPeerId);
+			});
+		});
+	return nullptr;
+}
+
 bool isNewerMessageId(const QString &a, const QString &b) {
 	return uuidV6Time(a) > uuidV6Time(b);
 }
@@ -10392,6 +10547,36 @@ void setNameOrder(not_null<Main::Session*> session, NameOrder order) {
 
 int nameOrderVersion() {
 	return NameOrderVersion;
+}
+
+base::options::option<bool> OptionThreadRowsTwoLines({
+	.id = "mtslink-thread-rows-two-lines",
+	.name = "Threads in two lines in the chat list",
+});
+
+bool threadRowsThreeLines() {
+	return !OptionThreadRowsTwoLines.value();
+}
+
+void setThreadRowsThreeLines(not_null<Main::Session*> session, bool three) {
+	if (threadRowsThreeLines() == three) {
+		return;
+	}
+	OptionThreadRowsTwoLines.set(!three);
+	// The thread rows live in the folders, their heights are recounted.
+	auto &filters = session->data().chatsFilters();
+	for (const auto &filter : filters.list()) {
+		const auto list = filters.chatsList(filter.id());
+		for (const auto &row : list->indexed()->all()) {
+			if (const auto history = row->history()) {
+				if (isThreadPeer(history->peer->id)) {
+					session->changes().entryUpdated(
+						history,
+						Data::EntryUpdate::Flag::Height);
+				}
+			}
+		}
+	}
 }
 
 base::options::option<bool> OptionHideThreadsMark({

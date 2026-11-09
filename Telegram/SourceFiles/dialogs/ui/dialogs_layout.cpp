@@ -48,6 +48,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/unread_badge_paint.h"
 #include "ui/unread_counter_format.h"
 #include "styles/style_dialogs.h"
+#include "styles/style_chat.h"
 #include "styles/style_dialogs_layout.h"
 #include "styles/style_widgets.h"
 #include "styles/style_window.h"
@@ -58,8 +59,8 @@ const char kOptionDialogsMuteIcon[] = "dialogs-mute-icon";
 
 namespace {
 
-// The share of the accent color in the background of a thread row.
-constexpr auto kThreadRowTint = 0.08;
+// The thread message (the second line of a thread row) is grayer.
+constexpr auto kThreadRootOpacity = 0.7;
 
 base::options::toggle DialogsMuteIcon({
 	.id = kOptionDialogsMuteIcon,
@@ -500,16 +501,10 @@ void PaintRow(
 	if (swipeTranslation) {
 		p.translate(swipeMirrored ? swipeTranslation : -swipeTranslation, 0);
 	}
-	// MTS Link: a thread is tinted, to be told from the chats.
-	if (!context.active
-		&& history
-		&& MtsLink::isThreadPeer(history->peer->id)) {
-		p.fillRect(
-			geometry,
-			anim::color(QBrush(bg).color(), st::windowBgActive->c, kThreadRowTint));
-	} else {
-		p.fillRect(geometry, bg);
-	}
+	p.fillRect(geometry, bg);
+	// MTS Link: a thread, to be told from the chats.
+	const auto threadRow = history
+		&& MtsLink::isThreadPeer(history->peer->id);
 	if (!(flags & Flag::TopicJumpRipple)) {
 		auto ripple = context.active
 			? st::dialogsRippleBgActive
@@ -561,6 +556,14 @@ void PaintRow(
 			row->userpicView(),
 			context);
 	} else {
+		// MTS Link: the userpic of a thread is in the middle of its three
+		// lines.
+		const auto userpicShift = (threadRow
+				&& MtsLink::threadRowsThreeLines())
+			? ((geometry.height() - context.st->photoSize) / 2
+				- context.st->padding.top())
+			: 0;
+		p.translate(0, userpicShift);
 		row->paintUserpic(
 			p,
 			entry,
@@ -572,6 +575,7 @@ void PaintRow(
 				&& !draft
 				&& item
 				&& !item->isEmpty()));
+		p.translate(0, -userpicShift);
 	}
 
 	const auto nameleft = context.st->nameLeft;
@@ -624,7 +628,16 @@ void PaintRow(
 		rectForName.setLeft(position.x() + skip + st::dialogsChatTypeSkip);
 	} else if (from) {
 		if (const auto chatTypeIcon = ChatTypeIcon(from, context)) {
-			chatTypeIcon->paint(p, rectForName.topLeft(), context.width);
+			if (threadRow && !context.active) {
+				// MTS Link: in the color of the thread name.
+				chatTypeIcon->paint(
+					p,
+					rectForName.topLeft(),
+					context.width,
+					st::windowActiveTextFg->c);
+			} else {
+				chatTypeIcon->paint(p, rectForName.topLeft(), context.width);
+			}
 			rectForName.setLeft(rectForName.left()
 				+ chatTypeIcon->width()
 				+ st::dialogsChatTypeSkip);
@@ -975,8 +988,11 @@ void PaintRow(
 			paintPeerBadge(rowName.maxWidth());
 			badgeWidth = widthBefore - rectForName.width();
 		}
+		// MTS Link: a thread name is colored, as in the thread header.
 		p.setPen(context.active
 			? st::dialogsNameFgActive
+			: threadRow
+			? st::windowActiveTextFg
 			: context.selected
 			? st::dialogsNameFgOver
 			: st::dialogsNameFg);
@@ -1015,6 +1031,8 @@ void PaintRow(
 	} else {
 		p.setPen(context.active
 			? st::dialogsNameFgActive
+			: threadRow
+			? st::windowActiveTextFg
 			: entry->folder()
 			? (context.selected
 				? st::dialogsArchiveFgOver
@@ -1155,7 +1173,20 @@ void RowPainter::Paint(
 		Painter &p,
 		not_null<const Row*> row,
 		VideoUserpic *videoUserpic,
-		const PaintContext &context) {
+		const PaintContext &passedContext) {
+	// MTS Link: a thread row looks the same under the mouse, only its
+	// background is changed (the active one is all white, as a chat).
+	auto threadContext = std::optional<PaintContext>();
+	if (const auto threadHistory = row->history()
+		; threadHistory
+			&& MtsLink::isThreadPeer(threadHistory->peer->id)
+			&& passedContext.selected
+			&& !passedContext.active) {
+		threadContext.emplace(passedContext);
+		threadContext->currentBg = st::dialogsBgOver->b;
+		threadContext->selected = false;
+	}
+	const auto &context = threadContext ? *threadContext : passedContext;
 	const auto entry = row->entry();
 	const auto history = row->history();
 	const auto thread = row->thread();
@@ -1238,6 +1269,67 @@ void RowPainter::Paint(
 			texttop,
 			availableWidth,
 			st::dialogsTextFont->height);
+		// MTS Link: the thread message is the second line (as the topics
+		// of a forum), the last comment is below it.
+		const auto threadRoot = (peer
+				&& MtsLink::isThreadPeer(peer->id)
+				&& MtsLink::threadRowsThreeLines())
+			? peer->owner().message(
+				peer->id,
+				MtsLink::threadParentInfo(peer->id).second)
+			: nullptr;
+		if (threadRoot) {
+			const auto rootRect = QRect(
+				nameleft,
+				texttop,
+				availableWidth,
+				st::dialogsTextFont->height);
+			auto rootText = threadRoot->notificationText().text;
+			rootText.replace(QChar('\n'), QChar(' '));
+			p.setFont(st::dialogsTextFont);
+			// Grayer than the last comment below it.
+			auto rootColor = (context.active
+				? st::dialogsTextFgActive
+				: context.selected
+				? st::dialogsTextFgOver
+				: st::dialogsTextFg)->c;
+			if (!context.active) {
+				rootColor.setAlphaF(rootColor.alphaF() * kThreadRootOpacity);
+			}
+			// The root author as in a chat preview: "Name: text".
+			auto left = rootRect.x();
+			auto available = rootRect.width();
+			if (const auto from = threadRoot->from()) {
+				const auto author = from->isSelf()
+					? tr::lng_from_you(tr::now)
+					: from->shortName();
+				const auto prefix = st::dialogsTextFont->elided(
+					author + u": "_q,
+					available);
+				auto authorColor = color->c;
+				if (!context.active) {
+					authorColor.setAlphaF(
+						authorColor.alphaF() * kThreadRootOpacity);
+				}
+				p.setPen(authorColor);
+				p.drawTextLeft(left, rootRect.y(), context.width, prefix);
+				const auto used = st::dialogsTextFont->width(prefix);
+				left += used;
+				available -= used;
+			}
+			p.setPen(rootColor);
+			if (available > 0) {
+				p.drawTextLeft(
+					left,
+					rootRect.y(),
+					context.width,
+					st::dialogsTextFont->elided(rootText, available));
+			}
+			rect.moveTop(texttop + context.st->topicsHeight);
+		}
+		const auto lastComment = threadRoot
+			? MtsLink::threadLastComment(&peer->session(), peer->id)
+			: nullptr;
 		const auto actionWasPainted = ShowSendActionInDialogs(thread)
 			? thread->sendActionPainter()->paint(
 				p,
@@ -1250,9 +1342,12 @@ void RowPainter::Paint(
 			: false;
 		const auto view = actionWasPainted
 			? nullptr
+			: (threadRoot && !lastComment)
+			? nullptr
 			: thread
 			? &thread->lastItemDialogsView()
 			: nullptr;
+		const auto viewItem = lastComment ? lastComment : item;
 		if (view) {
 			const auto forum = (peer && context.st->topicsHeight)
 				? peer->forum()
@@ -1260,9 +1355,9 @@ void RowPainter::Paint(
 			const auto monoforum = (peer && context.st->topicsHeight)
 				? peer->monoforum()
 				: nullptr;
-			if (!view->prepared(item, forum, monoforum)) {
+			if (!view->prepared(viewItem, forum, monoforum)) {
 				view->prepare(
-					item,
+					viewItem,
 					forum,
 					monoforum,
 					[=] { entry->updateChatListEntry(); },
@@ -1271,7 +1366,13 @@ void RowPainter::Paint(
 			if (forum || monoforum) {
 				rect.setHeight(context.st->topicsHeight + rect.height());
 			}
-			view->paint(p, rect, context);
+			if (threadRoot) {
+				auto commentContext = context;
+				commentContext.baseText = !context.active;
+				view->paint(p, rect, commentContext);
+			} else {
+				view->paint(p, rect, context);
+			}
 		}
 	};
 	PaintRow(

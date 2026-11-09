@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "mtslink/data_adapters.h"
 #include "lang/lang_keys.h"
 #include "base/unixtime.h"
 #include "styles/style_dialogs.h"
@@ -408,8 +409,12 @@ const style::DialogRow &Row::ComputeSt(
 		FilterId filterId) {
 	if (const auto history = entry->asHistory()) {
 		const auto hasTags = entry->hasChatsFilterTags(filterId);
+		// MTS Link: a thread in three lines, as a forum: the chat, the
+		// thread message, the last comment.
 		const auto wideRow = history->peer->displayAsForum()
-			|| history->amMonoforumAdmin();
+			|| history->amMonoforumAdmin()
+			|| (MtsLink::isThreadPeer(history->peer->id)
+				&& MtsLink::threadRowsThreeLines());
 		return wideRow
 			? (hasTags ? st::taggedForumDialogRow : st::forumDialogRow)
 			: hasTags

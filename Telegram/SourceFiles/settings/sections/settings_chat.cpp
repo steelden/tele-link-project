@@ -1853,6 +1853,41 @@ void SetupMessages(
 		});
 	}
 
+	// MTS Link: the threads in the chat list in three lines (the chat, the
+	// thread message, the last comment) or in two.
+	{
+		const auto current = std::make_shared<rpl::variable<bool>>(
+			MtsLink::threadRowsThreeLines());
+		const auto text = [](bool three) {
+			return three
+				? tr::lng_mtslink_thread_rows_three(tr::now)
+				: tr::lng_mtslink_thread_rows_two(tr::now);
+		};
+		const auto button = AddButtonWithLabel(
+			container,
+			tr::lng_mtslink_thread_rows(),
+			current->value() | rpl::map(text),
+			st::settingsButton,
+			{ &st::menuIconDiscussion });
+		button->addClickHandler([=] {
+			const auto options = std::vector<QString>{
+				text(false),
+				text(true),
+			};
+			controller->show(Box(SingleChoiceBox, SingleChoiceBoxArgs{
+				.title = tr::lng_mtslink_thread_rows(),
+				.options = options,
+				.initialSelection = current->current() ? 1 : 0,
+				.callback = [=](int index) {
+					*current = (index == 1);
+					MtsLink::setThreadRowsThreeLines(
+						&controller->session(),
+						index == 1);
+				},
+			}));
+		});
+	}
+
 	// MTS Link: the order of the pinned chats.
 	{
 		using Sort = MtsLink::PinnedSort;

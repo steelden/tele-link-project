@@ -77,6 +77,8 @@ struct PaintContext {
 	bool narrow = false;
 	bool displayUnreadInfo = false;
 	bool insideCommunity = false;
+	// MTS Link: the last comment of a thread in the base text color.
+	bool baseText = false;
 };
 
 extern const char kOptionDialogsMuteIcon[];

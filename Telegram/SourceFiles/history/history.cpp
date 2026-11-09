@@ -2540,10 +2540,26 @@ void History::mtsLinkUnreadHidesChanged(const Dialogs::UnreadState &was) {
 }
 
 void History::setFakeUnreadWhileOpened(bool enabled) {
+	// Temporary: a thread left the unread folder when opened.
+	if (MtsLink::hasChatId(peer->id)) {
+		const auto state = chatListBadgesState();
+		LOG(("MtsLink FakeUnread: %1 '%2' thread %3, enable %4, was %5, "
+			"inChatList %6, unread %7, mention %8, count %9"
+			).arg(peer->id.value
+			).arg(peer->name()
+			).arg(MtsLink::isThreadPeer(peer->id) ? 1 : 0
+			).arg(enabled ? 1 : 0
+			).arg(fakeUnreadWhileOpened() ? 1 : 0
+			).arg(inChatList() ? 1 : 0
+			).arg(state.unread ? 1 : 0
+			).arg(state.mention ? 1 : 0
+			).arg(unreadCount()));
+	}
 	if (fakeUnreadWhileOpened() == enabled) {
 		return;
 	} else if (enabled) {
-		if (!inChatList()) {
+		// MTS Link: a thread row is not in the main list, only in folders.
+		if (!inChatList() && !MtsLink::isThreadPeer(peer->id)) {
 			return;
 		}
 		const auto state = chatListBadgesState();
@@ -2556,7 +2572,12 @@ void History::setFakeUnreadWhileOpened(bool enabled) {
 	} else {
 		_flags &= ~Flag::FakeUnreadWhileOpened;
 	}
-	owner().chatsFilters().refreshHistory(this);
+	if (MtsLink::isThreadPeer(peer->id)) {
+		// A thread row lives in the folders only, not in the main list.
+		owner().refreshChatListEntry(this);
+	} else {
+		owner().chatsFilters().refreshHistory(this);
+	}
 }
 
 [[nodiscard]] bool History::fakeUnreadWhileOpened() const {
