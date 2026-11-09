@@ -194,9 +194,10 @@ void PinnedBar::createControls() {
 
 	_bar->widget()->move(0, 0);
 	_bar->widget()->show();
-	_wrap.entity()->resize(
-		_wrap.entity()->width(),
-		_bar->widget()->height());
+	_bar->widget()->heightValue(
+	) | rpl::on_next([=](int height) {
+		_wrap.entity()->resize(_wrap.entity()->width(), height);
+	}, _bar->widget()->lifetime());
 
 	_wrap.geometryValue(
 	) | rpl::on_next([=](QRect rect) {

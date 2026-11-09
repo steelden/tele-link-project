@@ -29,6 +29,8 @@ struct MessageBarContent {
 	Text::MarkedContext context;
 	std::shared_ptr<DynamicImage> preview;
 	style::margins margins;
+	// MTS Link: the text in a few lines (the thread message), the bar grows.
+	int maxLines = 1;
 };
 
 class MessageBar final {
@@ -77,6 +79,8 @@ private:
 	};
 	void setup();
 	void refreshImage();
+	void refreshHeight();
+	[[nodiscard]] int textLines() const;
 	void paint(Painter &p);
 	void paintLeftBar(Painter &p);
 	void tweenTo(MessageBarContent &&content);
@@ -114,6 +118,7 @@ private:
 	Text::String _title, _text;
 	QPixmap _image, _topBarGradient, _bottomBarGradient;
 	std::unique_ptr<Animation> _animation;
+	int _extraHeight = 0;
 	bool _customEmojiRepaintScheduled = false;
 	bool _imageRefreshScheduled = false;
 

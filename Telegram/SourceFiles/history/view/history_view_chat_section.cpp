@@ -4358,13 +4358,6 @@ void ChatWidget::restoreState(not_null<ChatMemento*> memento) {
 	if (_repliesRootId && MtsLink::hasChatId(_peer->id)) {
 		MtsLink::setCurrentOpenThread(_peer->id, _repliesRootId);
 		MtsLink::subscribeTyping(&session(), _peer->id, _repliesRootId);
-		// Temporary: a thread left the unread folder when opened.
-		LOG(("MtsLink FakeUnread: open thread %1 of %2, entry %3, loaded %4"
-			).arg(_repliesRootId.bare
-			).arg(_peer->id.value
-			).arg(MtsLink::threadPeerFor(_peer->id, _repliesRootId).value
-			).arg(session().data().historyLoaded(
-				MtsLink::threadPeerFor(_peer->id, _repliesRootId)) ? 1 : 0));
 		if (const auto entry = session().data().historyLoaded(
 				MtsLink::threadPeerFor(_peer->id, _repliesRootId))) {
 			entry->setFakeUnreadWhileOpened(true);

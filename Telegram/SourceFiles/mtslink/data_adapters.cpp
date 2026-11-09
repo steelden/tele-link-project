@@ -407,7 +407,6 @@ void ClearReadNotified(
 		return;
 	}
 	auto &ids = i.value();
-	auto hidden = 0;
 	for (auto k = ids.begin(); k != ids.end();) {
 		const auto mtsId = msgIdToMtsLinkId(peerId, *k);
 		const auto read = lastReadId.isEmpty()
@@ -420,15 +419,8 @@ void ClearReadNotified(
 			item->notificationThread()->removeNotification(item);
 			Core::App().notifications().clearFromItem(item);
 		}
-		++hidden;
 		k = ids.erase(k);
 	}
-	LOG(("MtsLink Notify: read %1 root %2 till '%3', hidden %4, left %5"
-		).arg(peerId.value
-		).arg(rootId.bare
-		).arg(lastReadId
-		).arg(hidden
-		).arg(ids.size()));
 	if (ids.isEmpty()) {
 		NotifiedMessages.erase(i);
 	}
@@ -10168,12 +10160,6 @@ HistoryItem *threadLastComment(
 						cached->profiles);
 					return;
 				}
-				LOG(("MtsLink ThreadRow: last comment of %1 from the server "
-					"(cache %2)"
-					).arg(threadPeerId.value
-					).arg((cached && !cached->messages.isEmpty())
-						? u"old"_q
-						: u"none"_q));
 				loadThreadLastComment(strong, threadPeerId);
 			});
 		});

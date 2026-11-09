@@ -52,7 +52,10 @@ MessageBar::MessageBar(
 	Fn<bool()> customEmojiPaused)
 : _st(st)
 , _widget(parent)
-, _customEmojiPaused(std::move(customEmojiPaused)) {
+, _customEmojiPaused(std::move(customEmojiPaused))
+// MTS Link: the text may wrap (the thread message in a few lines), the
+// default String is never wrapped (its min resize width is the maximum).
+, _text(st::msgMinWidth) {
 	setup();
 
 	style::PaletteChanged(
@@ -81,6 +84,36 @@ void MessageBar::setup() {
 		}
 		paint(p);
 	}, _widget.lifetime());
+
+	_widget.widthValue(
+	) | rpl::on_next([=] {
+		refreshHeight();
+	}, _widget.lifetime());
+}
+
+int MessageBar::textLines() const {
+	if (_content.maxLines <= 1 || _title.isEmpty()) {
+		return 1;
+	}
+	const auto width = bodyRect().width();
+	if (width <= 0) {
+		return 1;
+	}
+	const auto line = _st.text.font->height;
+	const auto lines = (_text.countHeight(width) + line - 1) / line;
+	return std::clamp(lines, 1, _content.maxLines);
+}
+
+void MessageBar::refreshHeight() {
+	const auto extra = (textLines() - 1) * _st.text.font->height;
+	if (_extraHeight != extra) {
+		_extraHeight = extra;
+		_topBarGradient = _bottomBarGradient = QPixmap();
+	}
+	const auto height = st::historyReplyHeight + _extraHeight;
+	if (_widget.height() != height) {
+		_widget.resize(_widget.width(), height);
+	}
 }
 
 void MessageBar::set(MessageBarContent &&content) {
@@ -215,7 +248,9 @@ void MessageBar::updateFromContent(MessageBarContent &&content) {
 	_text.setMarkedText(
 		_st.text,
 		_content.text,
-		Ui::DialogTextOptions(),
+		((_content.maxLines > 1)
+			? Ui::ItemTextDefaultOptions()
+			: Ui::DialogTextOptions()),
 		_content.context);
 	if (_content.preview) {
 		_content.preview->subscribeToUpdates(crl::guard(&_widget, [=] {
@@ -226,6 +261,7 @@ void MessageBar::updateFromContent(MessageBarContent &&content) {
 		}));
 	}
 	refreshImage();
+	refreshHeight();
 }
 
 void MessageBar::refreshImage() {
@@ -264,7 +300,7 @@ QRect MessageBar::bodyRect(bool withImage) const {
 	const auto left = innerLeft + (withImage ? imageSkip : 0);
 	const auto top = st::msgReplyPadding.top();
 	const auto width = _widget.width() - left - st::msgReplyPadding.right();
-	const auto height = (st::historyReplyHeight - 2 * top);
+	const auto height = (st::historyReplyHeight + _extraHeight - 2 * top);
 	return QRect(left, top, width, height) - _content.margins;
 }
 
@@ -436,7 +472,7 @@ void MessageBar::paint(Painter &p) {
 				.now = now,
 				.pausedEmoji = paused || On(PowerSaving::kEmojiChat),
 				.pausedSpoiler = pausedSpoiler,
-				.elisionLines = 1,
+				.elisionLines = textLines(),
 			});
 		}
 	} else if (_animation->bodyAnimation == BodyAnimation::Text) {
@@ -485,12 +521,11 @@ auto MessageBar::countBarState(int index) const -> BarState {
 
 	auto result = BarState();
 	const auto line = st::msgReplyBarSize.width();
-	const auto height = st::msgReplyBarSize.height();
+	const auto height = st::msgReplyBarSize.height() + _extraHeight;
 	const auto count = _content.count;
 	const auto shownCount = std::min(count, 4);
 	const auto dividers = (shownCount - 1) * line;
-	const auto size = float64(st::msgReplyBarSize.height() - dividers)
-		/ shownCount;
+	const auto size = float64(height - dividers) / shownCount;
 	const auto fullHeight = count * size + (count - 1) * line;
 	const auto topByIndex = [&](int index) {
 		return index * (size + line);
@@ -549,7 +584,7 @@ void MessageBar::paintLeftBar(Painter &p) {
 		? _animation->barTop.value(state.offset)
 		: state.offset;
 	const auto line = st::msgReplyBarSize.width();
-	const auto height = st::msgReplyBarSize.height();
+	const auto height = st::msgReplyBarSize.height() + _extraHeight;
 	const auto activeFrom = offset - scroll;
 	const auto activeTill = activeFrom + state.size;
 	const auto single = state.size + state.skip;

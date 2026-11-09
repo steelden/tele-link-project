@@ -70,13 +70,21 @@ rpl::producer<Ui::MessageBarContent> RootViewContent(
 			// while loading the content shows a "Loading..." text.
 			content.text = tr::link(tr::lng_deleted_message(tr::now));
 		}
-		PeerData *sender = history->peer;
+		// MTS Link: the author of the thread message, the chat name is in
+		// the top bar already.
+		PeerData *sender = item ? item->from().get() : history->peer.get();
 		if (item && item->discussionPostOriginalSender()) {
 			sender = item->discussionPostOriginalSender();
 		}
 		content.title = sender->name().isEmpty()
 			? "Message"
 			: sender->name();
+		// MTS Link: the thread message is shown in up to 10 lines.
+		content.maxLines = 10;
+		// The full text, the reply preview is cut and in one line.
+		if (item && !item->originalText().text.isEmpty()) {
+			content.text = item->originalText();
+		}
 		return std::move(content);
 	});
 }
