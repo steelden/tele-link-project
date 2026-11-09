@@ -1441,7 +1441,9 @@ void TopBarWidget::updateControlsVisibility() {
 	const auto callsEnabled = [&] {
 		if (const auto peer = _activeChat.key.peer()) {
 			if (const auto user = peer->asUser()) {
+				// MTS Link: no call in the Favorites (a personal chat).
 				return !user->isSelf()
+					&& (peer->id != MtsLink::favoritesPeerId())
 					&& !user->isBot()
 					&& !user->isInaccessible()
 					&& !peer->isServiceUser();
