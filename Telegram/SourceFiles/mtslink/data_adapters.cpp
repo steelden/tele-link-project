@@ -5595,9 +5595,21 @@ void handleNotificationEvent(
 				}
 			} else {
 				const auto history = session->data().historyLoaded(peerId);
-				if (history) {
+				const auto item = history
+					? session->data().message(peerId, readMsgId)
+					: nullptr;
+				// The events come for each read request, late: the event of
+				// an earlier request moved the read back, the messages read
+				// after it were unread again (the chat opened at them).
+				const auto readDate = history
+					? history->mtsLinkInboxReadDate()
+					: TimeId();
+				const auto older = item
+					&& readDate
+					&& (item->date() < readDate);
+				if (history && !older) {
 					history->setInboxReadTill(readMsgId);
-					if (const auto item = session->data().message(peerId, readMsgId)) {
+					if (item) {
 						history->setMtsLinkInboxReadDate(item->date());
 					}
 				}
@@ -7051,12 +7063,6 @@ void sendTracked(not_null<Main::Session*> session, const QString &clientId) {
 	}
 	const auto &send = i.value();
 	const auto weak = base::make_weak(session);
-	// Temporary: the second file of a few sent at once was not sent.
-	LOG(("MtsLink Sending: %1 to %2, files '%3', local %4"
-		).arg(clientId
-		).arg(send.chatId
-		).arg(send.fileIds.join(',')
-		).arg(send.localId.bare));
 	mts->sending()->sendMessage(
 		send.chatId,
 		send.text,
@@ -7069,13 +7075,6 @@ void sendTracked(not_null<Main::Session*> session, const QString &clientId) {
 		[=](const QJsonObject &result) {
 			const auto strong = weak.get();
 			const auto type = result.value(u"type"_q).toString();
-			// Temporary: the answer to the send.
-			LOG(("MtsLink Sending: %1 answer %2 %3"
-				).arg(clientId
-				).arg(type
-				).arg(QString::fromUtf8(QJsonDocument(
-					result.value(u"value"_q).toObject()).toJson(
-						QJsonDocument::Compact)).left(300)));
 			if (!strong || type != u"BusinessError"_q) {
 				return;
 			}
@@ -12325,7 +12324,6 @@ void showOpenMeetingBox(std::shared_ptr<Ui::Show> show) {
 			const auto url = onlyId.match(text).hasMatch()
 				? QUrl(u"https://my.mts-link.ru/j/MTC/"_q + text)
 				: QUrl::fromUserInput(text);
-			LOG(("MtsLink Navigate: open meeting '%1'").arg(url.toString()));
 			if (text.isEmpty() || !tryOpenConferenceUrl(url)) {
 				field->showError();
 				return;

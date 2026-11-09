@@ -500,17 +500,6 @@ void PaintRow(
 	if (swipeTranslation) {
 		p.translate(swipeMirrored ? swipeTranslation : -swipeTranslation, 0);
 	}
-	// Temporary: whether the thread rows are painted here.
-	if (history) {
-		static auto logged = base::flat_set<PeerId>();
-		if (logged.emplace(history->peer->id).second) {
-			LOG(("MtsLink ThreadLook: row %1 '%2' thread %3 active %4"
-				).arg(history->peer->id.value
-				).arg(history->peer->name()
-				).arg(MtsLink::isThreadPeer(history->peer->id) ? 1 : 0
-				).arg(context.active ? 1 : 0));
-		}
-	}
 	// MTS Link: a thread is tinted, to be told from the chats.
 	if (!context.active
 		&& history

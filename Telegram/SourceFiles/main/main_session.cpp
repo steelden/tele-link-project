@@ -555,11 +555,6 @@ bool Session::uploadsInProgress() const {
 void Session::uploadsStopWithConfirmation(Fn<void()> done) {
 	const auto id = _uploader->currentUploadId();
 	const auto message = data().message(id);
-	// Temporary: what upload holds the quit.
-	LOG(("MtsLink Upload: in progress %1/%2, message %3"
-		).arg(id.peer.value
-		).arg(id.msg.bare
-		).arg(message ? "yes" : "no"));
 	const auto exists = (message != nullptr);
 	const auto window = message
 		? Core::App().windowFor(message->history()->peer)

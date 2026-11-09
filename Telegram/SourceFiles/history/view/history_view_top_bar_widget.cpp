@@ -648,9 +648,6 @@ void TopBarWidget::paintTopBar(Painter &p) {
 		// it), colored: a thread, not the chat itself.
 		p.setPen(st::windowActiveTextFg);
 		p.setFont(st::semiboldFont);
-		// Temporary: the color of the thread title.
-		LOG(("MtsLink ThreadLook: title color %1"
-			).arg(st::windowActiveTextFg->c.name()));
 		const auto title = peer
 			? peer->name()
 			: tr::lng_manage_discussion_group(tr::now);

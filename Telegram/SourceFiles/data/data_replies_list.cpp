@@ -28,9 +28,43 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "mtslink/data_adapters.h"
 #include "mtslink/session.h"
+#include "data/data_groups.h"
 
 namespace Data {
 namespace {
+
+// MTS Link: a message with several files is an album, the message with its
+// extra files (a group). The album is drawn on the last item of the group,
+// all the items are in the list, or the comment is not shown at all.
+void PushMtsLinkItem(
+		std::vector<MsgId> &list,
+		not_null<HistoryItem*> item) {
+	const auto push = [&](MsgId id) {
+		if (!ranges::contains(list, id)) {
+			list.push_back(id);
+		}
+	};
+	push(item->id);
+	if (const auto group = item->history()->owner().groups().find(item)) {
+		for (const auto &other : group->items) {
+			push(other->id);
+		}
+	}
+}
+
+// Whether the item is an extra file of an album already in the list.
+[[nodiscard]] bool MtsLinkGroupInList(
+		const std::vector<MsgId> &list,
+		not_null<HistoryItem*> item) {
+	if (const auto group = item->history()->owner().groups().find(item)) {
+		for (const auto &other : group->items) {
+			if (other != item && ranges::contains(list, other->id)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
 
 constexpr auto kMessagesPerPage = 50;
 constexpr auto kReadRequestTimeout = crl::time(100);
@@ -490,9 +524,12 @@ bool RepliesList::applyUpdate(const MessageUpdate &update) {
 
 	const auto id = update.item->id;
 	const auto peerId = _history->peer->id;
+	const auto groupInList = MtsLink::hasChatId(peerId)
+		&& MtsLinkGroupInList(_list, update.item);
 	const auto inThread = update.item->inThread(_rootId)
 		|| (MtsLink::hasChatId(peerId)
-			&& MtsLink::threadRootFor(peerId, id) == _rootId);
+			&& MtsLink::threadRootFor(peerId, id) == _rootId)
+		|| groupInList;
 	const auto added = (update.flags & Flag::ReplyToTopAdded);
 	const auto i = ranges::lower_bound(_list, id, std::greater<>());
 	if (update.flags & Flag::Destroyed) {
@@ -520,7 +557,7 @@ bool RepliesList::applyUpdate(const MessageUpdate &update) {
 	} else if (!inThread) {
 		return false;
 	}
-	if (added) {
+	if (added && !groupInList) {
 		changeUnreadCountByPost(id, 1);
 	}
 	if (_skippedAfter != 0) {
@@ -534,11 +571,21 @@ bool RepliesList::applyUpdate(const MessageUpdate &update) {
 			return false;
 		}
 		_list.insert(begin(_list), id);
+		if (const auto group = _history->owner().groups().find(
+				update.item)) {
+			for (const auto &other : group->items) {
+				if (!ranges::contains(_list, other->id)) {
+					_list.insert(begin(_list), other->id);
+				}
+			}
+		}
 	} else {
 		_list.insert(i, id);
 	}
 	if (MtsLink::hasChatId(_history->peer->id)) {
-		if (const auto known = _fullCount.current()) {
+		// An extra file of an album is the same comment, not counted.
+		if (groupInList) {
+		} else if (const auto known = _fullCount.current()) {
 			_fullCount = *known + 1;
 		}
 	} else if (_skippedBefore && _skippedAfter) {
@@ -731,7 +778,7 @@ void RepliesList::mtsLinkApplyAround(
 			const auto item = MtsLink::addMessage(
 				session, messages[i], true);
 			if (item) {
-				_list.push_back(item->id);
+				PushMtsLinkItem(_list, item);
 			}
 		}
 		_loadingHistorical = false;
@@ -849,9 +896,8 @@ void RepliesList::loadBefore() {
 				for (int i = messages.size() - 1; i >= 0; --i) {
 					const auto item = MtsLink::addMessage(
 						session, messages[i], true);
-					if (item
-						&& !ranges::contains(_list, item->id)) {
-						_list.push_back(item->id);
+					if (item) {
+						PushMtsLinkItem(_list, item);
 					}
 				}
 				auto &owner = _history->owner();
@@ -1243,8 +1289,8 @@ void RepliesList::mtsLinkApplyPage(
 	_loadingHistorical = true;
 	for (const auto &message : messages) {
 		const auto item = MtsLink::addMessage(session, message, true);
-		if (item && !ranges::contains(_list, item->id)) {
-			_list.push_back(item->id);
+		if (item) {
+			PushMtsLinkItem(_list, item);
 		}
 	}
 	_loadingHistorical = false;
