@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "main/main_account.h"
 #include "mtslink/data_adapters.h"
+#include "data/data_groups.h"
 #include "mtslink/call_window.h"
 #include "mtslink/session.h"
 #include "mtslink/api/api_messages.h"
@@ -8989,6 +8990,29 @@ int HistoryWidget::countInitialScrollTop() {
 			_history->peer->id);
 		_history->calculateFirstUnreadMessage();
 		const auto unread = _history->firstUnreadMessage();
+		// Temporary: the album unread.
+		if (const auto unreadItem = unread ? unread->data().get() : nullptr
+			; unreadItem && MtsLink::hasChatId(_history->peer->id)) {
+			const auto unread = unreadItem;
+			auto group = QString();
+			if (const auto found = session().data().groups().find(unread)) {
+				for (const auto &other : found->items) {
+					group += QString::number(other->id.bare)
+						+ ((other.get() == unread) ? u"*"_q : QString())
+						+ ' ';
+				}
+			}
+			LOG(("MtsLink AlbumUnread: first unread %1 (%2) date %3 "
+				"readDate %4 unread %5 group [%6]"
+				).arg(unread->id.bare
+				).arg(MtsLink::msgIdToMtsLinkId(
+					_history->peer->id,
+					unread->id)
+				).arg(unread->date()
+				).arg(_history->mtsLinkInboxReadDate()
+				).arg(_history->unreadCount()
+				).arg(group));
+		}
 		if (unread) {
 			createUnreadBarAndResize();
 		}

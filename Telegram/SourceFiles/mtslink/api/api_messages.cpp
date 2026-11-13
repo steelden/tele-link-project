@@ -9,10 +9,72 @@ based on Telegram Desktop.
 #include <QtCore/QJsonDocument>
 
 namespace MtsLink::Api {
+namespace {
+
+constexpr auto kServerErrorRetries = 5;
+constexpr auto kRetryMaxDelay = 30000;
+
+[[nodiscard]] bool IsErrorResult(const QJsonObject &result) {
+	const auto type = result.value(u"type"_q).toString();
+	return (type == u"RpcError"_q) || (type == u"BusinessError"_q);
+}
+
+} // namespace
 
 Messages::Messages(Rpc *rpc, QObject *parent)
 : QObject(parent)
 , _rpc(rpc) {
+}
+
+void Messages::requestMessages(
+		const QJsonObject &param,
+		std::function<void(const QJsonObject&)> done,
+		std::function<void(const QString&)> fail,
+		int errors,
+		int attempt) {
+	const auto retry = [=](const QString &reason, int errorsNow) {
+		const auto chatId = param.value(u"chatId"_q).toString();
+		if (errorsNow > kServerErrorRetries) {
+			LOG(("MtsLink Messages: load of %1 failed %2 times, the last: "
+				"%3").arg(chatId).arg(errorsNow).arg(reason));
+			if (fail) {
+				fail(reason);
+			}
+			return;
+		}
+		const auto again = [=] {
+			requestMessages(param, done, fail, errorsNow, attempt + 1);
+		};
+		if (!_rpc->isConnected()) {
+			// Sent with the connection (the requests wait for it).
+			LOG(("MtsLink Messages: load of %1 (%2) waits for the "
+				"connection").arg(chatId, reason));
+			again();
+			return;
+		}
+		const auto delay = std::min(
+			1000 << std::min(attempt, 5),
+			kRetryMaxDelay);
+		LOG(("MtsLink Messages: load of %1 (%2) repeated in %3 ms, "
+			"attempt %4").arg(chatId, reason).arg(delay).arg(attempt + 2));
+		QTimer::singleShot(delay, this, again);
+	};
+	_rpc->call(
+		u"Chat.GetMessagesV2"_q,
+		param,
+		[=](const QJsonObject &result) {
+			if (IsErrorResult(result)) {
+				retry(
+					QString::fromUtf8(QJsonDocument(result).toJson(
+						QJsonDocument::Compact)).left(300),
+					errors + 1);
+				return;
+			}
+			done(result);
+		},
+		[=](const QString &error) {
+			retry(error, errors);
+		});
 }
 
 void Messages::load(
@@ -30,32 +92,11 @@ void Messages::load(
 	const auto isOlder = !fromMessageId.isEmpty();
 	const auto loading = isOlder ? &_loadingOlderChats : &_loadingChats;
 	loading->insert(chatId);
-	const auto timer = QPointer<QTimer>(new QTimer(this));
-	timer->setSingleShot(true);
-	timer->start(10000);
-	QObject::connect(timer, &QTimer::timeout, this, [=] {
-		// No answer: repeated with the reconnect or the next open.
-		LOG(("MtsLink Messages: load of %1 timed out").arg(chatId));
-		loading->remove(chatId);
-		if (!isOlder) {
-			_failedChats.insert(chatId);
-		}
-		timer->deleteLater();
-	});
-	const auto finishTimer = [timer] {
-		if (timer) {
-			timer->stop();
-			timer->deleteLater();
-		}
-	};
-	_rpc->call(
-		"Chat.GetMessagesV2",
+	requestMessages(
 		param,
-		[this, chatId, isOlder, loading, finishTimer](
-				const QJsonObject &result) {
-			finishTimer();
+		[this, chatId, isOlder, loading](const QJsonObject &result) {
 			loading->remove(chatId);
-			if (!isOlder && result.value("type").toString() != u"BusinessError"_q) {
+			if (!isOlder) {
 				_loadedOnceChats.insert(chatId);
 				_failedChats.remove(chatId);
 			}
@@ -108,9 +149,9 @@ void Messages::load(
 					chatId, messages, profiles, rawLastId, rawCount);
 			}
 		},
-		[this, chatId, isOlder, loading, finishTimer](const QString &error) {
-			finishTimer();
-			LOG(("MtsLink Messages: load of %1 failed: %2").arg(chatId, error));
+		[this, chatId, isOlder, loading](const QString &error) {
+			// Not an empty page (the older ones: not the history top),
+			// the newest ones are loaded again with the reconnect or open.
 			loading->remove(chatId);
 			if (!isOlder) {
 				_failedChats.insert(chatId);
@@ -119,8 +160,7 @@ void Messages::load(
 }
 
 void Messages::loadPreview(const ChatId &chatId, int limit) {
-	_rpc->call(
-		"Chat.GetMessagesV2",
+	requestMessages(
 		QJsonObject{ { "chatId", chatId }, { "limit", limit } },
 		[this, chatId, limit](const QJsonObject &result) {
 			const auto value = result.value("value").toObject();
@@ -455,8 +495,7 @@ void Messages::loadThread(
 		param["direction"] = QStringLiteral("Before");
 	}
 
-	_rpc->call(
-		"Chat.GetMessagesV2",
+	requestMessages(
 		param,
 		[this, chatId, parentId](const QJsonObject &result) {
 			const auto value = result.value("value").toObject();
@@ -509,8 +548,7 @@ void Messages::loadThreadPage(
 		param["from"] = fromMessageId;
 		param["direction"] = after ? u"After"_q : u"Before"_q;
 	}
-	_rpc->call(
-		"Chat.GetMessagesV2",
+	requestMessages(
 		param,
 		[=](const QJsonObject &result) {
 			const auto value = result.value("value").toObject();
@@ -594,8 +632,7 @@ void Messages::loadAround(
 			const QString &direction,
 			int count,
 			Fn<void(const QJsonObject&)> done) {
-		_rpc->call(
-			"Chat.GetMessagesV2",
+		requestMessages(
 			QJsonObject{
 				{ "chatId", chatId },
 				{ "from", from },
@@ -653,13 +690,57 @@ void Messages::loadAround(
 	});
 }
 
+void Messages::loadBefore(
+		const ChatId &chatId,
+		const MessageId &fromId,
+		int limit,
+		OlderSliceDone done) {
+	requestMessages(
+		QJsonObject{
+			{ "chatId", chatId },
+			{ "from", fromId },
+			{ "direction", u"Before"_q },
+			{ "limit", limit },
+		},
+		[=](const QJsonObject &result) {
+			const auto value = result.value("value").toObject();
+			const auto list = value.value("messages").toArray();
+			const auto rawLastId = list.isEmpty()
+				? QString()
+				: list.last().toObject().value("id").toString();
+			QList<MessageData> messages;
+			for (const auto &item : list) {
+				auto msg = parseMessage(item.toObject());
+				if (msg.isDeleted) {
+					Q_EMIT deletedMessageSeen(
+						msg.chatId.isEmpty() ? chatId : msg.chatId,
+						msg.id);
+					continue;
+				}
+				if (msg.chatId.isEmpty()) {
+					msg.chatId = chatId;
+				}
+				messages.push_back(std::move(msg));
+			}
+			QList<MemberProfile> profiles;
+			for (const auto &item : value.value("memberProfiles").toArray()) {
+				profiles.push_back(parseProfile(item.toObject()));
+			}
+			done(
+				std::move(messages),
+				std::move(profiles),
+				rawLastId,
+				int(list.size()));
+		},
+		[=](const QString &) { done({}, {}, QString(), -1); });
+}
+
 void Messages::loadAfter(
 		const ChatId &chatId,
 		const MessageId &fromId,
 		int limit,
 		SliceDone done) {
-	_rpc->call(
-		"Chat.GetMessagesV2",
+	requestMessages(
 		QJsonObject{
 			{ "chatId", chatId },
 			{ "from", fromId },

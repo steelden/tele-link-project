@@ -272,6 +272,21 @@ void Histories::readInboxTill(
 		};
 		const auto date = dateOf(tillId);
 		const auto readDate = history->mtsLinkInboxReadDate();
+		// Temporary: the album unread.
+		{
+			const auto item = session().data().message(
+				history->peer,
+				tillId);
+			LOG(("MtsLink AlbumUnread: read till %1 (%2) date %3 "
+				"readDate %4 unread %5 group %6 willRead %7"
+				).arg(tillId.bare
+				).arg(MtsLink::msgIdToMtsLinkId(history->peer->id, tillId)
+				).arg(date
+				).arg(readDate
+				).arg(history->unreadCount()
+				).arg((item && item->groupId()) ? 1 : 0
+				).arg(_states[history].willReadTill.bare));
+		}
 		if (date && readDate && date < readDate) {
 			return;
 		}
@@ -799,6 +814,11 @@ void Histories::sendReadRequest(not_null<History*> history, State &state) {
 				history->peer,
 				tillId);
 			const auto sending = tillItem && tillItem->isSending();
+			// Temporary: the album unread.
+			LOG(("MtsLink AlbumUnread: request %1 till %2 (%3) sending %4"
+				).arg(chatId, mtsId
+				).arg(tillId.bare
+				).arg(sending ? 1 : 0));
 			if (!chatId.isEmpty() && !mtsId.isEmpty() && !sending) {
 				MtsLink::markReadRequestSent(chatId);
 				mts->sending()->readMessage(chatId, mtsId);

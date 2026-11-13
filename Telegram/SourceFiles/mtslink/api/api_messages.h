@@ -156,6 +156,19 @@ public:
 		const ChatId &chatId,
 		const MessageId &messageId,
 		int limit = 50);
+	// The older messages before a message (filling a gap in the history),
+	// done(messages, profiles, rawLastId, rawCount), empty on a failure:
+	// not the olderMessagesLoaded() of the history top.
+	using OlderSliceDone = std::function<void(
+		QList<MessageData>,
+		QList<MemberProfile>,
+		QString,
+		int)>;
+	void loadBefore(
+		const ChatId &chatId,
+		const MessageId &fromId,
+		int limit,
+		OlderSliceDone done);
 
 	// A page of a thread, "Before" or "After" the given message (the
 	// first replies: after the parent itself), done(messages, profiles).
@@ -225,6 +238,17 @@ Q_SIGNALS:
 		const QList<MessageData> &messages,
 		const QList<MemberProfile> &profiles);
 private:
+	// Chat.GetMessagesV2 repeated until a real answer: after the connection
+	// errors and the timeouts always (an error answer is not an empty page,
+	// the history top or a thread without the replies), after the server
+	// errors a few times, then fail().
+	void requestMessages(
+		const QJsonObject &param,
+		std::function<void(const QJsonObject&)> done,
+		std::function<void(const QString&)> fail = nullptr,
+		int errors = 0,
+		int attempt = 0);
+
 	[[nodiscard]] MessageData parseMessage(const QJsonObject &obj) const;
 	[[nodiscard]] FileData parseFile(const QJsonObject &obj) const;
 	[[nodiscard]] MemberProfile parseProfile(const QJsonObject &obj) const;

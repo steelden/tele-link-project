@@ -2682,6 +2682,78 @@ void handleTypingEvent(
 	return result;
 }
 
+namespace {
+
+constexpr auto kGapPagesLimit = 20;
+
+using NewestDone = Fn<void(
+	QList<Api::MessageData>,
+	QList<Api::MemberProfile>,
+	QString,
+	int)>;
+
+// More new messages than a page (while TeleLink was closed or offline): the
+// older pages till the known messages, all added together (otherwise the
+// messages between them are never shown, the history goes on above them).
+void FillHistoryGap(
+		not_null<Main::Session*> session,
+		not_null<Session*> mts,
+		const ChatId &chatId,
+		QList<Api::MessageData> messages,
+		QList<Api::MemberProfile> profiles,
+		const QString &rawLastId,
+		int rawCount,
+		TimeId knownDate,
+		int pages,
+		NewestDone finish) {
+	const auto reached = messages.isEmpty()
+		|| (TimeId(messages.back().createdAt / 1000) <= knownDate);
+	if (reached || rawLastId.isEmpty() || pages >= kGapPagesLimit) {
+		LOG(("MtsLink Gap: %1 %2 after %3 pages, %4 messages"
+			).arg(chatId
+			).arg(reached ? u"filled"_q : u"NOT filled"_q
+			).arg(pages
+			).arg(messages.size()));
+		finish(std::move(messages), std::move(profiles), rawLastId, rawCount);
+		return;
+	}
+	const auto weak = base::make_weak(session);
+	mts->messages()->loadBefore(chatId, rawLastId, 50, [=](
+			QList<Api::MessageData> older,
+			QList<Api::MemberProfile> olderProfiles,
+			QString olderLastId,
+			int olderCount) {
+		if (!weak) {
+			return;
+		} else if (olderCount <= 0) {
+			// The chat start or the server failed: what is loaded.
+			LOG(("MtsLink Gap: %1 stopped after %2 pages (%3)"
+				).arg(chatId
+				).arg(pages
+				).arg(olderCount ? u"failed"_q : u"the chat start"_q));
+			finish(messages, profiles, rawLastId, rawCount);
+			return;
+		}
+		auto all = messages;
+		all.append(older);
+		auto allProfiles = profiles;
+		allProfiles.append(olderProfiles);
+		FillHistoryGap(
+			weak.get(),
+			mts,
+			chatId,
+			std::move(all),
+			std::move(allProfiles),
+			olderLastId,
+			rawCount + olderCount,
+			knownDate,
+			pages + 1,
+			finish);
+	});
+}
+
+} // namespace
+
 void connectToSession(
 		not_null<Main::Session*> mainSession,
 		not_null<Session*> mtsSession) {
@@ -2952,15 +3024,23 @@ void connectToSession(
 				deleteMessage(mainSession, chatId, messageId);
 			}
 		});
-	QObject::connect(
-		mtsSession->messages(),
-		&Api::Messages::messagesLoaded,
-		[mainSession, mtsSession](
+	const auto applyNewest = std::make_shared<Fn<void(
+		const ChatId&,
+		const QList<Api::MessageData>&,
+		const QList<Api::MemberProfile>&,
+		const QString&,
+		int,
+		bool)>>();
+	*applyNewest = [
+			mainSession,
+			mtsSession,
+			weakApply = std::weak_ptr(applyNewest)](
 				const ChatId &chatId,
 				const QList<Api::MessageData> &messages,
 				const QList<Api::MemberProfile> &profiles,
 				const QString &rawLastId,
-				int rawCount) {
+				int rawCount,
+				bool gapFilled) {
 			LOG(("MtsLink Messages: loaded %1 of %2 for %3"
 				).arg(messages.size()).arg(rawCount).arg(chatId));
 			for (const auto &p : profiles) {
@@ -2978,17 +3058,45 @@ void connectToSession(
 				}
 			}
 			const bool hasCachedMessages = (newestExistingDate > 0);
-			if (hasCachedMessages
+			if (!gapFilled
+				&& hasCachedMessages
 				&& !messages.isEmpty()
 				&& rawCount >= 50
 				&& TimeId(messages.back().createdAt / 1000)
 					> newestExistingDate) {
-				// Diagnostics: more new messages than loaded, a gap.
+				// More new messages than loaded: the gap is loaded first.
 				LOG(("MtsLink NewMsg: GAP in %1, the oldest loaded %2 is "
-					"newer than the newest known %3"
+					"newer than the newest known %3, filling"
 					).arg(chatId
 					).arg(messages.back().createdAt / 1000
 					).arg(newestExistingDate));
+				const auto apply = weakApply.lock();
+				if (apply) {
+					FillHistoryGap(
+						mainSession,
+						mtsSession,
+						chatId,
+						messages,
+						profiles,
+						rawLastId,
+						rawCount,
+						newestExistingDate,
+						0,
+						[=](
+								QList<Api::MessageData> all,
+								QList<Api::MemberProfile> allProfiles,
+								QString allLastId,
+								int allCount) {
+							(*apply)(
+								chatId,
+								all,
+								allProfiles,
+								allLastId,
+								allCount,
+								true);
+						});
+					return;
+				}
 			}
 			std::vector<not_null<HistoryItem*>> newerItems;
 			for (int i = messages.size() - 1; i >= 0; --i) {
@@ -3116,6 +3224,23 @@ void connectToSession(
 					});
 				mtsSession->messages()->load(chatId, rawLastId, 50);
 			}
+		};
+	QObject::connect(
+		mtsSession->messages(),
+		&Api::Messages::messagesLoaded,
+		[applyNewest](
+				const ChatId &chatId,
+				const QList<Api::MessageData> &messages,
+				const QList<Api::MemberProfile> &profiles,
+				const QString &rawLastId,
+				int rawCount) {
+			(*applyNewest)(
+				chatId,
+				messages,
+				profiles,
+				rawLastId,
+				rawCount,
+				false);
 		});
 
 	QObject::connect(
@@ -5829,6 +5954,15 @@ void handleChatEvent(
 	}();
 	LOG(("MtsLink Event: type=%1 chatId=%2 dst=%3")
 		.arg(type).arg(chatId).arg(dst));
+	// Temporary: the album unread.
+	if (type == u"ChatFirstUnreadMessageUpdatedEvent"_q
+		|| type == u"ChatUnreadMessageCountUpdatedEvent"_q
+		|| type == u"MessageReadEvent"_q) {
+		LOG(("MtsLink AlbumUnread: %1 %2").arg(
+			type,
+			QString::fromUtf8(QJsonDocument(value).toJson(
+				QJsonDocument::Compact))));
+	}
 
 	if (chatId.isEmpty()) {
 		return;
