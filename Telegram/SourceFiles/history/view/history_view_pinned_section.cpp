@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item_components.h"
 #include "history/history_item.h"
+#include "mtslink/data_adapters.h"
 #include "history/history_view_swipe_back_session.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/widgets/elastic_scroll.h"
@@ -671,6 +672,19 @@ rpl::producer<Data::MessagesSlice> PinnedWidget::listSource(
 		}
 		for (auto i = 0; i != count; ++i) {
 			result.ids.push_back(slice[i]);
+		}
+		// MTS Link: the ids are hashes, not growing, the list is by date.
+		if (MtsLink::hasChatId(_history->peer->id)) {
+			const auto owner = &_history->owner();
+			const auto position = [=](FullMsgId id) {
+				const auto item = owner->message(id);
+				return item
+					? item->position()
+					: Data::MessagePosition{ .fullId = id };
+			};
+			ranges::stable_sort(result.ids, [&](FullMsgId a, FullMsgId b) {
+				return position(a) < position(b);
+			});
 		}
 		return result;
 	});
