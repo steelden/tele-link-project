@@ -137,11 +137,23 @@ public:
 	void loadPinned(const ChatId &chatId, int limit = 50);
 	void reloadPinned(const ChatId &chatId);
 
+	// A page of a thread for this request only (a shared signal gave the
+	// answer of one request to another): the newest one (no "from"), or
+	// "Before" / "After" the message, done(messages, profiles, rawLastId,
+	// rawCount) with the deleted ones counted in rawCount (a page with
+	// them is not the last one), rawCount -1 after the failed retries.
+	using ThreadSliceDone = std::function<void(
+		QList<MessageData>,
+		QList<MemberProfile>,
+		QString,
+		int)>;
 	void loadThread(
 		const ChatId &chatId,
 		const MessageId &parentId,
-		const MessageId &fromMessageId = {},
-		int limit = 50);
+		const MessageId &fromMessageId,
+		bool after,
+		int limit,
+		ThreadSliceDone done);
 
 	using SliceDone = std::function<void(
 		QList<MessageData>,
@@ -201,6 +213,12 @@ public:
 	[[nodiscard]] MessageId newestRawId(const ChatId &chatId) const {
 		return _newestRawIds.value(chatId);
 	}
+	// The newest reply of the thread including deleted ones (the server
+	// counts a deleted newest reply as unread until it is read).
+	[[nodiscard]] MessageId newestThreadRawId(
+			const MessageId &parentId) const {
+		return _newestThreadRawIds.value(parentId);
+	}
 
 Q_SIGNALS:
 	void deletedMessageSeen(const ChatId &chatId, const MessageId &messageId);
@@ -227,11 +245,6 @@ Q_SIGNALS:
 		const QList<MessageData> &messages,
 		const QList<MemberProfile> &profiles,
 		int total);
-	void threadMessagesLoaded(
-		const ChatId &chatId,
-		const MessageId &parentId,
-		const QList<MessageData> &messages,
-		const QList<MemberProfile> &profiles);
 	void aroundMessagesLoaded(
 		const ChatId &chatId,
 		const MessageId &targetId,
@@ -259,6 +272,7 @@ private:
 	// The newest message of the chat including deleted ones: the server
 	// counts a deleted newest message as unread until it is read.
 	QHash<ChatId, MessageId> _newestRawIds;
+	QHash<MessageId, MessageId> _newestThreadRawIds;
 	QSet<ChatId> _failedChats;
 	QSet<ChatId> _loadedOnceChats;
 	QSet<ChatId> _loadingPinnedChats;

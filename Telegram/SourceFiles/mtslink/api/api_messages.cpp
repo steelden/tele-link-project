@@ -485,27 +485,35 @@ void Messages::loadThread(
 		const ChatId &chatId,
 		const MessageId &parentId,
 		const MessageId &fromMessageId,
-		int limit) {
-	QJsonObject param;
-	param["chatId"] = chatId;
-	param["parentId"] = parentId;
-	param["limit"] = limit;
+		bool after,
+		int limit,
+		ThreadSliceDone done) {
+	auto param = QJsonObject{
+		{ "chatId", chatId },
+		{ "parentId", parentId },
+		{ "limit", limit },
+	};
 	if (!fromMessageId.isEmpty()) {
 		param["from"] = fromMessageId;
-		param["direction"] = QStringLiteral("Before");
+		param["direction"] = after ? u"After"_q : u"Before"_q;
 	}
-
 	requestMessages(
 		param,
-		[this, chatId, parentId](const QJsonObject &result) {
+		[=](const QJsonObject &result) {
 			const auto value = result.value("value").toObject();
-			const auto msgArray = value.value("messages").toArray();
-			const auto profilesArray =
-				value.value("memberProfiles").toArray();
-
-			QList<MessageData> messages;
-			messages.reserve(msgArray.size());
-			for (const auto &item : msgArray) {
+			const auto list = value.value("messages").toArray();
+			const auto rawLastId = list.isEmpty()
+				? QString()
+				: list.last().toObject().value("id").toString();
+			if (fromMessageId.isEmpty() && !list.isEmpty()) {
+				// The newest page: the newest reply is the first one.
+				_newestThreadRawIds.insert(
+					parentId,
+					list.first().toObject().value("id").toString());
+			}
+			auto messages = QList<MessageData>();
+			messages.reserve(list.size());
+			for (const auto &item : list) {
 				auto msg = parseMessage(item.toObject());
 				if (msg.isDeleted) {
 					// Deleted on the server: removed locally (kept in the
@@ -520,14 +528,19 @@ void Messages::loadThread(
 				}
 				messages.push_back(std::move(msg));
 			}
-
-			QList<MemberProfile> profiles;
-			profiles.reserve(profilesArray.size());
-			for (const auto &item : profilesArray) {
+			auto profiles = QList<MemberProfile>();
+			for (const auto &item
+					: value.value("memberProfiles").toArray()) {
 				profiles.push_back(parseProfile(item.toObject()));
 			}
-
-			Q_EMIT threadMessagesLoaded(chatId, parentId, messages, profiles);
+			done(
+				std::move(messages),
+				std::move(profiles),
+				rawLastId,
+				int(list.size()));
+		},
+		[=](const QString &) {
+			done({}, {}, QString(), -1);
 		});
 }
 

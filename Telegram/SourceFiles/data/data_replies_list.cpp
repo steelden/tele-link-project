@@ -643,34 +643,38 @@ void RepliesList::loadAround(MsgId id) {
 		auto *mts = session->account().mtsLinkSession();
 		if (!mts) return;
 		auto *msgs = mts->messages();
-		const auto conn = std::make_shared<QMetaObject::Connection>();
-		*conn = QObject::connect(msgs,
-			&MtsLink::Api::Messages::threadMessagesLoaded,
-			[this, weak = base::make_weak(this), conn, id, session, peerId, parentId](
-				const QString &loadedChatId,
-				const QString &loadedParentId,
-				const QList<MtsLink::Api::MessageData> &messages,
-				const QList<MtsLink::Api::MemberProfile> &profiles) {
-			if (!weak) {
-				// The thread was unloaded before the answer.
-				QObject::disconnect(*conn);
+		const auto weak = base::make_weak(this);
+		const auto done = [=](
+				QList<MtsLink::Api::MessageData> messages,
+				QList<MtsLink::Api::MemberProfile> profiles,
+				QString rawLastId,
+				int rawCount) {
+			if (!weak || _loadingAround != id) {
+				// Unloaded, or another request is loading (a refresh).
 				return;
 			}
-			if (loadedParentId != parentId) return;
-			QObject::disconnect(*conn);
 			_loadingAround = std::nullopt;
-
+			LOG(("MtsLink Thread: %1 page around %2: %3 messages, %4 raw"
+				).arg(_rootId.bare
+				).arg(id.bare
+				).arg(messages.size()
+				).arg(rawCount));
+			if (rawCount < 0) {
+				// Not an empty thread: the shown messages stay.
+				_listChanges.fire({});
+				return;
+			}
 			_mtsLinkServerLoaded = true;
 			if (!id) {
 				MtsLink::saveThreadToCache(
 					session,
-					loadedChatId,
+					chatId,
 					parentId,
 					messages,
 					profiles);
 			}
-			mtsLinkApplyAround(id, messages, profiles);
-		});
+			mtsLinkApplyAround(id, messages, profiles, rawLastId, rawCount);
+		};
 		if (!id && _list.empty() && !_mtsLinkCacheTried) {
 			// Shown from the cache at once, replaced by the server answer.
 			_mtsLinkCacheTried = true;
@@ -685,11 +689,16 @@ void RepliesList::loadAround(MsgId id) {
 					).arg(_rootId.bare
 					).arg(messages.size()));
 				const auto loading = _loadingAround;
-				mtsLinkApplyAround(0, messages, profiles);
+				mtsLinkApplyAround(
+					0,
+					messages,
+					profiles,
+					QString(),
+					int(messages.size()));
 				_loadingAround = loading;
 			});
 		}
-		msgs->loadThread(chatId, parentId);
+		msgs->loadThread(chatId, parentId, {}, false, 50, done);
 		return;
 	}
 
@@ -746,7 +755,9 @@ void RepliesList::loadAround(MsgId id) {
 void RepliesList::mtsLinkApplyAround(
 		MsgId id,
 		const QList<MtsLink::Api::MessageData> &messages,
-		const QList<MtsLink::Api::MemberProfile> &profiles) {
+		const QList<MtsLink::Api::MemberProfile> &profiles,
+		const QString &rawLastId,
+		int rawCount) {
 	const auto session = &_history->session();
 	const auto peerId = _history->peer->id;
 	if (!_mtsLinkInboxReadDate) {
@@ -779,9 +790,29 @@ void RepliesList::mtsLinkApplyAround(
 				session, messages[i], true);
 			if (item) {
 				PushMtsLinkItem(_list, item);
+			} else {
+				// Temporary: a reply counted, not shown.
+				LOG(("MtsLink Thread: %1 message %2 (type %3, parent '%4') "
+					"not added"
+					).arg(_rootId.bare
+					).arg(messages[i].id
+					).arg(int(messages[i].type)
+					).arg(messages[i].parentId));
 			}
 		}
 		_loadingHistorical = false;
+		// Temporary: a reply counted, not shown.
+		LOG(("MtsLink Thread: %1 applied %2 messages, %3 in the list, "
+			"replies %4"
+			).arg(_rootId.bare
+			).arg(messages.size()
+			).arg(_list.size()
+			).arg([&] {
+				const auto root = _history->owner().message(
+					_history->peer->id,
+					_rootId);
+				return root ? root->repliesCount() : -1;
+			}()));
 		for (const auto &local : locals) {
 			if (!ranges::contains(_list, local)) {
 				_list.push_back(local);
@@ -809,7 +840,9 @@ void RepliesList::mtsLinkApplyAround(
 			}
 			return a > b;
 		});
-		_skippedBefore = (messages.size() >= 50) ? 1 : 0;
+		// The deleted messages are not in the list: by the server page.
+		_skippedBefore = (rawCount >= 50) ? 1 : 0;
+		_mtsLinkOlderFrom = rawLastId;
 		_skippedAfter = 0;
 		if (const auto root = _history->owner().message(peerId, _rootId)) {
 			const auto apiCount = root->repliesCount();
@@ -850,7 +883,20 @@ void RepliesList::loadBefore() {
 		}
 		const auto peerId = _history->peer->id;
 		const auto lastMsgId = _list.back();
-		const auto fromId = MtsLink::msgIdToMtsLinkId(peerId, lastMsgId);
+		// The oldest loaded on the server (the local call materials are
+		// not there, the deleted ones are not in the list).
+		const auto fromId = [&] {
+			if (!_mtsLinkOlderFrom.isEmpty()) {
+				return _mtsLinkOlderFrom;
+			}
+			for (auto i = _list.rbegin(); i != _list.rend(); ++i) {
+				const auto id = MtsLink::msgIdToMtsLinkId(peerId, *i);
+				if (!id.isEmpty()) {
+					return id;
+				}
+			}
+			return QString();
+		}();
 		if (fromId.isEmpty()) {
 			_skippedBefore = 0;
 			_listChanges.fire({});
@@ -863,22 +909,26 @@ void RepliesList::loadBefore() {
 		if (!mts) return;
 		auto *msgs = mts->messages();
 		_loadingAround = lastMsgId;
-		const auto conn = std::make_shared<QMetaObject::Connection>();
-		*conn = QObject::connect(msgs,
-			&MtsLink::Api::Messages::threadMessagesLoaded,
-			[this, weak = base::make_weak(this), conn, session, peerId, parentId, lastMsgId](
-				const QString &loadedChatId,
-				const QString &loadedParentId,
-				const QList<MtsLink::Api::MessageData> &messages,
-				const QList<MtsLink::Api::MemberProfile> &profiles) {
-			if (!weak) {
-				// The thread was unloaded before the answer.
-				QObject::disconnect(*conn);
+		const auto weak = base::make_weak(this);
+		const auto done = [=](
+				QList<MtsLink::Api::MessageData> messages,
+				QList<MtsLink::Api::MemberProfile> profiles,
+				QString rawLastId,
+				int rawCount) {
+			if (!weak || _loadingAround != lastMsgId) {
+				// Unloaded, or another request is loading (a refresh).
 				return;
 			}
-			if (loadedParentId != parentId) return;
-			QObject::disconnect(*conn);
 			_loadingAround = std::nullopt;
+			LOG(("MtsLink Thread: %1 older page: %2 messages, %3 raw"
+				).arg(_rootId.bare
+				).arg(messages.size()
+				).arg(rawCount));
+			if (rawCount < 0) {
+				// Not the thread start: repeated by the scroll.
+				_listChanges.fire({});
+				return;
+			}
 
 			if (_list.empty() || _list.back() != lastMsgId) {
 				_listChanges.fire({});
@@ -889,8 +939,10 @@ void RepliesList::loadBefore() {
 				MtsLink::applyUserData(session, p);
 			}
 
+			_mtsLinkOlderFrom = rawLastId;
 			if (messages.isEmpty()) {
-				_skippedBefore = 0;
+				// Only the deleted ones in a full page: the next one.
+				_skippedBefore = (rawCount >= 50) ? 1 : 0;
 			} else {
 				_loadingHistorical = true;
 				for (int i = messages.size() - 1; i >= 0; --i) {
@@ -923,7 +975,7 @@ void RepliesList::loadBefore() {
 					return a > b;
 				});
 				_loadingHistorical = false;
-				_skippedBefore = (messages.size() >= 50) ? 1 : 0;
+				_skippedBefore = (rawCount >= 50) ? 1 : 0;
 			}
 			if (_skippedBefore == 0 && _skippedAfter == 0) {
 				const auto root = _history->owner().message(peerId, _rootId);
@@ -954,9 +1006,11 @@ void RepliesList::loadBefore() {
 					LOG(("MtsLink Thread: target %1 not found").arg(seek.bare));
 					_mtsLinkSeekId = 0;
 				}
+			} else if (messages.isEmpty() && _skippedBefore.value_or(0)) {
+				loadBefore();
 			}
-		});
-		msgs->loadThread(chatId, parentId, fromId);
+		};
+		msgs->loadThread(chatId, parentId, fromId, false, 50, done);
 		return;
 	}
 
@@ -1022,19 +1076,25 @@ void RepliesList::loadAfter() {
 		constexpr auto kPage = 50;
 		_mtsLinkLoadingAfter = true;
 		const auto weak = base::make_weak(this);
-		mts->messages()->loadThreadPage(chatId, parentId, fromId, true, kPage, [=](
+		mts->messages()->loadThread(chatId, parentId, fromId, true, kPage, [=](
 				QList<MtsLink::Api::MessageData> messages,
-				QList<MtsLink::Api::MemberProfile> profiles) {
+				QList<MtsLink::Api::MemberProfile> profiles,
+				QString,
+				int rawCount) {
 			const auto strong = weak.get();
 			if (!strong) {
 				return;
 			}
 			_mtsLinkLoadingAfter = false;
+			if (rawCount < 0) {
+				// Not the thread end: repeated by the scroll.
+				return;
+			}
 			LOG(("MtsLink Thread: %1 newer page: %2 messages"
 				).arg(_rootId.bare
 				).arg(messages.size()));
 			mtsLinkApplyPage(messages, profiles);
-			_skippedAfter = (messages.size() >= kPage) ? 1 : 0;
+			_skippedAfter = (rawCount >= kPage) ? 1 : 0;
 			_listChanges.fire({});
 		});
 		return;
@@ -1340,9 +1400,11 @@ void RepliesList::mtsLinkLoadFromStart(Fn<void()> done) {
 	constexpr auto kPage = 50;
 	const auto weak = base::make_weak(this);
 	LOG(("MtsLink Thread: loading %1 from the start").arg(_rootId.bare));
-	mts->messages()->loadThreadPage(chatId, parentId, parentId, true, kPage, [=](
+	mts->messages()->loadThread(chatId, parentId, parentId, true, kPage, [=](
 			QList<MtsLink::Api::MessageData> messages,
-			QList<MtsLink::Api::MemberProfile> profiles) {
+			QList<MtsLink::Api::MemberProfile> profiles,
+			QString,
+			int rawCount) {
 		const auto strong = weak.get();
 		if (!strong) {
 			return;
@@ -1358,7 +1420,7 @@ void RepliesList::mtsLinkLoadFromStart(Fn<void()> done) {
 		_list.clear();
 		mtsLinkApplyPage(messages, profiles);
 		_skippedBefore = 0;
-		_skippedAfter = (messages.size() >= kPage) ? 1 : 0;
+		_skippedAfter = (rawCount >= kPage) ? 1 : 0;
 		if (_skippedAfter == 0) {
 			_fullCount = int(_list.size());
 		}
@@ -1716,9 +1778,21 @@ void RepliesList::sendReadTillRequest() {
 			// Reading the newest shown reply reads the newest one on the
 			// server too (deleted or not loaded yet), otherwise the server
 			// keeps the thread unread.
-			const auto lastChild = MtsLink::threadLastChildId(
-				_history->peer->id,
-				_rootId);
+			const auto lastChild = [&] {
+				const auto parentId = MtsLink::msgIdToMtsLinkId(
+					_history->peer->id,
+					_rootId);
+				const auto loaded = mts->messages()->newestThreadRawId(
+					parentId);
+				const auto known = MtsLink::threadLastChildId(
+					_history->peer->id,
+					_rootId);
+				return (known.isEmpty()
+					|| (!loaded.isEmpty()
+						&& MtsLink::isNewerMessageId(loaded, known)))
+					? loaded
+					: known;
+			}();
 			if (!mtsId.isEmpty()
 				&& !lastChild.isEmpty()
 				&& lastChild != mtsId

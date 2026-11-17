@@ -127,7 +127,9 @@ private:
 	void mtsLinkApplyAround(
 		MsgId id,
 		const QList<MtsLink::Api::MessageData> &messages,
-		const QList<MtsLink::Api::MemberProfile> &profiles);
+		const QList<MtsLink::Api::MemberProfile> &profiles,
+		const QString &rawLastId,
+		int rawCount);
 	void loadBefore();
 	void loadAfter();
 
@@ -158,6 +160,9 @@ private:
 	// until the jump target is found.
 	MsgId _mtsLinkSeekId = 0;
 	int _mtsLinkSeekPages = 0;
+	// The oldest message of the last older page, the deleted ones too:
+	// the next page is loaded before it (a page of deleted ones only).
+	QString _mtsLinkOlderFrom;
 	Fn<void()> _mtsLinkTopLoaded;
 	bool _mtsLinkLoadingAfter = false;
 	void mtsLinkApplyPage(
