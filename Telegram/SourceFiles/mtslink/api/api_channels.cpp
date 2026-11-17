@@ -128,19 +128,34 @@ void Channels::loadChatInfo(const ChatId &chatId) {
 					).arg(QString::fromUtf8(QJsonDocument(result).toJson(
 						QJsonDocument::Compact)).left(3000)));
 			}
-			for (const auto &p : value.value("memberProfiles").toArray()) {
+			// {"type":"DialogV2","value":{..., "memberProfile":{...}}}:
+			// the dialog has one profile (of the interlocutor) inside.
+			const auto inner = (value.contains("value")
+				&& value.contains("type"))
+				? value.value("value").toObject()
+				: value;
+			for (const auto &p : inner.value("memberProfiles").toArray()) {
 				ch.memberProfiles.push_back(p.toObject());
 			}
+			const auto single = inner.value("memberProfile").toObject();
+			if (!single.isEmpty()) {
+				ch.memberProfiles.push_back(single);
+				if (ch.type == ChatType::Dialog
+					&& ch.interlocutorId.isEmpty()) {
+					ch.interlocutorId = single.value("userId").toString();
+				}
+			}
 			if (ch.type == ChatType::Dialog && ch.name.isEmpty()) {
-				const auto profiles = value.value("memberProfiles").toArray();
-				for (const auto &p : profiles) {
-					const auto prof = p.toObject();
+				for (const auto &prof : ch.memberProfiles) {
 					const auto uid = prof.value("userId").toString();
 					if (uid == ch.interlocutorId) {
-						auto name = prof.value("displayName").toString();
+						// As in the dialogs list: the full name first (the
+						// display name may be the login).
+						auto name = (prof.value("firstName").toString()
+							+ " "
+							+ prof.value("lastName").toString()).trimmed();
 						if (name.isEmpty()) {
-							name = (prof.value("firstName").toString()
-								+ " " + prof.value("lastName").toString()).trimmed();
+							name = prof.value("displayName").toString();
 						}
 						ch.name = name;
 						if (ch.avatarFileId.isEmpty()) {
