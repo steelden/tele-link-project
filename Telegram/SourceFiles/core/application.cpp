@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/application.h"
+#include "mtslink/whats_new.h"
 
 #include "data/data_abstract_structure.h"
 #include "data/data_channel.h"
@@ -325,6 +326,7 @@ void Application::run() {
 	refreshGlobalProxy(); // Depends on app settings being read.
 
 	if (const auto old = Local::oldSettingsVersion(); old < AppVersion) {
+		MtsLink::rememberWhatsNewAfterUpdate(old);
 		autoRegisterUrlScheme();
 		Platform::NewVersionLaunched(old);
 	}

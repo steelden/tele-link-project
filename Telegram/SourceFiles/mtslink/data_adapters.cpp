@@ -3,6 +3,7 @@ This file is part of MTS Link Desktop,
 based on Telegram Desktop.
 */
 #include "mtslink/data_adapters.h"
+#include "mtslink/whats_new.h"
 #include "mtslink/session.h"
 #include "mtslink/env_config.h"
 #include "mtslink/my_profile.h"
@@ -2820,6 +2821,8 @@ void connectToSession(
 		[mainSession, mtsSession] {
 			mtsSession->messages()->retryFailedLoads();
 			mtsSession->sending()->forgetSentReads();
+			// After an update: what's new, once.
+			showWhatsNewIfPending();
 			// The chat shown before the connection (restored at the start)
 			// was not refreshed on opening: refreshed now.
 			const auto window = Core::App().activePrimaryWindow();

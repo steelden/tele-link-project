@@ -12,10 +12,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <windows.h>
 #include <dbghelp.h>
+
+#pragma comment(lib, "dbghelp.lib")
 #include <shellapi.h>
 #include <VersionHelpers.h>
 
 #include <crtdbg.h>
+#include <csignal>
 #include <cstdlib>
 
 namespace Platform {
@@ -182,6 +185,125 @@ LONG WINAPI WriteCrashDump(EXCEPTION_POINTERS *info) {
 	return EXCEPTION_CONTINUE_SEARCH;
 }
 
+// TeleLink: a CRT/STL assertion (the "Debug Assertion Failed" box), an
+// abort(), a pure virtual call or an invalid CRT parameter were not in the
+// log at all. Now the message and the stack are written to the log, and the
+// app crashes with a minidump in "crashes" (no message box).
+void LogCallStack() {
+	void *frames[62] = { nullptr };
+	const auto count = CaptureStackBackTrace(2, 62, frames, nullptr);
+	const auto process = GetCurrentProcess();
+	static const auto symbols = [&] {
+		SymSetOptions(SYMOPT_UNDNAME
+			| SYMOPT_DEFERRED_LOADS
+			| SYMOPT_LOAD_LINES);
+		return SymInitialize(process, nullptr, TRUE) != FALSE;
+	}();
+	auto buffer = std::array<char, sizeof(SYMBOL_INFO) + 512>();
+	const auto symbol = reinterpret_cast<SYMBOL_INFO*>(buffer.data());
+	for (auto i = 0; i != count; ++i) {
+		const auto address = DWORD64(frames[i]);
+		auto text = u"  #%1 0x%2"_q.arg(i).arg(address, 0, 16);
+		if (symbols) {
+			symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+			symbol->MaxNameLen = 511;
+			auto displacement = DWORD64();
+			if (SymFromAddr(process, address, &displacement, symbol)) {
+				text += ' ' + QString::fromLocal8Bit(symbol->Name);
+			}
+			auto line = IMAGEHLP_LINE64{ .SizeOfStruct = sizeof(IMAGEHLP_LINE64) };
+			auto lineDisplacement = DWORD();
+			if (SymGetLineFromAddr64(
+					process,
+					address,
+					&lineDisplacement,
+					&line)) {
+				const auto file = QString::fromLocal8Bit(line.FileName);
+				text += u" (%1:%2)"_q.arg(
+					file.mid(file.lastIndexOf('\\') + 1)
+				).arg(line.LineNumber);
+			}
+		}
+		Logs::writeMain(text);
+	}
+}
+
+[[noreturn]] void LogFailureAndCrash(const QString &kind, QString message) {
+	static auto failing = false;
+	if (!failing) {
+		failing = true;
+		message = message.trimmed();
+		Logs::writeMain(u"MtsLink Assert: %1: %2"_q.arg(kind, message));
+		CrashReports::SetAnnotation("CrtAssert", message);
+		LogCallStack();
+		Logs::writeMain(u"MtsLink Assert: crashing, minidump in crashes"_q);
+	}
+	// Into the unhandled exception filter: WriteCrashDump.
+	volatile auto nullptr_value = (int*)nullptr;
+	*nullptr_value = 0;
+	std::abort();
+}
+
+#ifdef _DEBUG
+int LogReportHook(int reportType, char *message, int *returnValue) {
+	if (returnValue) {
+		*returnValue = 0;
+	}
+	if (reportType == _CRT_ASSERT || reportType == _CRT_ERROR) {
+		LogFailureAndCrash(
+			u"CRT assertion"_q,
+			QString::fromLocal8Bit(message ? message : ""));
+	} else if (message) {
+		Logs::writeMain(u"MtsLink CRT: "_q
+			+ QString::fromLocal8Bit(message).trimmed());
+	}
+	return TRUE;
+}
+
+int LogReportHookW(int reportType, wchar_t *message, int *returnValue) {
+	if (returnValue) {
+		*returnValue = 0;
+	}
+	if (reportType == _CRT_ASSERT || reportType == _CRT_ERROR) {
+		LogFailureAndCrash(
+			u"CRT assertion"_q,
+			QString::fromWCharArray(message ? message : L""));
+	} else if (message) {
+		Logs::writeMain(u"MtsLink CRT: "_q
+			+ QString::fromWCharArray(message).trimmed());
+	}
+	return TRUE;
+}
+#endif // _DEBUG
+
+void InstallFailureLogging() {
+	_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+	signal(SIGABRT, [](int) {
+		LogFailureAndCrash(u"abort()"_q, QString());
+	});
+	_set_purecall_handler([] {
+		LogFailureAndCrash(u"purecall"_q, u"Pure virtual function call"_q);
+	});
+	_set_invalid_parameter_handler([](
+			const wchar_t *expression,
+			const wchar_t *function,
+			const wchar_t *file,
+			unsigned int line,
+			uintptr_t) {
+		LogFailureAndCrash(
+			u"invalid parameter"_q,
+			u"%1 in %2 (%3:%4)"_q.arg(
+				QString::fromWCharArray(expression ? expression : L""),
+				QString::fromWCharArray(function ? function : L""),
+				QString::fromWCharArray(file ? file : L"")
+			).arg(line));
+	});
+#ifdef _DEBUG
+	_CrtSetReportHook2(_CRT_RPTHOOK_INSTALL, LogReportHook);
+	_CrtSetReportHookW2(_CRT_RPTHOOK_INSTALL, LogReportHookW);
+#endif // _DEBUG
+}
+
 } // namespace
 
 Launcher::Launcher(int argc, char *argv[])
@@ -192,6 +314,8 @@ void Launcher::initHook() {
 	SetUnhandledExceptionFilter(WriteCrashDump);
 	if (cTestAgent()) {
 		InstallTestAgentCrashHandling();
+	} else {
+		InstallFailureLogging();
 	}
 }
 

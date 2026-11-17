@@ -1563,6 +1563,8 @@ PRIVATE
     mtslink/lang_overrides.h
     mtslink/my_profile.cpp
     mtslink/my_profile.h
+    mtslink/whats_new.cpp
+    mtslink/whats_new.h
     mtslink/rpc.cpp
     mtslink/rpc.h
     mtslink/session.cpp
