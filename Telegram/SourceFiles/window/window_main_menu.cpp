@@ -80,6 +80,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_wallet.h"
 #include "styles/style_window.h"
 #include "styles/style_window_main_menu.h"
+#include "mtslink/whats_new.h"
 
 #include <QtGui/QWindow>
 #include <QtGui/QScreen>
@@ -420,9 +421,17 @@ MainMenu::MainMenu(
 		.append(QChar(8211))
 		.append(QChar(' '))
 		.append(tr::link(tr::lng_menu_about(tr::now), 2))); // Link 2.
+	// TeleLink: the version opens "what's new" (WHATSNEW.md).
 	_version->setLink(
 		1,
-		std::make_shared<UrlClickHandler>(Core::App().changelogLink()));
+		std::make_shared<LambdaClickHandler>([=] {
+			const auto weak = base::make_weak(controller);
+			MtsLink::showWhatsNew([=](QString text) {
+				if (const auto strong = weak.get()) {
+					strong->showToast(text);
+				}
+			});
+		}));
 	_version->setLink(
 		2,
 		std::make_shared<LambdaClickHandler>([=] {

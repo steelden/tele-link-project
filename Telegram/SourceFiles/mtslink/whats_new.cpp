@@ -11,6 +11,7 @@ a desktop application based on Telegram Desktop.
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QJsonObject>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
@@ -27,6 +28,12 @@ constexpr auto kShownKey = "whatsNewShown";
 constexpr auto kUrlBase
 	= "https://raw.githubusercontent.com/steelden/tele-link-project/";
 
+enum class LoadResult {
+	Shown,
+	NotFound,
+	Failed,
+};
+
 [[nodiscard]] QString VersionTag() {
 	return u"v"_q + QString::fromLatin1(AppVersionStr);
 }
@@ -41,7 +48,7 @@ void SetSetting(const char *key, int value) {
 	return readLocalSettings().value(QString::fromLatin1(key)).toInt();
 }
 
-void ShowFile(const QByteArray &bytes) {
+bool ShowFile(const QByteArray &bytes) {
 	const auto folder = cWorkingDir() + u"tdata/whatsnew/"_q;
 	QDir().mkpath(folder);
 	// The file name is the viewer title.
@@ -49,15 +56,51 @@ void ShowFile(const QByteArray &bytes) {
 	auto file = QFile(path);
 	if (!file.open(QIODevice::WriteOnly) || file.write(bytes) < 0) {
 		LOG(("MtsLink WhatsNew: can't write '%1'").arg(path));
-		return;
+		return false;
 	}
 	file.close();
-	if (Core::App().iv().showMarkdown(path)) {
-		LOG(("MtsLink WhatsNew: shown %1").arg(VersionTag()));
-		SetSetting(kShownKey, AppVersion);
-	} else {
+	if (!Core::App().iv().showMarkdown(path)) {
 		LOG(("MtsLink WhatsNew: the viewer failed for '%1'").arg(path));
+		return false;
 	}
+	LOG(("MtsLink WhatsNew: shown %1").arg(VersionTag()));
+	return true;
+}
+
+void Load(Fn<void(LoadResult)> done) {
+	static const auto manager = new QNetworkAccessManager();
+	const auto url = QString::fromLatin1(kUrlBase)
+		+ VersionTag()
+		+ u"/WHATSNEW.md"_q;
+	LOG(("MtsLink WhatsNew: loading %1").arg(url));
+	auto request = QNetworkRequest(QUrl(url));
+	request.setAttribute(
+		QNetworkRequest::RedirectPolicyAttribute,
+		QNetworkRequest::NoLessSafeRedirectPolicy);
+	const auto reply = manager->get(request);
+	QObject::connect(reply, &QNetworkReply::finished, [=] {
+		reply->deleteLater();
+		const auto status = reply->attribute(
+			QNetworkRequest::HttpStatusCodeAttribute).toInt();
+		if (status == 404) {
+			LOG(("MtsLink WhatsNew: no notes for %1").arg(VersionTag()));
+			done(LoadResult::NotFound);
+			return;
+		} else if (reply->error() != QNetworkReply::NoError) {
+			LOG(("MtsLink WhatsNew: failed to load %1: %2 (%3)"
+				).arg(url
+				).arg(reply->errorString()
+				).arg(status));
+			done(LoadResult::Failed);
+			return;
+		}
+		const auto bytes = reply->readAll();
+		if (bytes.trimmed().isEmpty()) {
+			done(LoadResult::NotFound);
+		} else {
+			done(ShowFile(bytes) ? LoadResult::Shown : LoadResult::Failed);
+		}
+	});
 }
 
 } // namespace
@@ -79,40 +122,32 @@ void showWhatsNewIfPending() {
 		return;
 	}
 	requested = true;
+	Load([](LoadResult result) {
+		// Nothing written for this version: not asked again. A network
+		// error: asked again with the next start.
+		if (result != LoadResult::Failed) {
+			SetSetting(kShownKey, AppVersion);
+		}
+	});
+}
 
-	static const auto manager = new QNetworkAccessManager();
-	const auto url = QString::fromLatin1(kUrlBase)
-		+ VersionTag()
-		+ u"/WHATSNEW.md"_q;
-	LOG(("MtsLink WhatsNew: loading %1").arg(url));
-	auto request = QNetworkRequest(QUrl(url));
-	request.setAttribute(
-		QNetworkRequest::RedirectPolicyAttribute,
-		QNetworkRequest::NoLessSafeRedirectPolicy);
-	const auto reply = manager->get(request);
-	QObject::connect(reply, &QNetworkReply::finished, [=] {
-		reply->deleteLater();
-		const auto status = reply->attribute(
-			QNetworkRequest::HttpStatusCodeAttribute).toInt();
-		if (status == 404) {
-			// Nothing written for this version: not asked again.
-			LOG(("MtsLink WhatsNew: no notes for %1").arg(VersionTag()));
+void showWhatsNew(Fn<void(QString)> fail) {
+	static auto loading = false;
+	if (loading) {
+		return;
+	}
+	loading = true;
+	Load([=](LoadResult result) {
+		loading = false;
+		if (result == LoadResult::Shown) {
+			// Seen: not shown again after the start.
 			SetSetting(kShownKey, AppVersion);
-			return;
-		} else if (reply->error() != QNetworkReply::NoError) {
-			// Asked again with the next start.
-			LOG(("MtsLink WhatsNew: failed to load %1: %2 (%3)"
-				).arg(url
-				).arg(reply->errorString()
-				).arg(status));
-			return;
+		} else if (fail) {
+			fail((result == LoadResult::NotFound)
+				? (u"Нет описания изменений для версии "_q
+					+ QString::fromLatin1(AppVersionStr))
+				: u"Не удалось загрузить описание изменений"_q);
 		}
-		const auto bytes = reply->readAll();
-		if (bytes.trimmed().isEmpty()) {
-			SetSetting(kShownKey, AppVersion);
-			return;
-		}
-		ShowFile(bytes);
 	});
 }
 
