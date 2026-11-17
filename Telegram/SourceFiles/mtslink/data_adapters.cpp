@@ -706,26 +706,39 @@ std::optional<MTPMessageReactions> buildMtpReactions(
 
 // The images of a photo of MTS Link: "_s" (64px) is the first quick one,
 // "_m" (256px) the preview (the shared media grid, the profile), the full one.
+// The original image file is shown in the full size: "thumb_<id>.jpg" (the
+// full size of MTS Link) is recompressed by the server, worse than the sent
+// one. The formats not shown by Qt (HEIC, TIFF, ...) - by that thumb.
+[[nodiscard]] bool OriginalImageShown(const QString &mime) {
+	return (mime == u"image/jpeg"_q)
+		|| (mime == u"image/jpg"_q)
+		|| (mime == u"image/png"_q)
+		|| (mime == u"image/webp"_q)
+		|| (mime == u"image/bmp"_q);
+}
+
 void applyPhotoImages(
 		not_null<PhotoData*> photo,
 		const QString &fileId,
+		const QString &mime,
 		int width,
 		int height) {
-	const auto location = [&](const QString &suffix) {
+	const auto location = [&](const QString &url) {
 		return ImageWithLocation{
 			.location = ImageLocation(
-				DownloadLocation{
-					PlainUrlLocation{ privateCdnThumbBase() + fileId + suffix }
-				},
+				DownloadLocation{ PlainUrlLocation{ url } },
 				width,
 				height),
 		};
 	};
+	const auto thumb = privateCdnThumbBase() + fileId;
 	photo->updateImages(
 		QByteArray(),
-		location(u"_s.jpg"_q),
-		location(u"_m.jpg"_q),
-		location(u".jpg"_q),
+		location(thumb + u"_s.jpg"_q),
+		location(thumb + u"_m.jpg"_q),
+		location(OriginalImageShown(mime.toLower())
+			? (fileDownloadBase() + fileId + u"/download"_q)
+			: (thumb + u".jpg"_q)),
 		ImageWithLocation{},
 		ImageWithLocation{},
 		crl::time(0));
@@ -746,7 +759,7 @@ void reapplyPhotoUrls(
 		return;
 	}
 
-	applyPhotoImages(photo, file.id, file.width, file.height);
+	applyPhotoImages(photo, file.id, file.mime, file.width, file.height);
 	photo->clearFailed(Data::PhotoSize::Small);
 	photo->clearFailed(Data::PhotoSize::Thumbnail);
 	photo->clearFailed(Data::PhotoSize::Large);
@@ -829,7 +842,7 @@ MTPMessageMedia buildPhotoMedia(
 	PhotoFiles.insert(photoId, file);
 
 	const auto photo = session->data().photo(photoId);
-	applyPhotoImages(photo, file.id, file.width, file.height);
+	applyPhotoImages(photo, file.id, file.mime, file.width, file.height);
 
 
 	using Flag = MTPDmessageMediaPhoto::Flag;
@@ -7432,7 +7445,7 @@ bool replacePendingWithReal(
 				const auto w = f.width > 0 ? f.width : 100;
 				const auto h = f.height > 0 ? f.height : 100;
 				photo->clearImages();
-				applyPhotoImages(photo, f.id, w, h);
+				applyPhotoImages(photo, f.id, f.mime, w, h);
 			} else if (const auto doc = media->document()) {
 				LOG(("MtsLink Files: sent document %1 mime=%2 size=%3x%4 "
 					"thumbnail=%5"
@@ -11627,6 +11640,7 @@ void putToImageCache(
 		privateCdnThumbBase() + fileId + u"_s.jpg"_q,
 		privateCdnThumbBase() + fileId + u"_m.jpg"_q,
 		privateCdnThumbBase() + fileId + u".jpg"_q,
+		fileDownloadBase() + fileId + u"/download"_q,
 	}) {
 		LOG(("MtsLink Stickers: image cache %1 (%2 bytes)"
 			).arg(url

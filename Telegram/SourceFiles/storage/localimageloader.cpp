@@ -898,9 +898,16 @@ void FileLoadTask::process(ProcessArgs &&args) {
 		if (!fullimage.isNull() && fullimage.width() > 0) {
 			if (_type == SendMediaType::Photo) {
 				if (ValidateThumbDimensions(fullimage.width(), fullimage.height())) {
-					filesize = -1; // Fill later.
-					filemime = Core::MimeTypeForName("image/jpeg").name();
-					filename = filedialogDefaultName(u"image"_q, u".jpg"_q, QString(), true);
+					// MTS Link: the pasted image is uploaded as it is (PNG,
+					// the content), not the photo JPEG (87%, 1280 px) of
+					// Telegram: the screenshots were blurred.
+					{
+						QBuffer buffer(&_content);
+						fullimage.save(&buffer, "PNG");
+					}
+					filesize = _content.size();
+					filemime = Core::MimeTypeForName("image/png").name();
+					filename = filedialogDefaultName(u"image"_q, u".png"_q, QString(), true);
 				} else {
 					_type = SendMediaType::File;
 				}

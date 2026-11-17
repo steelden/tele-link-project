@@ -4831,7 +4831,15 @@ void OverlayWidget::displayPhoto(
 		_w = size.width();
 		_h = size.height();
 	} else {
-		auto dimensions = QSize(photo->width(), photo->height());
+		// MTS Link: by the loaded original (the server size may differ),
+		// pixel to pixel: not enlarged by the interface scale (blurred).
+		const auto large = _photoMedia->image(Data::PhotoSize::Large);
+		auto dimensions = large
+			? large->size()
+			: QSize(photo->width(), photo->height());
+		if (large) {
+			_photoSizedByLarge = photo;
+		}
 		if (dimensions.isEmpty()) {
 			const auto best = [&]() -> Image* {
 				const auto large = _photoMedia->image(
@@ -4848,8 +4856,8 @@ void OverlayWidget::displayPhoto(
 				dimensions = best->size();
 			}
 		}
-		const auto size = style::ConvertScale(
-			flipSizeByRotation(dimensions));
+		const auto ratio = style::DevicePixelRatio();
+		const auto size = flipSizeByRotation(dimensions) / ratio;
 		_w = size.width();
 		_h = size.height();
 	}
@@ -6431,6 +6439,17 @@ void OverlayWidget::validatePhotoCurrentImage() {
 				redisplayContent();
 			});
 		}
+	}
+	// The original loaded after the photo was shown: by its size.
+	if (_photoSizedByLarge != _photo
+		&& _photoMedia->image(Data::PhotoSize::Large)
+		&& !_photoRedisplayQueued) {
+		_photoSizedByLarge = _photo;
+		_photoRedisplayQueued = true;
+		InvokeQueued(_widget, [=] {
+			_photoRedisplayQueued = false;
+			redisplayContent();
+		});
 	}
 	validatePhotoImage(_photoMedia->image(Data::PhotoSize::Large), false);
 	validatePhotoImage(_photoMedia->image(Data::PhotoSize::Thumbnail), true);

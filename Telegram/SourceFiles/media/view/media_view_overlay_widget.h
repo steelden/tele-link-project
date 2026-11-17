@@ -714,6 +714,8 @@ private:
 	int _maxUsedHeight = 0;
 	int _x = 0, _y = 0, _w = 0, _h = 0;
 	bool _photoRedisplayQueued = false;
+	// MTS Link: the size of the loaded original the photo is shown by.
+	PhotoData *_photoSizedByLarge = nullptr;
 	int _xStart = 0, _yStart = 0;
 	int _zoom = 0; // < 0 - out, 0 - none, > 0 - in
 	float64 _zoomToScreen = 0.; // for documents
