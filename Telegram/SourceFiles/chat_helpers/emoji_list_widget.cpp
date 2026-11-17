@@ -1972,19 +1972,28 @@ void EmojiListWidget::fillRecent() {
 	const auto &list = Core::App().settings().recentEmoji();
 	_recent.reserve(std::min(int(list.size()), Core::kRecentEmojiLimit) + 1);
 	const auto test = session().isTestMode();
+	auto added = base::flat_set<EmojiPtr>();
 	for (const auto &one : list) {
 		const auto document = std::get_if<RecentEmojiDocument>(&one.id.data);
 		if (document && ((document->test != test) || _onlyUnicodeEmoji)) {
 			continue;
-		} else if (_mtsLinkReactions) {
-			const auto emoji = std::get_if<EmojiPtr>(&one.id.data);
+		}
+		auto id = one.id;
+		if (const auto emoji = std::get_if<EmojiPtr>(&id.data)) {
+			*emoji = (*emoji)->original();
+			if (!added.emplace(*emoji).second) {
+				continue;
+			}
+		}
+		if (_mtsLinkReactions) {
+			const auto emoji = std::get_if<EmojiPtr>(&id.data);
 			if (document || !emoji || !emojiAllowed(*emoji)) {
 				continue;
 			}
 		}
 		_recent.push_back({
-			.custom = resolveCustomRecent(one.id),
-			.id = one.id,
+			.custom = resolveCustomRecent(id),
+			.id = id,
 		});
 		if (document) {
 			_recentCustomIds.emplace(document->id);
@@ -2951,16 +2960,8 @@ void EmojiListWidget::mousePressEvent(QMouseEvent *e) {
 	}
 	if (const auto over = std::get_if<OverEmoji>(&_selected)) {
 		const auto emoji = lookupOverEmoji(over);
-		if (emoji && emoji->hasVariants()) {
-			_pickerSelected = _selected;
-			setCursor(style::cur_default);
-			if (!Core::App().settings().hasChosenEmojiVariant(emoji)) {
-				showPicker();
-			} else {
-				_previewTimer.cancel();
-				_showPickerTimer.callOnce(kColorPickerDelay);
-			}
-		} else if (lookupCustomEmoji(over)) {
+		// TeleLink: no skin tone picker, the default emoji is chosen.
+		if (lookupCustomEmoji(over)) {
 			_showPickerTimer.cancel();
 			_previewTimer.callOnce(QApplication::startDragTime());
 		}
@@ -3212,9 +3213,8 @@ void EmojiListWidget::pickerHidden() {
 }
 
 bool EmojiListWidget::hasColorButton(int index) const {
-	return !_searchMode
-		&& (_staticCount > int(Section::People))
-		&& (index == int(Section::People));
+	// TeleLink: no skin tone choice.
+	return false;
 }
 
 QRect EmojiListWidget::colorButtonRect(int index) const {

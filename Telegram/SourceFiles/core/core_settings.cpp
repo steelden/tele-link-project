@@ -1689,23 +1689,13 @@ void Settings::setLegacyRecentEmojiPreload(
 	}
 }
 
+// TeleLink: no skin tone choice, always the default (yellow) emoji.
 EmojiPtr Settings::lookupEmojiVariant(EmojiPtr emoji) const {
-	if (emoji->hasVariants()) {
-		const auto i = _emojiVariants.find(emoji->nonColoredId());
-		if (i != end(_emojiVariants)) {
-			return emoji->variant(i->second);
-		}
-		const auto j = _emojiVariants.find(QString());
-		if (j != end(_emojiVariants)) {
-			return emoji->variant(j->second);
-		}
-	}
-	return emoji;
+	return emoji->original();
 }
 
 bool Settings::hasChosenEmojiVariant(EmojiPtr emoji) const {
-	return _emojiVariants.contains(QString())
-		|| _emojiVariants.contains(emoji->nonColoredId());
+	return true;
 }
 
 void Settings::saveEmojiVariant(EmojiPtr emoji) {
