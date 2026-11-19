@@ -3755,6 +3755,17 @@ void HistoryWidget::showHistory(
 		}
 		if (MtsLink::hasChatId(_history->peer->id)) {
 			MtsLink::subscribeTyping(&session(), _history->peer->id);
+			// Temporary: the old messages of a joined chat.
+			LOG(("MtsLink JoinLoad: open %1: scrollTop=%2 ready=%3 "
+				"empty=%4 blocks=%5 atBottom=%6 atTop=%7 oldest='%8'"
+				).arg(MtsLink::peerIdToChatId(_history->peer->id)
+				).arg(Logs::b(_history->scrollTopItem != nullptr)
+				).arg(Logs::b(_history->isReadyFor(_showAtMsgId))
+				).arg(Logs::b(_history->isEmpty())
+				).arg(_history->blocks.size()
+				).arg(Logs::b(_history->loadedAtBottom())
+				).arg(Logs::b(_history->loadedAtTop())
+				).arg(MtsLink::oldestLoadedMessageId(_history->peer->id)));
 		}
 		if (_history->scrollTopItem
 			|| (_migrated && _migrated->scrollTopItem)
@@ -5307,12 +5318,24 @@ void HistoryWidget::loadMessages() {
 		return;
 	}
 	if (MtsLink::hasChatId(_history->peer->id)) {
-		if (_history->loadedAtTop()) {
-			return;
-		}
 		const auto peerId = _history->peer->id;
 		const auto chatId = MtsLink::peerIdToChatId(peerId);
 		const auto oldestId = MtsLink::oldestLoadedMessageId(peerId);
+		// Temporary: the old messages of a joined chat.
+		const auto mtsForLog = _history->session().account().mtsLinkSession();
+		LOG(("MtsLink JoinLoad: older of %1: atTop=%2 oldest='%3' "
+			"loading=%4 older=%5 blocks=%6"
+			).arg(chatId
+			).arg(Logs::b(_history->loadedAtTop())
+			).arg(oldestId
+			).arg(Logs::b(mtsForLog
+				&& mtsForLog->messages()->isLoading(chatId))
+			).arg(Logs::b(mtsForLog
+				&& mtsForLog->messages()->isLoadingOlder(chatId))
+			).arg(_history->blocks.size()));
+		if (_history->loadedAtTop()) {
+			return;
+		}
 		if (chatId.isEmpty() || oldestId.isEmpty()) {
 			return;
 		}

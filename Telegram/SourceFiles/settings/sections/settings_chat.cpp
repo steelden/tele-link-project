@@ -76,11 +76,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "support/support_templates.h"
 #include "main/main_session.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/threads_background.h"
 #include "main/main_session_settings.h"
 #include "mainwidget.h"
 #include "styles/style_chat_helpers.h" // stickersRemove
 #include "styles/style_settings.h"
 #include "styles/style_layers.h"
+#include "styles/style_passcode_box.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_window.h"
 #include "styles/style_dialogs.h"
@@ -1948,6 +1950,390 @@ void SetupMessages(
 
 }
 
+// TeleLink: the wallpaper of the threads (the discussions).
+class ThreadsBackgroundRow : public Ui::RpWidget {
+public:
+	ThreadsBackgroundRow(
+		QWidget *parent,
+		not_null<Window::SessionController*> controller);
+
+protected:
+	void paintEvent(QPaintEvent *e) override;
+	int resizeGetHeight(int newWidth) override;
+
+private:
+	void updateImage();
+	void updateState();
+	void chooseFromFile();
+
+	const not_null<Window::SessionController*> _controller;
+	const std::shared_ptr<Ui::ChatTheme> _theme;
+	QPixmap _background;
+	object_ptr<Ui::FlatLabel> _state;
+	object_ptr<Ui::LinkButton> _chooseFromGallery;
+	object_ptr<Ui::LinkButton> _chooseFromFile;
+	object_ptr<Ui::LinkButton> _reset;
+
+};
+
+ThreadsBackgroundRow::ThreadsBackgroundRow(
+	QWidget *parent,
+	not_null<Window::SessionController*> controller)
+: RpWidget(parent)
+, _controller(controller)
+, _theme(MtsLink::threadsChatTheme(controller))
+, _state(this, QString(), st::boxDividerLabel)
+, _chooseFromGallery(
+	this,
+	tr::lng_settings_bg_from_gallery(tr::now),
+	st::settingsLink)
+, _chooseFromFile(this, tr::lng_settings_bg_from_file(tr::now), st::settingsLink)
+, _reset(
+	this,
+	tr::lng_mtslink_threads_background_reset(tr::now),
+	st::settingsLink) {
+	_chooseFromGallery->addClickHandler([=] {
+		controller->show(Box<BackgroundBox>(controller, nullptr, true));
+	});
+	_chooseFromFile->addClickHandler([=] {
+		chooseFromFile();
+	});
+	_reset->addClickHandler([=] {
+		MtsLink::resetThreadsWallPaper();
+	});
+	_theme->repaintBackgroundRequests(
+	) | rpl::on_next([=] {
+		updateImage();
+	}, lifetime());
+	MtsLink::threadsWallPaperChanges(
+	) | rpl::on_next([=] {
+		updateState();
+	}, lifetime());
+	updateImage();
+	updateState();
+}
+
+void ThreadsBackgroundRow::chooseFromFile() {
+	auto filters = QStringList(
+		u"Image files (*"_q + Ui::ImageExtensions().join(u" *"_q) + u")"_q);
+	filters.push_back(FileDialog::AllFilesFilter());
+	const auto controller = _controller;
+	const auto callback = crl::guard(controller, [=](
+			const FileDialog::OpenResult &result) {
+		if (result.paths.isEmpty() && result.remoteContent.isEmpty()) {
+			return;
+		}
+		auto image = Images::Read({
+			.path = result.paths.isEmpty() ? QString() : result.paths.front(),
+			.content = result.remoteContent,
+			.forceOpaque = true,
+		}).image;
+		if (image.isNull() || image.width() <= 0 || image.height() <= 0) {
+			return;
+		}
+		auto local = Data::CustomWallPaper();
+		local.setLocalImageAsThumbnail(std::make_shared<Image>(
+			std::move(image)));
+		controller->show(Box<BackgroundPreviewBox>(
+			controller,
+			local,
+			BackgroundPreviewArgs{ .forThreads = true }));
+	});
+	FileDialog::GetOpenPath(
+		this,
+		tr::lng_choose_image(tr::now),
+		filters.join(u";;"_q),
+		crl::guard(this, callback));
+}
+
+void ThreadsBackgroundRow::updateState() {
+	const auto own = MtsLink::hasThreadsWallPaper();
+	_state->setText(own
+		? tr::lng_mtslink_threads_background_custom(tr::now)
+		: tr::lng_mtslink_threads_background_default(tr::now));
+	_reset->setVisible(own);
+	resizeToWidth(width());
+}
+
+void ThreadsBackgroundRow::updateImage() {
+	const auto size = st::settingsBackgroundThumb;
+	const auto fullsize = size * style::DevicePixelRatio();
+	const auto &background = _theme->background();
+	const auto &prepared = background.prepared;
+	const auto pattern = background.isPattern
+		|| (!background.colors.empty() && prepared.isNull());
+	auto back = QImage();
+	if (pattern && !background.colors.empty()) {
+		const auto paintPattern = [&](QPainter &p, bool inverted) {
+			if (prepared.isNull()) {
+				return;
+			}
+			const auto w = prepared.width();
+			const auto h = prepared.height();
+			const auto s = [&] {
+				const auto scaledw = w * st::windowMinHeight / h;
+				const auto result = (w * size) / std::max(scaledw, 1);
+				return std::min({ result, w, h });
+			}();
+			auto small = prepared.copy((w - s) / 2, (h - s) / 2, s, s);
+			if (inverted) {
+				small = Ui::InvertPatternImage(std::move(small));
+			}
+			p.drawImage(QRect(0, 0, fullsize, fullsize), small);
+		};
+		back = Ui::GenerateBackgroundImage(
+			{ fullsize, fullsize },
+			background.colors,
+			background.gradientRotation,
+			background.patternOpacity,
+			paintPattern);
+	} else {
+		back = QImage(
+			QSize{ fullsize, fullsize },
+			QImage::Format_ARGB32_Premultiplied);
+		back.setDevicePixelRatio(style::DevicePixelRatio());
+		if (const auto color = background.colorForFill) {
+			back.fill(*color);
+		} else if (prepared.isNull()) {
+			back.fill(Qt::transparent);
+		} else {
+			auto p = QPainter(&back);
+			PainterHighQualityEnabler hq(p);
+			const auto w = prepared.width();
+			const auto h = prepared.height();
+			const auto s = std::min(w, h);
+			p.drawImage(
+				QRect(0, 0, size, size),
+				prepared,
+				QRect((w - s) / 2, (h - s) / 2, s, s));
+		}
+	}
+	if (!back.isNull()) {
+		auto p = QPainter(&back);
+		MtsLink::paintThreadsOverlay(
+			p,
+			QRect(QPoint(), back.size() / back.devicePixelRatio()));
+	}
+	_background = Ui::PixmapFromImage(
+		Images::Round(std::move(back), ImageRoundRadius::Small));
+	_background.setDevicePixelRatio(style::DevicePixelRatio());
+	update();
+}
+
+void ThreadsBackgroundRow::paintEvent(QPaintEvent *e) {
+	auto p = QPainter(this);
+	p.drawPixmap(0, 0, _background);
+}
+
+int ThreadsBackgroundRow::resizeGetHeight(int newWidth) {
+	const auto left = st::settingsBackgroundThumb + st::settingsThumbSkip;
+	const auto available = std::max(newWidth - left, 1);
+	auto top = st::settingsFromGalleryTop;
+	const auto place = [&](not_null<Ui::RpWidget*> widget) {
+		widget->moveToLeft(left, top, newWidth);
+		top += widget->height() + st::settingsFromFileTop;
+	};
+	_state->resizeToWidth(available);
+	place(_state.data());
+	for (const auto link : {
+			_chooseFromGallery.data(),
+			_chooseFromFile.data(),
+			_reset.data() }) {
+		link->resizeToWidth(std::min(available, link->naturalWidth()));
+		if (!link->isHidden()) {
+			place(link);
+		}
+	}
+	return std::max(st::settingsBackgroundThumb, top);
+}
+
+void SetupThreadsBackground(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::VerticalLayout*> container) {
+	Ui::AddSkip(container);
+	Ui::AddDivider(container);
+	Ui::AddSkip(container);
+	Ui::AddSubsectionTitle(
+		container,
+		tr::lng_mtslink_threads_background());
+	container->add(
+		object_ptr<ThreadsBackgroundRow>(container, controller),
+		st::settingsBackgroundPadding);
+
+	// The pattern over the wallpaper of the chats (no own wallpaper).
+	using Pattern = MtsLink::ThreadsPattern;
+	static const auto kPatterns = std::vector<Pattern>{
+		Pattern::None,
+		Pattern::Lines,
+		Pattern::Dots,
+		Pattern::Grid,
+		Pattern::Diamonds,
+		Pattern::Waves,
+		Pattern::Zigzag,
+		Pattern::Circles,
+	};
+	const auto text = [](Pattern pattern) {
+		switch (pattern) {
+		case Pattern::Lines:
+			return tr::lng_mtslink_threads_pattern_lines(tr::now);
+		case Pattern::Dots:
+			return tr::lng_mtslink_threads_pattern_dots(tr::now);
+		case Pattern::Grid:
+			return tr::lng_mtslink_threads_pattern_grid(tr::now);
+		case Pattern::Diamonds:
+			return tr::lng_mtslink_threads_pattern_diamonds(tr::now);
+		case Pattern::Waves:
+			return tr::lng_mtslink_threads_pattern_waves(tr::now);
+		case Pattern::Zigzag:
+			return tr::lng_mtslink_threads_pattern_zigzag(tr::now);
+		case Pattern::Circles:
+			return tr::lng_mtslink_threads_pattern_circles(tr::now);
+		case Pattern::None:
+		case Pattern::Count:
+			break;
+		}
+		return tr::lng_mtslink_threads_pattern_none(tr::now);
+	};
+	const auto current = std::make_shared<rpl::variable<Pattern>>(
+		MtsLink::threadsPattern());
+	// The pattern is reset by the choice of the wallpaper.
+	MtsLink::threadsWallPaperChanges(
+	) | rpl::on_next([=] {
+		*current = MtsLink::threadsPattern();
+	}, container->lifetime());
+	const auto wrap = container->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			container,
+			object_ptr<Ui::VerticalLayout>(container)));
+	const auto button = AddButtonWithLabel(
+		wrap->entity(),
+		tr::lng_mtslink_threads_pattern(),
+		current->value() | rpl::map(text),
+		st::settingsButtonNoIcon);
+	button->addClickHandler([=] {
+		auto options = std::vector<QString>();
+		for (const auto pattern : kPatterns) {
+			options.push_back(text(pattern));
+		}
+		const auto i = ranges::find(kPatterns, current->current());
+		controller->show(Box(SingleChoiceBox, SingleChoiceBoxArgs{
+			.title = tr::lng_mtslink_threads_pattern(),
+			.options = options,
+			.initialSelection = int(i - begin(kPatterns)),
+			.callback = [=](int index) {
+				*current = kPatterns[index];
+				MtsLink::setThreadsPattern(kPatterns[index]);
+			},
+		}));
+	});
+
+	// The color of the pattern.
+	using PatternColor = MtsLink::ThreadsPatternColor;
+	static const auto kColors = std::vector<PatternColor>{
+		PatternColor::Dark,
+		PatternColor::Light,
+		PatternColor::Accent,
+		PatternColor::Custom,
+	};
+	const auto colorText = [](PatternColor color) {
+		switch (color) {
+		case PatternColor::Light:
+			return tr::lng_mtslink_threads_pattern_color_light(tr::now);
+		case PatternColor::Accent:
+			return tr::lng_mtslink_threads_pattern_color_accent(tr::now);
+		case PatternColor::Custom:
+			return tr::lng_mtslink_threads_pattern_color_custom(tr::now);
+		case PatternColor::Dark:
+		case PatternColor::Count:
+			break;
+		}
+		return tr::lng_mtslink_threads_pattern_color_dark(tr::now);
+	};
+	const auto currentColor = std::make_shared<rpl::variable<PatternColor>>(
+		MtsLink::threadsPatternColor());
+	const auto colorButton = AddButtonWithLabel(
+		wrap->entity(),
+		tr::lng_mtslink_threads_pattern_color(),
+		currentColor->value() | rpl::map(colorText),
+		st::settingsButtonNoIcon);
+	const auto editCustom = [=] {
+		controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+			const auto editor = box->addRow(object_ptr<ColorEditor>(
+				box,
+				ColorEditor::Mode::RGBA,
+				MtsLink::threadsPatternCustomColor()));
+			const auto save = crl::guard(box, [=] {
+				*currentColor = PatternColor::Custom;
+				MtsLink::setThreadsPatternColor(
+					PatternColor::Custom,
+					editor->color());
+				box->closeBox();
+			});
+			editor->submitRequests(
+			) | rpl::on_next(save, editor->lifetime());
+			box->setFocusCallback([=] {
+				editor->setInnerFocus();
+			});
+			box->addButton(tr::lng_settings_save(), save);
+			box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+			box->setTitle(tr::lng_mtslink_threads_pattern_color());
+			box->setWidth(editor->width());
+		}));
+	};
+	colorButton->addClickHandler([=] {
+		// As SingleChoiceBox, but "Custom color" opens the editor on each
+		// click (when it is already chosen too).
+		controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+			box->setTitle(tr::lng_mtslink_threads_pattern_color());
+			box->addButton(tr::lng_box_ok(), [=] { box->closeBox(); });
+			const auto i = ranges::find(kColors, currentColor->current());
+			const auto group = std::make_shared<Ui::RadiobuttonGroup>(
+				int(i - begin(kColors)));
+			const auto layout = box->verticalLayout();
+			layout->add(object_ptr<Ui::FixedHeightWidget>(
+				layout,
+				st::boxOptionListPadding.top()
+					+ st::autolockButton.margin.top()));
+			for (auto index = 0; index != int(kColors.size()); ++index) {
+				const auto radio = layout->add(
+					object_ptr<Ui::Radiobutton>(
+						layout,
+						group,
+						index,
+						colorText(kColors[index]),
+						st::defaultBoxCheckbox,
+						st::defaultRadio),
+					QMargins(
+						st::boxPadding.left()
+							+ st::boxOptionListPadding.left(),
+						0,
+						st::boxPadding.right(),
+						st::boxOptionListSkip));
+				if (kColors[index] == PatternColor::Custom) {
+					radio->clicks(
+					) | rpl::on_next([=] {
+						box->closeBox();
+						editCustom();
+					}, radio->lifetime());
+				}
+			}
+			group->setChangedCallback([=](int index) {
+				if (kColors[index] == PatternColor::Custom) {
+					// By the click: the editor.
+					return;
+				}
+				*currentColor = kColors[index];
+				MtsLink::setThreadsPatternColor(kColors[index]);
+				box->closeBox();
+			});
+		}));
+	});
+
+	// Shown with the own wallpaper too: the pattern is over any of them.
+	wrap->toggle(true, anim::type::instant);
+	Ui::AddSkip(container);
+}
+
 void SetupChatBackground(
 		not_null<Window::SessionController*> controller,
 		not_null<Ui::VerticalLayout*> container,
@@ -2045,6 +2431,8 @@ void SetupChatBackground(
 			{ .radius = st::boxRadius },
 		} });
 	}
+
+	SetupThreadsBackground(controller, container);
 }
 
 void SetupChatListQuickAction(

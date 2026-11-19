@@ -1565,6 +1565,8 @@ PRIVATE
     mtslink/my_profile.h
     mtslink/whats_new.cpp
     mtslink/whats_new.h
+    mtslink/threads_background.cpp
+    mtslink/threads_background.h
     mtslink/rpc.cpp
     mtslink/rpc.h
     mtslink/session.cpp

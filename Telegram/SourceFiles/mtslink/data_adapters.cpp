@@ -3122,6 +3122,22 @@ void connectToSession(
 					false,
 					hasCachedMessages ? &newerItems : nullptr);
 			}
+			// Temporary: the old messages of a joined chat.
+			if (const auto h = mainSession->data().historyLoaded(peerId)) {
+				const auto channel = h->peer->asChannel();
+				LOG(("MtsLink JoinLoad: newest of %1: cached=%2 newer=%3 "
+					"empty=%4 blocks=%5 atBottom=%6 atTop=%7 amIn=%8 "
+					"oldest='%9'"
+					).arg(chatId
+					).arg(Logs::b(hasCachedMessages)
+					).arg(newerItems.size()
+					).arg(Logs::b(h->isEmpty())
+					).arg(h->blocks.size()
+					).arg(Logs::b(h->loadedAtBottom())
+					).arg(Logs::b(h->loadedAtTop())
+					).arg(Logs::b(!channel || channel->amIn())
+					).arg(oldestLoadedMessageId(peerId)));
+			}
 			// Set active call state from the newest Call message only.
 			// messages[0] is the newest (server returns newest-first).
 			for (int ci = 0; ci < messages.size(); ++ci) {

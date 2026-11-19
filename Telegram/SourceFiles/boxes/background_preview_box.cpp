@@ -46,6 +46,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/localimageloader.h"
 #include "window/window_session_controller.h"
 #include "window/themes/window_themes_embedded.h"
+#include "mtslink/threads_background.h"
 #include "styles/style_background_preview_box.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
@@ -190,6 +191,7 @@ BackgroundPreviewBox::BackgroundPreviewBox(
 : SimpleElementDelegate(controller, [=] { update(); })
 , _controller(controller)
 , _forPeer(args.forPeer)
+, _forThreads(args.forThreads)
 , _fromMessageId(args.fromMessageId)
 , _chatStyle(std::make_unique<Ui::ChatStyle>(
 	controller->session().colorIndicesValue()))
@@ -494,9 +496,11 @@ void BackgroundPreviewBox::rebuildButtons(bool dark) {
 		? tr::lng_background_apply_channel()
 		: _forPeer
 		? tr::lng_background_apply_button()
+		: _forThreads
+		? tr::lng_mtslink_threads_background_apply()
 		: tr::lng_settings_apply(), [=] { apply(); });
 	addButton(tr::lng_cancel(), [=] { closeBox(); });
-	if (!_forPeer && _paper.hasShareUrl()) {
+	if (!_forPeer && !_forThreads && _paper.hasShareUrl()) {
 		addLeftButton(tr::lng_background_share(), [=] { share(); });
 	}
 	const auto equals = (dark == Window::Theme::IsNightMode());
@@ -576,7 +580,11 @@ void BackgroundPreviewBox::recreateBlurCheckbox() {
 }
 
 void BackgroundPreviewBox::apply() {
-	if (_forPeer) {
+	if (_forThreads) {
+		MtsLink::setThreadsWallPaper(_paper, _full);
+		closeBox();
+		return;
+	} else if (_forPeer) {
 		applyForPeer();
 	} else {
 		applyForEveryone();

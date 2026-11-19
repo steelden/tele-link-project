@@ -106,6 +106,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_forum_topic.h"
 #include "data/data_replies_list.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/threads_background.h"
+#include "ui/chat/chat_theme.h"
 #include "data/data_peer_values.h"
 #include "data/data_changes.h"
 #include "data/data_compose_stash.h"
@@ -471,12 +473,29 @@ ChatWidget::ChatWidget(
 		_scroll->updateBars();
 	}, _scroll->lifetime());
 
+	// TeleLink: the section repaints by the theme of the peer, the theme
+	// of a thread is another one.
+	const auto repaintLifetime = lifetime().make_state<rpl::lifetime>();
 	Window::ChatThemeValueFromPeer(
 		controller,
 		_peer
 	) | rpl::on_next([=](std::shared_ptr<Ui::ChatTheme> &&theme) {
-		_theme = std::move(theme);
+		// TeleLink: the comments of a message (a thread) have their own
+		// background instead of the default theme of the chats.
+		const auto thread = _repliesRootId
+			&& (theme == controller->defaultChatTheme());
+		_theme = thread
+			? MtsLink::threadsChatTheme(controller)
+			: std::move(theme);
 		controller->setChatStyleTheme(_theme);
+		repaintLifetime->destroy();
+		if (thread) {
+			_theme->repaintBackgroundRequests(
+			) | rpl::on_next([=] {
+				update();
+			}, *repaintLifetime);
+			update();
+		}
 	}, lifetime());
 
 	setupRoot();

@@ -24,7 +24,8 @@ public:
 	BackgroundBox(
 		QWidget*,
 		not_null<Window::SessionController*> controller,
-		PeerData *forPeer = nullptr);
+		PeerData *forPeer = nullptr,
+		bool forThreads = false);
 
 protected:
 	void prepare() override;
@@ -50,5 +51,7 @@ private:
 	// MTS Link: shows the removing of all the imported wallpapers.
 	std::shared_ptr<rpl::variable<bool>> _hasImported;
 	PeerData *_forPeer = nullptr;
+	// TeleLink: the wallpaper of the threads (the discussions).
+	bool _forThreads = false;
 
 };

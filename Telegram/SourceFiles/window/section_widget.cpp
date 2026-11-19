@@ -34,6 +34,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_slide_animation.h"
 #include "window/window_session_controller.h"
 #include "window/themes/window_theme.h"
+#include "mtslink/data_adapters.h"
+#include "mtslink/threads_background.h"
 
 #include "styles/style_polls.h"
 
@@ -386,7 +388,7 @@ void SectionWidget::PaintBackground(
 	PaintBackground(p, theme, fill, clip, paused);
 }
 
-void SectionWidget::PaintBackground(
+static void PaintBackgroundBase(
 		QPainter &p,
 		not_null<Ui::ChatTheme*> theme,
 		QSize fill,
@@ -516,6 +518,19 @@ void SectionWidget::PaintBackground(
 	}
 }
 
+void SectionWidget::PaintBackground(
+		QPainter &p,
+		not_null<Ui::ChatTheme*> theme,
+		QSize fill,
+		QRect clip,
+		bool paused) {
+	PaintBackgroundBase(p, theme, fill, clip, paused);
+	// TeleLink: the threads have a pattern over the background.
+	if (MtsLink::isThreadsChatTheme(theme)) {
+		MtsLink::paintThreadsOverlay(p, clip);
+	}
+}
+
 void SectionWidget::paintEvent(QPaintEvent *e) {
 	if (_showAnimation) {
 		auto p = QPainter(this);
@@ -575,16 +590,22 @@ auto ChatThemeValueFromPeer(
 	}) | rpl::flatten_latest(
 	) | rpl::distinct_until_changed();
 
+	// TeleLink: the threads have their own background (instead of the
+	// default theme of the chats).
+	const auto thread = MtsLink::isThreadPeer(peer->id);
 	return rpl::combine(
 		std::move(cloud),
 		controller->peerThemeOverrideValue()
 	) | rpl::map([=](
 			std::shared_ptr<Ui::ChatTheme> &&cloud,
 			PeerThemeOverride &&overriden) {
-		return (overriden.peer == peer.get()
+		auto result = (overriden.peer == peer.get()
 			&& peer->themeToken() != overriden.token)
 			? std::move(overriden.theme)
 			: std::move(cloud);
+		return (thread && result == controller->defaultChatTheme())
+			? MtsLink::threadsChatTheme(controller)
+			: result;
 	});
 }
 

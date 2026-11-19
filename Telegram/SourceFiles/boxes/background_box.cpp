@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/painter.h"
+#include "mtslink/threads_background.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_info.h"
 
@@ -162,13 +163,17 @@ private:
 BackgroundBox::BackgroundBox(
 	QWidget*,
 	not_null<Window::SessionController*> controller,
-	PeerData *forPeer)
+	PeerData *forPeer,
+	bool forThreads)
 : _controller(controller)
-, _forPeer(forPeer) {
+, _forPeer(forPeer)
+, _forThreads(forThreads) {
 }
 
 void BackgroundBox::prepare() {
-	setTitle(tr::lng_backgrounds_header());
+	setTitle(_forThreads
+		? tr::lng_mtslink_threads_background()
+		: tr::lng_backgrounds_header());
 
 	addButton(tr::lng_close(), [=] { closeBox(); });
 
@@ -213,14 +218,20 @@ void BackgroundBox::prepare() {
 		// MTS Link: back to the background of the current theme.
 		const auto reset = container->add(object_ptr<Ui::SettingsButton>(
 			container,
-			tr::lng_mtslink_bg_theme(),
+			(_forThreads
+				? tr::lng_mtslink_threads_background_reset()
+				: tr::lng_mtslink_bg_theme()),
 			st::infoProfileButton));
 		object_ptr<Info::Profile::FloatingIcon>(
 			reset,
 			st::backgroundThemeResetIcon,
 			st::infoSharedMediaButtonIconPosition);
 		reset->setClickedCallback([=] {
-			Window::Theme::Background()->reset();
+			if (_forThreads) {
+				MtsLink::resetThreadsWallPaper();
+			} else {
+				Window::Theme::Background()->reset();
+			}
 			closeBox();
 		});
 
@@ -405,7 +416,7 @@ void BackgroundBox::importWallPapers() {
 }
 
 void BackgroundBox::chooseFromFile() {
-	const auto filterStart = _forPeer
+	const auto filterStart = (_forPeer || _forThreads)
 		? u"Image files (*"_q
 		: u"Theme files (*.tdesktop-theme *.tdesktop-palette *"_q;
 	auto filters = QStringList(
@@ -418,7 +429,7 @@ void BackgroundBox::chooseFromFile() {
 			return;
 		}
 
-		if (!_forPeer && !result.paths.isEmpty()) {
+		if (!_forPeer && !_forThreads && !result.paths.isEmpty()) {
 			const auto filePath = result.paths.front();
 			const auto hasExtension = [&](QLatin1String extension) {
 				return filePath.endsWith(extension, Qt::CaseInsensitive);
@@ -444,7 +455,10 @@ void BackgroundBox::chooseFromFile() {
 		_controller->show(Box<BackgroundPreviewBox>(
 			_controller,
 			local,
-			BackgroundPreviewArgs{ _forPeer }));
+			BackgroundPreviewArgs{
+				.forPeer = _forPeer,
+				.forThreads = _forThreads,
+			}));
 	};
 	FileDialog::GetOpenPath(
 		this,
@@ -513,7 +527,10 @@ void BackgroundBox::chosen(const Data::WallPaper &paper) {
 	_controller->show(Box<BackgroundPreviewBox>(
 		_controller,
 		paper,
-		BackgroundPreviewArgs{ _forPeer }));
+		BackgroundPreviewArgs{
+			.forPeer = _forPeer,
+			.forThreads = _forThreads,
+		}));
 }
 
 void BackgroundBox::resetForPeer() {

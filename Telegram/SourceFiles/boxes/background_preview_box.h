@@ -36,6 +36,8 @@ class FadeWrap;
 struct BackgroundPreviewArgs {
 	PeerData *forPeer = nullptr;
 	FullMsgId fromMessageId;
+	// TeleLink: the wallpaper of the threads (the discussions).
+	bool forThreads = false;
 };
 
 class BackgroundPreviewBox
@@ -105,6 +107,7 @@ private:
 
 	const not_null<Window::SessionController*> _controller;
 	PeerData * const _forPeer = nullptr;
+	const bool _forThreads = false;
 	bool _forPeerLevelCheck = false;
 	FullMsgId _fromMessageId;
 	std::unique_ptr<Ui::ChatStyle> _chatStyle;
