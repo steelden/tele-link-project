@@ -2171,6 +2171,12 @@ void SetupThreadsBackground(
 		Pattern::Waves,
 		Pattern::Zigzag,
 		Pattern::Circles,
+		Pattern::CelticRings,
+		Pattern::CelticKnot,
+		Pattern::CelticSpiral,
+		Pattern::SlavicRhombus,
+		Pattern::SlavicStitch,
+		Pattern::Herringbone,
 	};
 	const auto text = [](Pattern pattern) {
 		switch (pattern) {
@@ -2188,6 +2194,18 @@ void SetupThreadsBackground(
 			return tr::lng_mtslink_threads_pattern_zigzag(tr::now);
 		case Pattern::Circles:
 			return tr::lng_mtslink_threads_pattern_circles(tr::now);
+		case Pattern::CelticRings:
+			return tr::lng_mtslink_threads_pattern_celtic_rings(tr::now);
+		case Pattern::CelticKnot:
+			return tr::lng_mtslink_threads_pattern_celtic_knot(tr::now);
+		case Pattern::CelticSpiral:
+			return tr::lng_mtslink_threads_pattern_celtic_spiral(tr::now);
+		case Pattern::SlavicRhombus:
+			return tr::lng_mtslink_threads_pattern_slavic_rhombus(tr::now);
+		case Pattern::SlavicStitch:
+			return tr::lng_mtslink_threads_pattern_slavic_stitch(tr::now);
+		case Pattern::Herringbone:
+			return tr::lng_mtslink_threads_pattern_herringbone(tr::now);
 		case Pattern::None:
 		case Pattern::Count:
 			break;

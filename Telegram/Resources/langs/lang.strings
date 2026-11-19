@@ -6620,6 +6620,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_threads_pattern_waves" = "Waves";
 "lng_mtslink_threads_pattern_zigzag" = "Zigzag";
 "lng_mtslink_threads_pattern_circles" = "Circles";
+"lng_mtslink_threads_pattern_celtic_rings" = "Rings";
+"lng_mtslink_threads_pattern_celtic_knot" = "Knot";
+"lng_mtslink_threads_pattern_celtic_spiral" = "Spirals";
+"lng_mtslink_threads_pattern_slavic_rhombus" = "Double rhombus";
+"lng_mtslink_threads_pattern_slavic_stitch" = "Cross stitch";
+"lng_mtslink_threads_pattern_herringbone" = "Herringbone";
 "lng_mtslink_threads_pattern_color" = "Pattern color";
 "lng_mtslink_threads_pattern_color_dark" = "Dark";
 "lng_mtslink_threads_pattern_color_light" = "Light";

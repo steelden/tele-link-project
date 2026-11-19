@@ -7106,6 +7106,12 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_threads_pattern_waves" = "Волны";
 "lng_mtslink_threads_pattern_zigzag" = "Зигзаг";
 "lng_mtslink_threads_pattern_circles" = "Кружки";
+"lng_mtslink_threads_pattern_celtic_rings" = "Кольца";
+"lng_mtslink_threads_pattern_celtic_knot" = "Плетёнка";
+"lng_mtslink_threads_pattern_celtic_spiral" = "Спирали";
+"lng_mtslink_threads_pattern_slavic_rhombus" = "Двойной ромб";
+"lng_mtslink_threads_pattern_slavic_stitch" = "Вышивка";
+"lng_mtslink_threads_pattern_herringbone" = "Ёлочка";
 "lng_mtslink_threads_pattern_color" = "Цвет узора";
 "lng_mtslink_threads_pattern_color_dark" = "Тёмный";
 "lng_mtslink_threads_pattern_color_light" = "Светлый";

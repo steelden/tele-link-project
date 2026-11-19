@@ -236,6 +236,12 @@ struct PatternColorState {
 	case ThreadsPattern::Waves: return { 24, 14 };
 	case ThreadsPattern::Zigzag: return { 16, 10 };
 	case ThreadsPattern::Circles: return { 20, 20 };
+	case ThreadsPattern::CelticRings: return { 24, 24 };
+	case ThreadsPattern::CelticKnot: return { 24, 24 };
+	case ThreadsPattern::CelticSpiral: return { 28, 28 };
+	case ThreadsPattern::SlavicRhombus: return { 24, 24 };
+	case ThreadsPattern::SlavicStitch: return { 24, 24 };
+	case ThreadsPattern::Herringbone: return { 16, 10 };
 	case ThreadsPattern::None:
 	case ThreadsPattern::Count: break;
 	}
@@ -249,6 +255,28 @@ void PaintPattern(QPainter &p, ThreadsPattern pattern, QColor color) {
 	auto pen = QPen(color);
 	pen.setWidthF(1.3);
 	p.setPen(pen);
+	// A motif crossing the edges of the tile: drawn in the neighbours too,
+	// so the tiles join without seams.
+	const auto wrapped = [&](auto &&draw) {
+		for (const auto dx : { -w, 0, w }) {
+			for (const auto dy : { -h, 0, h }) {
+				p.save();
+				p.translate(dx, dy);
+				draw();
+				p.restore();
+			}
+		}
+	};
+	const auto polygon = [&](QPointF center, float64 radius, int count, float64 rotation) {
+		auto points = QPolygonF();
+		for (auto i = 0; i != count; ++i) {
+			const auto angle = rotation + (2 * M_PI * i / count);
+			points.push_back(center + QPointF(
+				radius * std::cos(angle),
+				radius * std::sin(angle)));
+		}
+		return points;
+	};
 	p.setBrush(Qt::NoBrush);
 	switch (pattern) {
 	case ThreadsPattern::Lines:
@@ -292,6 +320,105 @@ void PaintPattern(QPainter &p, ThreadsPattern pattern, QColor color) {
 		pen.setWidthF(1.);
 		p.setPen(pen);
 		p.drawEllipse(QPointF(w / 2., h / 2.), 4., 4.);
+		break;
+	case ThreadsPattern::CelticRings:
+		// The interlocking rings: in the corners and in the middle.
+		pen.setWidthF(1.1);
+		p.setPen(pen);
+		wrapped([&] {
+			p.drawEllipse(QPointF(0, 0), 9., 9.);
+			p.drawEllipse(QPointF(w / 2., h / 2.), 9., 9.);
+		});
+		break;
+	case ThreadsPattern::CelticKnot: {
+		// A plait: the bands go over and under in turn (a gap is "under").
+		pen.setWidthF(2.);
+		pen.setCapStyle(Qt::FlatCap);
+		p.setPen(pen);
+		const auto gap = 3.5;
+		// "\" goes under in the corners, "/" goes under in the middle.
+		wrapped([&] {
+			p.drawLine(QPointF(gap, gap), QPointF(w - gap, h - gap));
+			p.drawLine(
+				QPointF(0, h),
+				QPointF(w / 2. - gap, h / 2. + gap));
+			p.drawLine(
+				QPointF(w / 2. + gap, h / 2. - gap),
+				QPointF(w, 0));
+		});
+	} break;
+	case ThreadsPattern::CelticSpiral: {
+		pen.setWidthF(1.1);
+		p.setPen(pen);
+		auto path = QPainterPath();
+		const auto center = QPointF(w / 2., h / 2.);
+		const auto turns = 2.5;
+		const auto steps = 80;
+		for (auto i = 0; i <= steps; ++i) {
+			const auto t = i / float64(steps);
+			const auto angle = t * turns * 2 * M_PI;
+			const auto radius = 1. + t * 9.;
+			const auto point = center + QPointF(
+				radius * std::cos(angle),
+				radius * std::sin(angle));
+			if (!i) {
+				path.moveTo(point);
+			} else {
+				path.lineTo(point);
+			}
+		}
+		p.drawPath(path);
+		p.setPen(Qt::NoPen);
+		p.setBrush(color);
+		wrapped([&] {
+			p.drawEllipse(QPointF(0, 0), 1.3, 1.3);
+		});
+	} break;
+	case ThreadsPattern::SlavicRhombus: {
+		// The rhombus with a dot (a field), with the small ones between.
+		pen.setWidthF(1.2);
+		p.setPen(pen);
+		const auto c = QPointF(w / 2., h / 2.);
+		p.drawPolygon(polygon(c, 8., 4, 0.));
+		p.drawPolygon(polygon(c, 4., 4, 0.));
+		wrapped([&] {
+			p.drawPolygon(polygon(QPointF(0, 0), 3., 4, 0.));
+		});
+		p.setPen(Qt::NoPen);
+		p.setBrush(color);
+		p.drawEllipse(c, 1.2, 1.2);
+	} break;
+	case ThreadsPattern::SlavicStitch: {
+		// The cross stitch: the crosses in a rhombus, as an embroidery.
+		pen.setWidthF(1.);
+		p.setPen(pen);
+		const auto cell = w / 8.;
+		const auto cross = [&](int i, int j) {
+			const auto rect = QRectF(
+				i * cell + 0.6,
+				j * cell + 0.6,
+				cell - 1.2,
+				cell - 1.2);
+			p.drawLine(rect.topLeft(), rect.bottomRight());
+			p.drawLine(rect.topRight(), rect.bottomLeft());
+		};
+		for (auto i = 0; i != 8; ++i) {
+			for (auto j = 0; j != 8; ++j) {
+				const auto distance = std::abs(i - 4) + std::abs(j - 4);
+				if (distance == 3 || distance == 0) {
+					cross(i, j);
+				}
+			}
+		}
+	} break;
+	case ThreadsPattern::Herringbone:
+		// "The fir": the slanted stitches in turn.
+		pen.setWidthF(1.2);
+		p.setPen(pen);
+		wrapped([&] {
+			p.drawLine(QPointF(1, h - 1.), QPointF(w / 2. - 1., 1));
+			p.drawLine(QPointF(w / 2. + 1., 1), QPointF(w - 1., h - 1.));
+		});
 		break;
 	case ThreadsPattern::None:
 	case ThreadsPattern::Count: break;

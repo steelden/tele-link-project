@@ -40,6 +40,12 @@ enum class ThreadsPattern {
 	Waves,
 	Zigzag,
 	Circles,
+	CelticRings,
+	CelticKnot,
+	CelticSpiral,
+	SlavicRhombus,
+	SlavicStitch,
+	Herringbone,
 
 	Count,
 };
