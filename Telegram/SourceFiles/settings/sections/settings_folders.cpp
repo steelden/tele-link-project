@@ -42,6 +42,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/box_content_divider.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
+#include "base/options.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/slide_wrap.h"
@@ -1155,6 +1156,23 @@ void BuildViewSection(SectionBuilder &builder) {
 			Core::App().settings().setChatFiltersTabsMode(value);
 			Core::App().saveSettingsDelayed();
 		});
+
+		// MTS Link: "Open meeting" under the folders setup.
+		Ui::AddSkip(content);
+		auto &meetingOption = base::options::lookup<bool>(
+			"mtslink-folders-meeting-button");
+		const auto meeting = content->add(
+			object_ptr<Ui::Checkbox>(
+				content,
+				tr::lng_mtslink_folders_meeting_button(tr::now),
+				meetingOption.value(),
+				st::settingsCheckbox),
+			st::settingsCheckboxPadding);
+		meeting->checkedChanges(
+		) | rpl::on_next([=](bool checked) {
+			base::options::lookup<bool>(
+				"mtslink-folders-meeting-button").set(checked);
+		}, meeting->lifetime());
 		Ui::AddSkip(content);
 		Ui::AddSkip(content);
 

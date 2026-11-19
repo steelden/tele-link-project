@@ -46,6 +46,8 @@ private:
 	void setupList();
 	void updateFavorite();
 	void createFavorite();
+	// MTS Link: "Open meeting" under the folders setup (by the option).
+	void updateMeeting();
 	void destroyFavorite();
 	void applyReorder(
 		not_null<Ui::RpWidget*> widget,
@@ -81,6 +83,7 @@ private:
 	Ui::VerticalLayout *_list = nullptr;
 	std::unique_ptr<Ui::VerticalLayoutReorder> _reorder;
 	base::unique_qptr<Ui::SideBarButton> _setup;
+	base::unique_qptr<Ui::SideBarButton> _meeting;
 	base::unique_qptr<Ui::SlideWrap<FolderFavoriteButton>> _favorite;
 	base::flat_map<FilterId, base::unique_qptr<Ui::SideBarButton>> _filters;
 	base::weak_qptr<Ui::SideBarButton> _tabStop;

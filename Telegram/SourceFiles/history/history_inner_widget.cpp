@@ -1451,6 +1451,24 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 	_readMetricsTracker->setScreenActive(!overlapped
 		&& !pendingResized
 		&& _widget->markingContentsRead());
+	// Temporary: the chat not repainted till the mouse moves.
+	{
+		static auto LastSkipped = false;
+		const auto skipped = overlapped || pendingResized;
+		if (skipped || LastSkipped) {
+			LOG(("MtsLink Repaint: paint %1 overlapped=%2 pendingResized=%3 "
+				"rect=%4,%5 %6x%7 active=%8"
+				).arg(skipped ? "SKIPPED" : "done"
+				).arg(Logs::b(overlapped)
+				).arg(Logs::b(pendingResized)
+				).arg(e->rect().x()
+				).arg(e->rect().y()
+				).arg(e->rect().width()
+				).arg(e->rect().height()
+				).arg(Logs::b(window()->isActiveWindow())));
+		}
+		LastSkipped = skipped;
+	}
 	if (overlapped || pendingResized) {
 		return;
 	} else if (_recountedAfterPendingResizedItems) {

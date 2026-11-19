@@ -80,6 +80,8 @@ foldersChannelsActive: icon {{ "folders/folders_channels", sideBarIconFgActive }
 foldersCustom: icon {{ "folders/folders_custom", sideBarIconFg }};
 foldersCustomActive: icon {{ "folders/folders_custom", sideBarIconFgActive }};
 foldersSetup: icon {{ "folders/folders_setup", sideBarIconFg }};
+foldersMeeting: icon {{ "calls/call_camera_active", sideBarIconFg }};
+foldersMeetingActive: icon {{ "calls/call_camera_active", sideBarIconFgActive }};
 foldersSetupActive: icon {{ "folders/folders_setup", sideBarIconFgActive }};
 foldersPoo: icon {{ "folders/folders_poo", sideBarIconFg }};
 foldersPooActive: icon {{ "folders/folders_poo", sideBarIconFgActive }};

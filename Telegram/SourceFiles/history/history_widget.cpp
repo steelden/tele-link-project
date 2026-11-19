@@ -4855,6 +4855,16 @@ void HistoryWidget::newItemAdded(not_null<HistoryItem*> item) {
 	// - on second we get wrong markingMessagesRead() and read both.
 	session().data().sendHistoryChangeNotifications();
 
+	// Temporary: the chat not repainted till the mouse moves.
+	LOG(("MtsLink Repaint: new item %1 scroll %2 / %3 marking=%4 active=%5 "
+		"view=%6 pending=%7"
+		).arg(item->id.bare
+		).arg(_scroll->scrollTop()
+		).arg(_scroll->scrollTopMax()
+		).arg(Logs::b(markingMessagesRead())
+		).arg(Logs::b(window()->isActiveWindow())
+		).arg(Logs::b(item->mainView() != nullptr)
+		).arg(Logs::b(_history->hasPendingResizedItems())));
 	if (item->isSending()) {
 		synteticScrollToY(_scroll->scrollTopMax());
 	} else if (_scroll->scrollTop() < _scroll->scrollTopMax()) {

@@ -49,10 +49,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_widgets.h"
 #include "styles/style_window.h"
 #include "styles/style_menu_icons.h"
+#include "styles/style_filter_icons.h"
 
 #include <QtGui/QtEvents>
 
 namespace Window {
+// The button of opening a meeting under the folders setup.
+const char kOptionFoldersMeetingButton[] = "mtslink-folders-meeting-button";
+
+base::options::toggle FoldersMeetingButton({
+	.id = kOptionFoldersMeetingButton,
+	.name = "Open meeting button in the folders",
+	.description = "The button under the folders setup opening a meeting.",
+});
+
 namespace {
 
 // The folder tabs container, exposed as a list to screen readers.
@@ -200,6 +210,7 @@ void FiltersMenu::setup() {
 			-1,
 			{ TextWithEntities{ tr::lng_filters_setup(tr::now) } },
 			Ui::FilterIcon::Edit);
+		updateMeeting();
 		if (_favorite) {
 			_favorite = nullptr;
 			updateFavorite();
@@ -465,7 +476,36 @@ void FiltersMenu::setupList() {
 	) | rpl::on_next([=] {
 		updateFavorite();
 	}, _outer.lifetime());
+	updateMeeting();
+	FoldersMeetingButton.changes(
+	) | rpl::on_next([=] {
+		updateMeeting();
+	}, _outer.lifetime());
 	updateFavorite();
+}
+
+void FiltersMenu::updateMeeting() {
+	_meeting = nullptr;
+	if (!FoldersMeetingButton.value()) {
+		return;
+	}
+	const auto mode = tabsMode();
+	auto prepared = object_ptr<Ui::SideBarButton>(
+		_container,
+		TextWithEntities{ tr::lng_mtslink_open_meeting(tr::now) },
+		buttonStyle(),
+		Core::TextContext({ .session = &_session->session() }),
+		[] { return false; });
+	prepared->setShowIcon(mode != Ui::ChatsFiltersTabsMode::TextOnly);
+	prepared->setShowText(mode != Ui::ChatsFiltersTabsMode::IconsOnly);
+	prepared->setIconOverride(
+		&st::foldersMeeting,
+		&st::foldersMeetingActive);
+	prepared->setClickedCallback([=] {
+		MtsLink::showOpenMeetingBox(_session->uiShow());
+	});
+	_meeting = base::unique_qptr<Ui::SideBarButton>(
+		_container->add(std::move(prepared)));
 }
 
 void FiltersMenu::updateFavorite() {
@@ -494,7 +534,7 @@ void FiltersMenu::updateFavorite() {
 void FiltersMenu::createFavorite() {
 	_favorite = base::unique_qptr<Ui::SlideWrap<FolderFavoriteButton>>(
 		_container->insert(
-			_container->count() - 1,
+			_container->count() - (_meeting ? 2 : 1),
 			object_ptr<Ui::SlideWrap<FolderFavoriteButton>>(
 				_container,
 				object_ptr<FolderFavoriteButton>(
