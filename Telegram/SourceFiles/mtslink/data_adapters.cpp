@@ -7138,6 +7138,8 @@ void refreshChat(not_null<Main::Session*> session, PeerId peerId) {
 		return;
 	}
 	LOG(("MtsLink: refresh of %1 requested").arg(chatId));
+	// The read of the refreshed chat is queued, not skipped as sent.
+	mts->sending()->forceNextRead(chatId);
 	mts->messages()->load(chatId);
 	mts->messages()->reloadPinned(chatId);
 	mts->channels()->loadChatInfo(chatId);

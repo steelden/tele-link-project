@@ -2011,6 +2011,23 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 	// Build the full message menu.
 	FillContextMenuItems(result, list, request, hasPollOption);
 
+	// TeleLink: the thread of the message is refreshed (without the
+	// subscription to it too), the last item as in the other menus.
+	if (item
+		&& item->isRegular()
+		&& (item->repliesCount() > 0)
+		&& MtsLink::hasChatId(item->history()->peer->id)
+		&& !(item->history()->isForum() && item->topicRootId())
+		&& (list->elementContext() == Context::History
+			|| list->elementContext() == Context::Pinned)) {
+		const auto session = &item->history()->session();
+		const auto peerId = item->history()->peer->id;
+		const auto rootId = item->id;
+		result->addAction(tr::lng_mtslink_refresh_chat(tr::now), [=] {
+			MtsLink::refreshThread(session, peerId, rootId);
+		}, &st::menuIconRestore);
+	}
+
 	if (item) {
 		const auto media = item->media();
 		const auto poll = media ? media->poll() : nullptr;

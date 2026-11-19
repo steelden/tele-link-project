@@ -51,6 +51,9 @@ public:
 	void readMessage(
 		const ChatId &chatId,
 		const MessageId &messageId);
+	// After a forced refresh of the chat: the next read of it is not
+	// skipped, but queued (sent after the request in flight / the delay).
+	void forceNextRead(const ChatId &chatId);
 	// After a reconnect: the requests could be lost, sent again.
 	void forgetSentReads();
 
@@ -89,6 +92,9 @@ Q_SIGNALS:
 	void messageEditDone(const ChatId &chatId, const MessageId &messageId);
 
 private:
+	// The queued read of the chat, when nothing of it is in flight.
+	void sendQueuedRead(const ChatId &chatId);
+
 	static constexpr int kMaxForwardRetries = 5;
 	static constexpr int kForwardRetryDelayMs = 1000;
 

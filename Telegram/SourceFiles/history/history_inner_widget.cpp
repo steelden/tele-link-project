@@ -2835,6 +2835,8 @@ void HistoryInner::contextMenuEvent(QContextMenuEvent *e) {
 }
 
 void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
+	// TeleLink: the refresh of the thread, the last item of the menu.
+	auto refreshThread = Fn<void()>();
 	if (e->reason() == QContextMenuEvent::Mouse) {
 		mouseActionUpdate(e->globalPos());
 	} else if (e->reason() == QContextMenuEvent::Keyboard) {
@@ -3075,6 +3077,12 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					[=](const QString &text, Fn<void()> callback, const style::icon *icon) {
 						menu->addAction(text, std::move(callback), icon);
 					});
+				// The thread is refreshed without the subscription too.
+				const auto session = &_history->session();
+				const auto peerId = _history->peer->id;
+				refreshThread = [=] {
+					MtsLink::refreshThread(session, peerId, rootId);
+				};
 			}
 		} else if (isMtsLink && !withReplies) {
 			const auto rootId = item->id;
@@ -3922,6 +3930,13 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			_menu,
 			leaderOrSelf,
 			_controller);
+	}
+
+	if (refreshThread && !_menu->empty()) {
+		_menu->addAction(
+			tr::lng_mtslink_refresh_chat(tr::now),
+			refreshThread,
+			&st::menuIconRestore);
 	}
 
 	if (!_menu->empty() && rateTranscriptionItem) {

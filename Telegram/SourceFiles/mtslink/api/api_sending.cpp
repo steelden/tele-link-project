@@ -130,34 +130,129 @@ void Sending::editMessage(
 		});
 }
 
+namespace {
+
+// The same read is not sent again sooner: it was sent once for each
+// connection, and a read the server didn't apply (the chat stayed unread)
+// was never sent again.
+constexpr auto kReadResendDelay = crl::time(10000);
+
+QHash<QString, crl::time> ReadSentAt;
+
+// The read queue: one request of a chat in flight, the next one (the
+// newest) waits for its answer or for the resend delay.
+QSet<ChatId> ReadsInFlight;
+QHash<ChatId, MessageId> ReadsQueued;
+QSet<ChatId> ReadsForced;
+QSet<ChatId> ReadsTimerSet;
+
+} // namespace
+
 void Sending::readMessage(
 		const ChatId &chatId,
 		const MessageId &messageId) {
 	const auto key = chatId + ':' + messageId;
-	if (_sentReads.contains(key)) {
+	const auto now = crl::now();
+	const auto forced = ReadsForced.contains(chatId);
+	const auto recent = _sentReads.contains(key)
+		&& (now - ReadSentAt.value(key) < kReadResendDelay);
+	if (ReadsInFlight.contains(chatId) || (recent && forced)) {
+		// Queued: the newest read of the chat is sent after the answer
+		// to the request in flight or after the delay.
+		if (forced || !recent) {
+			ReadsQueued.insert(chatId, messageId);
+			LOG(("MtsLink ReadRequest: %1 till %2 queued (in flight %3)"
+				).arg(chatId, messageId
+				).arg(Logs::b(ReadsInFlight.contains(chatId))));
+			if (recent && !ReadsTimerSet.contains(chatId)) {
+				ReadsTimerSet.insert(chatId);
+				const auto wait = kReadResendDelay
+					- (now - ReadSentAt.value(key));
+				QTimer::singleShot(int(wait), this, [=] {
+					ReadsTimerSet.remove(chatId);
+					sendQueuedRead(chatId);
+				});
+			}
+		}
+		return;
+	} else if (recent) {
 		return;
 	}
+	ReadsForced.remove(chatId);
 	_sentReads.insert(key);
+	ReadSentAt.insert(key, now);
+	ReadsInFlight.insert(chatId);
 	QJsonObject param;
 	param["chatId"] = chatId;
 	param["lastMessageId"] = messageId;
+	// Temporary: the chat stays unread after the read.
+	LOG(("MtsLink ReadRequest: %1 till %2").arg(chatId, messageId));
 	_rpc->call(
 		"Chat.MarkMessagesAsRead",
 		param,
 		[=](const QJsonObject &result) {
 			const auto type = result.value(u"type"_q).toString();
+			LOG(("MtsLink ReadRequest: %1 till %2 result: %3"
+				).arg(chatId, messageId
+				).arg(QString::fromUtf8(QJsonDocument(result).toJson(
+					QJsonDocument::Compact)).left(500)));
 			if (type == u"RpcError"_q || type == u"BusinessError"_q) {
 				_sentReads.remove(key);
+				ReadSentAt.remove(key);
 			}
+			ReadsInFlight.remove(chatId);
+			sendQueuedRead(chatId);
 		},
-		[=](const QString &) {
+		[=](const QString &error) {
+			LOG(("MtsLink ReadRequest: %1 till %2 failed: %3"
+				).arg(chatId, messageId, error));
 			// Lost with the connection: sent again.
 			_sentReads.remove(key);
+			ReadSentAt.remove(key);
+			ReadsInFlight.remove(chatId);
+			sendQueuedRead(chatId);
 		});
+}
+
+void Sending::sendQueuedRead(const ChatId &chatId) {
+	if (ReadsInFlight.contains(chatId)) {
+		return;
+	}
+	const auto i = ReadsQueued.find(chatId);
+	if (i == ReadsQueued.end()) {
+		return;
+	}
+	const auto messageId = i.value();
+	const auto key = chatId + ':' + messageId;
+	const auto left = kReadResendDelay
+		- (crl::now() - ReadSentAt.value(key));
+	if (_sentReads.contains(key) && left > 0) {
+		// The same read was just sent: after the delay.
+		if (!ReadsTimerSet.contains(chatId)) {
+			ReadsTimerSet.insert(chatId);
+			QTimer::singleShot(int(left), this, [=] {
+				ReadsTimerSet.remove(chatId);
+				sendQueuedRead(chatId);
+			});
+		}
+		return;
+	}
+	ReadsQueued.erase(i);
+	_sentReads.remove(key);
+	ReadsForced.remove(chatId);
+	readMessage(chatId, messageId);
+}
+
+void Sending::forceNextRead(const ChatId &chatId) {
+	LOG(("MtsLink ReadRequest: %1 forced").arg(chatId));
+	ReadsForced.insert(chatId);
 }
 
 void Sending::forgetSentReads() {
 	_sentReads.clear();
+	ReadSentAt.clear();
+	ReadsInFlight.clear();
+	ReadsQueued.clear();
 }
 
 void Sending::setChatNotifications(
