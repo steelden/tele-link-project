@@ -208,7 +208,10 @@ MimeImageData ReadMimeImage(not_null<const QMimeData*> data) {
 				.content = std::move(bytes),
 			};
 		}
-	} else if (data->hasImage()) {
+		// TeleLink: not a jpeg (the original of a photo may be a png),
+		// the image itself is pasted, else nothing was pasted at all.
+	}
+	if (data->hasImage()) {
 		auto image = qvariant_cast<QImage>(data->imageData());
 		// The same area limit Images::Read() applies to files: a huge
 		// image can't be scaled down for the preview, because the smooth

@@ -505,6 +505,26 @@ void PaintRow(
 	// MTS Link: a thread, to be told from the chats.
 	const auto threadRow = history
 		&& MtsLink::isThreadPeer(history->peer->id);
+	// Temporary: the lighter background of a thread row.
+	if (threadRow) {
+		static auto Logged = base::flat_map<PeerId, QString>();
+		const auto state = u"active=%1 selected=%2 bg=%3 current=%4 "
+			"filter=%5 search=%6 narrow=%7 h=%8"_q
+			.arg(Logs::b(context.active))
+			.arg(Logs::b(context.selected))
+			.arg(QBrush(bg).color().name(QColor::HexArgb))
+			.arg(QBrush(context.currentBg).color().name(QColor::HexArgb))
+			.arg(context.filter)
+			.arg(Logs::b(context.search))
+			.arg(Logs::b(context.narrow))
+			.arg(geometry.height());
+		auto &was = Logged[history->peer->id];
+		if (was != state) {
+			was = state;
+			LOG(("MtsLink ThreadRowBg: %1 %2").arg(
+				history->peer->id.value).arg(state));
+		}
+	}
 	if (!(flags & Flag::TopicJumpRipple)) {
 		auto ripple = context.active
 			? st::dialogsRippleBgActive

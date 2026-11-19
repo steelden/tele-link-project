@@ -234,10 +234,16 @@ bool PhotoMedia::setToClipboard() {
 	}
 	auto mime = std::make_unique<QMimeData>();
 	mime->setImageData(std::move(fallback));
-	if (auto bytes = imageBytes(large); !bytes.isEmpty()) {
+	// TeleLink: the large size is the original file, it may be not a jpeg
+	// (a png, a webp): only a jpeg is pasted by its bytes.
+	auto bytes = imageBytes(large);
+	const auto jpeg = (bytes.size() > 2)
+		&& (uchar(bytes[0]) == 0xFF)
+		&& (uchar(bytes[1]) == 0xD8);
+	if (jpeg) {
 		mime->setData(u"image/jpeg"_q, std::move(bytes));
+		mime->setData(u"application/x-td-use-jpeg"_q, "1");
 	}
-	mime->setData(u"application/x-td-use-jpeg"_q, "1");
 	QGuiApplication::clipboard()->setMimeData(mime.release());
 	return true;
 }
