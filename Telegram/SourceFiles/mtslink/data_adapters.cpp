@@ -5938,6 +5938,11 @@ Storage::Cache::Key messageCacheKey(const QString &chatId);
 
 } // namespace
 
+void addToCachedMessages(
+	not_null<Main::Session*> session,
+	Storage::Cache::Key key,
+	const Api::MessageData &message,
+	const QList<Api::MemberProfile> &profiles);
 void applyEditToCachedMessages(
 	not_null<Main::Session*> session,
 	Storage::Cache::Key key,
@@ -6202,6 +6207,24 @@ void handleChatEvent(
 				msg,
 				clientId)) {
 			newItem = addMessage(session, msg, isThread);
+		}
+		{
+			auto profiles = QList<Api::MemberProfile>();
+			for (const auto &profile
+					: value.value("memberProfiles").toArray()) {
+				const auto parsed = Api::ParseMemberProfile(
+					profile.toObject());
+				if (!parsed.userId.isEmpty()) {
+					profiles.push_back(parsed);
+				}
+			}
+			addToCachedMessages(
+				session,
+				(isThread
+					? threadCacheKey(chatId, msg.parentId)
+					: messageCacheKey(chatId)),
+				msg,
+				profiles);
 		}
 		if (const auto mts = session->account().mtsLinkSession()
 			; mts && msg.authorId != mts->userId()) {
@@ -7949,6 +7972,56 @@ void saveThreadToCache(
 	session->data().cache().put(
 		threadCacheKey(chatId, parentId),
 		serializeMessages(messages, profiles));
+}
+
+// A new message to the cached page (of a chat or of a thread): the cache
+// was saved by the server answers only, a new comment came in an event and
+// was missing, it appeared only with the server answer after the opening.
+// Only an existing cache is updated (a page of one message is not shown).
+void addToCachedMessages(
+		not_null<Main::Session*> session,
+		Storage::Cache::Key key,
+		const Api::MessageData &message,
+		const QList<Api::MemberProfile> &profiles) {
+	constexpr auto kLimit = 50;
+	const auto weak = base::make_weak(session);
+	session->data().cache().get(key, [=](QByteArray &&data) {
+		crl::on_main(weak, [=, data = std::move(data)] {
+			auto cached = deserializeMessages(data);
+			if (!cached || cached->messages.isEmpty()) {
+				return;
+			}
+			auto &list = cached->messages;
+			if (ranges::contains(list, message.id, &Api::MessageData::id)) {
+				return;
+			}
+			// The pages are the newest first, the server order.
+			const auto newestFirst = (list.size() < 2)
+				|| (list.front().createdAt >= list.back().createdAt);
+			if (newestFirst) {
+				list.push_front(message);
+				while (list.size() > kLimit) {
+					list.pop_back();
+				}
+			} else {
+				list.push_back(message);
+				while (list.size() > kLimit) {
+					list.pop_front();
+				}
+			}
+			for (const auto &profile : profiles) {
+				if (!ranges::contains(
+						cached->profiles,
+						profile.userId,
+						&Api::MemberProfile::userId)) {
+					cached->profiles.push_back(profile);
+				}
+			}
+			weak->data().cache().put(
+				key,
+				serializeMessages(list, cached->profiles));
+		});
+	});
 }
 
 // An edited message in a cached page (of a chat or of a thread).
