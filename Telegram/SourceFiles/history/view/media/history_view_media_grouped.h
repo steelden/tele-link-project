@@ -81,12 +81,14 @@ public:
 	HistoryMessageEdited *displayedEditBadge() const override;
 
 	bool skipBubbleTail() const override {
-		return (_mode == Mode::Grid) && isRoundedInBubbleBottom();
+		return (_mode == Mode::Grid)
+			&& !mixed()
+			&& isRoundedInBubbleBottom();
 	}
 	void updateNeedBubbleState() override;
 	bool needsBubble() const override;
 	bool customInfoLayout() const override {
-		return (_mode != Mode::Column);
+		return (_mode != Mode::Column) && !mixed();
 	}
 	QPoint resolveCustomInfoRightBottom() const override;
 
@@ -120,6 +122,7 @@ private:
 
 		not_null<HistoryItem*> item;
 		std::unique_ptr<Media> content;
+		int index = 0; // In the group (the selection, the highlight).
 
 		RectParts sides = RectPart::None;
 		QRect initialGeometry;
@@ -130,6 +133,13 @@ private:
 	};
 
 	[[nodiscard]] static Mode DetectMode(not_null<Data::Media*> media);
+
+	// TeleLink: the photos / videos (a grid) with the files under them
+	// (a column) in one album, a message of MTS Link has them together.
+	[[nodiscard]] bool mixed() const {
+		return (_mode == Mode::Grid) && (_gridCount < int(_parts.size()));
+	}
+	[[nodiscard]] QMargins mixedFilesPadding() const;
 
 	template <typename DataMediaRange>
 	bool applyGroup(const DataMediaRange &medias);
@@ -157,6 +167,7 @@ private:
 
 	mutable std::optional<HistoryItem*> _captionItem;
 	std::vector<Part> _parts;
+	int _gridCount = 0; // The grid parts first, then the files (mixed).
 	Mode _mode = Mode::Grid;
 	bool _needBubble : 1 = false;
 	bool _purchasedPriceTag : 1 = false;

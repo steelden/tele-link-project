@@ -5233,6 +5233,126 @@ bool isOutboxUnread(PeerId peerId, MsgId msgId) {
 	return src.markdown.contains(tag) || src.text.contains(tag);
 }
 
+namespace {
+
+// The kinds of the albums of Telegram: the photos / videos (a grid) and the
+// other files (a column). A mixed group shows the first kind only: the
+// files of the other kind with the text and the forward info were lost.
+[[nodiscard]] bool IsGridMedia(const MTPMessageMedia &media) {
+	return media.match([](const MTPDmessageMediaPhoto &) {
+		return true;
+	}, [](const MTPDmessageMediaDocument &data) {
+		const auto document = data.vdocument();
+		if (!document) {
+			return false;
+		}
+		return document->match([](const MTPDdocument &d) {
+			for (const auto &a : d.vattributes().v) {
+				if (a.type() == mtpc_documentAttributeAnimated) {
+					return true;
+				} else if (a.type() == mtpc_documentAttributeVideo) {
+					return !a.c_documentAttributeVideo().is_round_message();
+				}
+			}
+			return false;
+		}, [](const auto &) {
+			return false;
+		});
+	}, [](const auto &) {
+		return false;
+	});
+}
+
+struct FilePart {
+	int index = 0;
+	MTPMessageMedia media;
+	uint64 groupedId = 0;
+};
+
+// The photos / videos first (the main item with the text), the other
+// files after, in one album (a grid with the files under it).
+[[nodiscard]] std::vector<FilePart> PlanFileParts(
+		not_null<Main::Session*> session,
+		const Api::MessageData &src,
+		TimeId date) {
+	auto grid = std::vector<FilePart>();
+	auto column = std::vector<FilePart>();
+	for (auto i = 0; i != int(src.files.size()); ++i) {
+		auto media = buildFileMedia(session, src.files[i], date);
+		auto &list = IsGridMedia(media) ? grid : column;
+		list.push_back({ .index = i, .media = std::move(media) });
+	}
+	const auto groupedId = (src.files.size() > 1)
+		? uuidToBareId(src.id)
+		: uint64(0);
+	auto result = std::vector<FilePart>();
+	for (auto &part : grid) {
+		part.groupedId = groupedId;
+		result.push_back(std::move(part));
+	}
+	for (auto &part : column) {
+		part.groupedId = groupedId;
+		result.push_back(std::move(part));
+	}
+	return result;
+}
+
+void ApplyForwardFields(
+		not_null<Main::Session*> session,
+		const Api::MessageData &src,
+		TimeId date,
+		HistoryItemCommonFields &fields) {
+	if (!src.forward) {
+		return;
+	}
+	const auto &fwd = *src.forward;
+	fields.forwardDate = TimeId(fwd.createdAt / 1000);
+	if (!fwd.authorId.isEmpty()) {
+		const auto fwdBareId = uuidToBareId(fwd.authorId);
+		fields.forwardFrom = PeerId(::UserId(fwdBareId));
+		if (const auto fwdUser = session->data().userLoaded(
+				::UserId(fwdBareId))) {
+			fields.forwardSenderName = fwdUser->name();
+		}
+	}
+	if (fields.forwardDate == 0) {
+		fields.forwardDate = date;
+	}
+	if (!fwd.chatId.isEmpty()) {
+		fields.forwardOriginalPeer = chatIdToPeerId(fwd.chatId);
+	}
+	if (!fwd.messageId.isEmpty()) {
+		const auto it = MtsLinkIdToMsgMap.constFind(fwd.messageId);
+		fields.forwardOriginalMsgId = (it != MtsLinkIdToMsgMap.constEnd())
+			? it.value().second
+			: MsgId(uuidToBareId(fwd.messageId) & 0x7FFFFFFFLL);
+	}
+}
+
+// The extra items of the files: the same author, date, forward info.
+[[nodiscard]] HistoryItemCommonFields ExtraFileFields(
+		const HistoryItemCommonFields &main,
+		const Api::MessageData &src,
+		const FilePart &part) {
+	auto result = HistoryItemCommonFields{
+		.id = MsgId(uuidToBareId(src.id + QString::number(part.index))
+			& 0x7FFFFFFFLL),
+		.flags = main.flags,
+		.from = main.from,
+		.date = main.date,
+		.groupedId = part.groupedId,
+	};
+	result.forwardDate = main.forwardDate;
+	result.forwardFrom = main.forwardFrom;
+	result.forwardSenderName = main.forwardSenderName;
+	result.forwardOriginalPeer = main.forwardOriginalPeer;
+	result.forwardOriginalMsgId = main.forwardOriginalMsgId;
+	return result;
+}
+
+} // namespace
+
+
 HistoryItem *addMessage(
 		not_null<Main::Session*> session,
 		const Api::MessageData &src,
@@ -5331,30 +5451,7 @@ HistoryItem *addMessage(
 			registerMessageId(chatPeerId, parentMsgId, src.parentId);
 		}
 	}
-	if (src.forward) {
-		const auto &fwd = *src.forward;
-		fields.forwardDate = TimeId(fwd.createdAt / 1000);
-		if (!fwd.authorId.isEmpty()) {
-			const auto fwdBareId = uuidToBareId(fwd.authorId);
-			fields.forwardFrom = PeerId(::UserId(fwdBareId));
-			if (const auto fwdUser = session->data().userLoaded(
-					::UserId(fwdBareId))) {
-				fields.forwardSenderName = fwdUser->name();
-			}
-		}
-		if (fields.forwardDate == 0) {
-			fields.forwardDate = date;
-		}
-		if (!fwd.chatId.isEmpty()) {
-			fields.forwardOriginalPeer = chatIdToPeerId(fwd.chatId);
-		}
-		if (!fwd.messageId.isEmpty()) {
-			const auto it = MtsLinkIdToMsgMap.constFind(fwd.messageId);
-			fields.forwardOriginalMsgId = (it != MtsLinkIdToMsgMap.constEnd())
-				? it.value().second
-				: MsgId(uuidToBareId(fwd.messageId) & 0x7FFFFFFFLL);
-		}
-	}
+	ApplyForwardFields(session, src, date, fields);
 
 	auto text = parseMentionedText(src.text, src.markdown, src.mentions, session);
 
@@ -5463,13 +5560,14 @@ HistoryItem *addMessage(
 		return item;
 	}
 
-	const auto multiFile = (src.files.size() > 1);
-	if (multiFile) {
-		fields.groupedId = msgBareId;
+	const auto parts = PlanFileParts(session, src, date);
+	if (!parts.empty()) {
+		fields.groupedId = parts.front().groupedId;
 	}
+	const auto mainFields = fields;
 
-	const auto media = (!src.files.isEmpty())
-		? buildFileMedia(session, src.files.first(), date)
+	const auto media = (!parts.empty())
+		? MTPMessageMedia(parts.front().media)
 		: MTP_messageMediaEmpty();
 
 	const auto item = (threadOnly || batchItems)
@@ -5484,35 +5582,25 @@ HistoryItem *addMessage(
 	if (item && batchItems) {
 		batchItems->push_back(item);
 	}
-	if (item && !src.files.isEmpty()) {
-		reapplyPhotoUrls(item, src.files.first());
+	if (item && !parts.empty()) {
+		reapplyPhotoUrls(item, src.files[parts.front().index]);
 	}
-	if (item && multiFile) {
-		for (int fi = 1; fi < src.files.size(); ++fi) {
-			const auto extraId = MsgId(
-				(uuidToBareId(src.id + QString::number(fi))
-					& 0x7FFFFFFFLL));
-			registerExtraFileMessageId(chatPeerId, extraId, src.id);
-			auto extraFields = HistoryItemCommonFields{
-				.id = extraId,
-				.flags = flags,
-				.from = fromPeerId,
-				.date = date,
-				.groupedId = msgBareId,
-			};
-			const auto extraMedia = buildFileMedia(
-				session, src.files[fi], date);
+	if (item && parts.size() > 1) {
+		for (auto pi = 1; pi != int(parts.size()); ++pi) {
+			const auto &part = parts[pi];
+			auto extraFields = ExtraFileFields(mainFields, src, part);
+			registerExtraFileMessageId(chatPeerId, extraFields.id, src.id);
 			const auto extra = (threadOnly || batchItems)
 				? history->makeMessage(
 					std::move(extraFields),
 					TextWithEntities(),
-					extraMedia)
+					part.media)
 				: history->addNewExternalMessage(
 					std::move(extraFields),
 					TextWithEntities(),
-					extraMedia);
+					part.media);
 			if (extra) {
-				reapplyPhotoUrls(extra, src.files[fi]);
+				reapplyPhotoUrls(extra, src.files[part.index]);
 				if (batchItems) {
 					batchItems->push_back(extra);
 				}
@@ -5627,31 +5715,7 @@ bool addOlderMessages(
 			};
 			fields.flags |= MessageFlag::HasReplyInfo;
 		}
-		if (src.forward) {
-			const auto &fwd = *src.forward;
-			fields.forwardDate = TimeId(fwd.createdAt / 1000);
-			if (!fwd.authorId.isEmpty()) {
-				const auto fwdBareId = uuidToBareId(fwd.authorId);
-				fields.forwardFrom = PeerId(::UserId(fwdBareId));
-				if (const auto fwdUser = session->data().userLoaded(
-						::UserId(fwdBareId))) {
-					fields.forwardSenderName = fwdUser->name();
-				}
-			}
-			if (fields.forwardDate == 0) {
-				fields.forwardDate = date;
-			}
-			if (!fwd.chatId.isEmpty()) {
-				fields.forwardOriginalPeer = chatIdToPeerId(fwd.chatId);
-			}
-			if (!fwd.messageId.isEmpty()) {
-				const auto it = MtsLinkIdToMsgMap.constFind(fwd.messageId);
-				fields.forwardOriginalMsgId =
-					(it != MtsLinkIdToMsgMap.constEnd())
-					? it.value().second
-					: MsgId(uuidToBareId(fwd.messageId) & 0x7FFFFFFFLL);
-			}
-		}
+		ApplyForwardFields(session, src, date, fields);
 
 		auto text = parseMentionedText(src.text, src.markdown, src.mentions, session);
 
@@ -5672,45 +5736,39 @@ bool addOlderMessages(
 			continue;
 		}
 
-		const auto multiFile = (src.files.size() > 1);
-		if (multiFile) {
-			fields.groupedId = msgBareId;
+		const auto parts = PlanFileParts(session, src, date);
+		if (!parts.empty()) {
+			fields.groupedId = parts.front().groupedId;
 		}
+		const auto mainFields = fields;
 
-		const auto media = (!src.files.isEmpty())
-			? buildFileMedia(session, src.files.first(), date)
+		const auto media = (!parts.empty())
+			? MTPMessageMedia(parts.front().media)
 			: MTP_messageMediaEmpty();
 
 		const auto item = history->makeMessage(
 			std::move(fields),
 			text,
 			media);
-		if (!src.files.isEmpty()) {
-			reapplyPhotoUrls(item, src.files.first());
+		if (!parts.empty()) {
+			reapplyPhotoUrls(item, src.files[parts.front().index]);
 		}
 		items.push_back(item);
 
-		if (item && multiFile) {
-			for (int fi = 1; fi < src.files.size(); ++fi) {
-				const auto extraId = MsgId(
-					(uuidToBareId(src.id + QString::number(fi))
-						& 0x7FFFFFFFLL));
-				registerExtraFileMessageId(chatPeerId, extraId, src.id);
-				auto extraFields = HistoryItemCommonFields{
-					.id = extraId,
-					.flags = flags,
-					.from = fromPeerId,
-					.date = date,
-					.groupedId = msgBareId,
-				};
-				const auto extraMedia = buildFileMedia(
-					session, src.files[fi], date);
+		if (item && parts.size() > 1) {
+			for (auto pi = 1; pi != int(parts.size()); ++pi) {
+				const auto &part = parts[pi];
+				auto extraFields = ExtraFileFields(mainFields, src, part);
+				registerExtraFileMessageId(
+					chatPeerId,
+					extraFields.id,
+					src.id);
 				const auto extra = history->makeMessage(
 					std::move(extraFields),
 					TextWithEntities(),
-					extraMedia);
+					part.media);
 				if (extra) {
-					reapplyPhotoUrls(extra, src.files[fi]);
+					reapplyPhotoUrls(extra, src.files[part.index]);
 					items.push_back(extra);
 				}
 			}

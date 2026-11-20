@@ -139,8 +139,60 @@ GroupedMedia::Mode GroupedMedia::DetectMode(not_null<Data::Media*> media) {
 		: Mode::Grid;
 }
 
+QMargins GroupedMedia::mixedFilesPadding() const {
+	const auto normal = st::msgFileLayout.padding;
+	const auto grouped = st::msgFileLayoutGrouped.padding;
+	return QMargins(
+		0,
+		normal.top() - grouped.top(),
+		0,
+		normal.bottom() - grouped.bottom());
+}
+
 QSize GroupedMedia::countOptimalSize() {
 	_purchasedPriceTag = hasPurchasedTag();
+	if (mixed()) {
+		auto sizes = std::vector<QSize>();
+		sizes.reserve(_gridCount);
+		for (auto i = 0; i != _gridCount; ++i) {
+			sizes.push_back(
+				_parts[i].content->sizeForGroupingOptimal(0, false));
+		}
+		const auto layout = Ui::LayoutMediaGroup(
+			sizes,
+			st::historyGroupWidthMax,
+			st::historyGroupWidthMin,
+			st::historyGroupSkip);
+		Assert(layout.size() == sizes.size());
+		auto maxWidth = 0;
+		auto top = 0;
+		for (auto i = 0; i != _gridCount; ++i) {
+			const auto &item = layout[i];
+			accumulate_max(maxWidth, item.geometry.x() + item.geometry.width());
+			accumulate_max(top, item.geometry.y() + item.geometry.height());
+			_parts[i].initialGeometry = item.geometry;
+			// The files are under the grid: no bottom rounding.
+			_parts[i].sides = item.sides & ~RectPart::Bottom;
+		}
+		const auto padding = mixedFilesPadding();
+		top += padding.top();
+		const auto count = int(_parts.size());
+		for (auto i = _gridCount; i != count; ++i) {
+			auto &part = _parts[i];
+			part.content->setBubbleRounding(bubbleRounding());
+			part.content->initDimensions();
+			const auto last = (i + 1 == count);
+			const auto size = part.content->sizeForGroupingOptimal(
+				maxWidth,
+				last);
+			part.initialGeometry = QRect(0, top, maxWidth, size.height());
+			part.sides = RectPart::Left
+				| RectPart::Right
+				| (last ? RectPart::Bottom : RectPart::None);
+			top += size.height();
+		}
+		return { maxWidth, top + padding.bottom() };
+	}
 
 	std::vector<QSize> sizes;
 	const auto partsCount = _parts.size();
@@ -254,6 +306,20 @@ QSize GroupedMedia::countCurrentSize(int newWidth) {
 			part.geometry = QRect(left, top, width, height);
 
 			accumulate_max(newHeight, top + height);
+			if (mixed() && (&part - &_parts.front()) + 1 == _gridCount) {
+				break;
+			}
+		}
+		if (mixed()) {
+			const auto padding = mixedFilesPadding();
+			auto top = newHeight + padding.top();
+			for (auto i = _gridCount; i != int(_parts.size()); ++i) {
+				auto &part = _parts[i];
+				const auto size = part.content->sizeForGrouping(newWidth);
+				part.geometry = QRect(0, top, newWidth, size.height());
+				top += size.height();
+			}
+			newHeight = top + padding.bottom();
 		}
 	}
 	if (_mode == Mode::Column
@@ -320,10 +386,10 @@ QMargins GroupedMedia::groupedPadding() const {
 }
 
 QRect GroupedMedia::groupItemRect(int index) const {
-	if (index >= 0 && index < int(_parts.size())) {
-		return _parts[index].geometry.translated(
-			0,
-			groupedPadding().top());
+	for (const auto &part : _parts) {
+		if (part.index == index) {
+			return part.geometry.translated(0, groupedPadding().top());
+		}
 	}
 	return {};
 }
@@ -354,6 +420,9 @@ QImage GroupedMedia::generateSpoilerTagBackground(QRect full) const {
 	const auto skip1 = st::historyGroupSkip / 2;
 	const auto skip2 = st::historyGroupSkip - skip1;
 	for (const auto &part : _parts) {
+		if (mixed() && (&part - &_parts.front()) >= _gridCount) {
+			break;
+		}
 		auto background = part.content->spoilerTagBackground();
 		const auto extended = part.geometry.translated(shift).marginsAdded(
 			{ skip1, skip1, skip2, skip2 });
@@ -440,11 +509,11 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 			? FullSelection
 			: textSelection
 			? selection
-			: IsGroupItemSelection(selection, i)
+			: IsGroupItemSelection(selection, part.index)
 			? FullSelection
 			: TextSelection());
-		const auto highlighted = (highlight.empty() && !i)
-			|| IsGroupItemSelection(highlight, i);
+		const auto highlighted = (highlight.empty() && !part.index)
+			|| IsGroupItemSelection(highlight, part.index);
 		const auto highlightOpacity = highlighted
 			? context.highlight.opacity
 			: 0.;
@@ -472,7 +541,7 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 		if (!part.cache.isNull()) {
 			nowCache = true;
 		}
-		if (tagged || _purchasedPriceTag) {
+		if ((tagged || _purchasedPriceTag) && (!mixed() || i < _gridCount)) {
 			fullRect = fullRect.united(part.geometry);
 		}
 	}
@@ -555,7 +624,9 @@ TextState GroupedMedia::textState(QPoint point, StateRequest request) const {
 			}
 		}
 	}
-	if (_parent->media() == this && (!_parent->hasBubble() || isBubbleBottom())) {
+	if (_parent->media() == this
+		&& !mixed()
+		&& (!_parent->hasBubble() || isBubbleBottom())) {
 		auto fullRight = width();
 		auto fullBottom = height();
 		const auto bottomInfoResult = _parent->bottomInfoTextState(
@@ -778,16 +849,32 @@ bool GroupedMedia::applyGroup(const DataMediaRange &medias) {
 		return true;
 	}
 
-	auto modeChosen = false;
+	auto hasGrid = false;
 	for (const auto media : medias) {
-		const auto mediaMode = DetectMode(media);
-		if (!modeChosen) {
-			_mode = mediaMode;
-			modeChosen = true;
-		} else if (mediaMode != _mode) {
-			continue;
+		if (DetectMode(media) == Mode::Grid) {
+			hasGrid = true;
+			break;
 		}
-		_parts.push_back(Part(_parent, media));
+	}
+	_mode = hasGrid ? Mode::Grid : Mode::Column;
+	auto index = 0;
+	for (const auto media : medias) {
+		if (DetectMode(media) == _mode) {
+			_parts.push_back(Part(_parent, media));
+			_parts.back().index = index;
+		}
+		++index;
+	}
+	_gridCount = (_mode == Mode::Grid) ? int(_parts.size()) : 0;
+	if (_mode == Mode::Grid) {
+		index = 0;
+		for (const auto media : medias) {
+			if (DetectMode(media) == Mode::Column) {
+				_parts.push_back(Part(_parent, media));
+				_parts.back().index = index;
+			}
+			++index;
+		}
 	}
 	if (_parts.empty()) {
 		return false;
@@ -814,7 +901,9 @@ bool GroupedMedia::validateGroupParts(
 not_null<Media*> GroupedMedia::main() const {
 	Expects(!_parts.empty());
 
-	return _parts.back().content.get();
+	return mixed()
+		? _parts[_gridCount - 1].content.get()
+		: _parts.back().content.get();
 }
 
 void GroupedMedia::hideSpoilers() {
@@ -930,7 +1019,7 @@ int GroupedMedia::contributedMaxMonospaceWidth() const {
 bool GroupedMedia::computeNeedBubble() const {
 	Expects(_mode == Mode::Column || _captionItem.has_value());
 
-	if (_mode == Mode::Column || *_captionItem) {
+	if (_mode == Mode::Column || mixed() || *_captionItem) {
 		return true;
 	}
 	if (const auto item = _parent->data()) {
@@ -950,6 +1039,7 @@ bool GroupedMedia::computeNeedBubble() const {
 bool GroupedMedia::needInfoDisplay() const {
 	const auto item = _parent->data();
 	return (_mode != Mode::Column)
+		&& !mixed()
 		&& (item->isSending()
 			|| item->awaitingVideoProcessing()
 			|| item->hasFailed()
