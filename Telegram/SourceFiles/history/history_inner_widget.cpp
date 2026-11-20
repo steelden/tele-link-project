@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/file_utilities.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/task_edit_box.h"
 #include "core/click_handler_types.h"
 #include "core/phone_click_handler.h"
 #include "data/data_chat_participant_status.h"
@@ -3930,6 +3931,18 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			_menu,
 			leaderOrSelf,
 			_controller);
+	}
+
+	// TeleLink: a task of the task tracker from the message.
+	if (leaderOrSelf
+		&& leaderOrSelf->isRegular()
+		&& MtsLink::hasChatId(leaderOrSelf->history()->peer->id)
+		&& !_menu->empty()) {
+		MtsLink::addCreateTaskMenuAction(
+			_menu.get(),
+			_controller,
+			leaderOrSelf,
+			false);
 	}
 
 	if (refreshThread && !_menu->empty()) {

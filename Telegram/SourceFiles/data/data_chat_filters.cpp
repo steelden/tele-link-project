@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "main/main_app_config.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/tasks_peers.h"
 #include "lang/lang_keys.h"
 #include "apiwrap.h"
 #include "core/application.h"
@@ -344,6 +345,11 @@ const base::flat_set<not_null<History*>> &ChatFilter::never() const {
 bool ChatFilter::contains(
 		not_null<History*> history,
 		bool ignoreFakeUnread) const {
+	// MTS Link: the sections of the tasks, only by the "Tasks" type.
+	if (MtsLink::isTaskPeer(history->peer->id)) {
+		return !_never.contains(history)
+			&& ((_flags & Flag::Tasks) || _always.contains(history));
+	}
 	const auto flag = [&] {
 		const auto peer = history->peer;
 		if (MtsLink::chatTypeForPeer(peer->id)
@@ -800,7 +806,10 @@ bool ChatFilters::applyChange(ChatFilter &filter, ChatFilter &&updated) {
 
 	const auto id = filter.id();
 	const auto exceptionsChanged = filter.always() != updated.always();
-	const auto rulesMask = Flag() | Flag::RulesMask | Flag::Threads;
+	const auto rulesMask = Flag()
+		| Flag::RulesMask
+		| Flag::Threads
+		| Flag::Tasks;
 	const auto rulesChanged = exceptionsChanged
 		|| ((filter.flags() & rulesMask) != (updated.flags() & rulesMask))
 		|| (filter.never() != updated.never());
@@ -858,6 +867,12 @@ bool ChatFilters::applyChange(ChatFilter &filter, ChatFilter &&updated) {
 		for (auto it = MtsLink::threadPeerMap().constBegin();
 			it != MtsLink::threadPeerMap().constEnd(); ++it) {
 			if (const auto h = _owner->historyLoaded(it.key())) {
+				feedHistory(h);
+			}
+		}
+		// The sections of the tasks are not in the main list either.
+		for (const auto peerId : MtsLink::taskPeerIds()) {
+			if (const auto h = _owner->historyLoaded(peerId)) {
 				feedHistory(h);
 			}
 		}

@@ -1567,6 +1567,13 @@ PRIVATE
     mtslink/whats_new.h
     mtslink/threads_background.cpp
     mtslink/threads_background.h
+    mtslink/tasks_section.cpp
+    mtslink/tasks_section.h
+    mtslink/task_edit_box.cpp
+    mtslink/task_edit_box.h
+    mtslink/tasks_peers.h
+    mtslink/api/api_tasks.cpp
+    mtslink/api/api_tasks.h
     mtslink/rpc.cpp
     mtslink/rpc.h
     mtslink/session.cpp

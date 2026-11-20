@@ -57,6 +57,8 @@ public:
 		ExistingChats = (1 << 12),
 
 		Threads       = (1 << 13),
+		// MTS Link: the sections of the tasks as the chats.
+		Tasks         = (1 << 14),
 	};
 	friend constexpr inline bool is_flag_type(Flag) { return true; };
 	using Flags = base::flags<Flag>;

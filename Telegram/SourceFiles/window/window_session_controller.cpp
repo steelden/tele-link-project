@@ -10,6 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "main/main_account.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/tasks_peers.h"
+#include "mtslink/tasks_section.h"
 #include "api/api_cloud_password.h"
 #include "api/api_text_entities.h"
 #include "boxes/peers/add_bot_to_chat_box.h"
@@ -3273,6 +3275,13 @@ void SessionController::showPeerHistory(
 		PeerId peerId,
 		const SectionShow &params,
 		MsgId msgId) {
+	// MTS Link: a section of the tasks shows its tasks.
+	if (const auto section = MtsLink::taskSectionForPeer(peerId)) {
+		auto copy = params;
+		copy.way = SectionShow::Way::ClearStack;
+		showSection(std::make_shared<MtsLink::TasksMemento>(*section), copy);
+		return;
+	}
 	// The chat with self (a "Message" in the own profile and alike) is
 	// the MTS Link favorites chat, not the Telegram saved messages.
 	if (peerId == session().userPeerId()) {

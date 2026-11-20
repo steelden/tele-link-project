@@ -47,6 +47,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/menu/menu_separator.h"
 #include "ui/image/image.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/task_edit_box.h"
 #include "ui/toast/toast.h"
 #include "ui/text/format_song_document_name.h"
 #include "ui/text/format_values.h"
@@ -2010,6 +2011,21 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 
 	// Build the full message menu.
 	FillContextMenuItems(result, list, request, hasPollOption);
+
+	// TeleLink: a task of the task tracker from the message.
+	if (item
+		&& item->isRegular()
+		&& MtsLink::hasChatId(item->history()->peer->id)
+		&& !result->empty()
+		&& (list->elementContext() == Context::History
+			|| list->elementContext() == Context::Replies
+			|| list->elementContext() == Context::Pinned)) {
+		MtsLink::addCreateTaskMenuAction(
+			result.get(),
+			list->controller(),
+			item,
+			(list->elementContext() == Context::Replies));
+	}
 
 	// TeleLink: the thread of the message is refreshed (without the
 	// subscription to it too), the last item as in the other menus.

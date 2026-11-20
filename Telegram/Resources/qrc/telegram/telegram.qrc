@@ -97,6 +97,12 @@
   <qresource prefix="/mtslink">
     <file alias="emoji_ids.txt">../../mtslink_emoji_ids.txt</file>
     <file alias="emoji_names.txt">../../mtslink_emoji_names.txt</file>
+    <file alias="tasks/my.svg">../../icons/mtslink/tasks_my.svg</file>
+    <file alias="tasks/all.svg">../../icons/mtslink/tasks_all.svg</file>
+    <file alias="tasks/important.svg">../../icons/mtslink/tasks_important.svg</file>
+    <file alias="tasks/assigned_by_me.svg">../../icons/mtslink/tasks_assigned_by_me.svg</file>
+    <file alias="tasks/someday.svg">../../icons/mtslink/tasks_someday.svg</file>
+    <file alias="tasks/completed.svg">../../icons/mtslink/tasks_completed.svg</file>
   </qresource>
   <qresource prefix="/langs">
     <file alias="ru.strings">../../langs/ru.strings</file>

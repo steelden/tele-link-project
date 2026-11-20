@@ -35,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lottie/lottie_icon.h"
 #include "main/main_session.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/tasks_peers.h"
 #include "storage/localstorage.h"
 #include "support/support_helper.h"
 #include "ui/empty_userpic.h"
@@ -447,6 +448,11 @@ void PaintDialogDate(
 		TimeId date,
 		QRect &rectForName,
 		const PaintContext &context) {
+	// MTS Link: a section of the tasks has no date.
+	if (const auto history = entry->asHistory()
+		; history && MtsLink::isTaskPeer(history->peer->id)) {
+		return;
+	}
 	const auto resolved = fakeRow
 		? fakeRow->dateText(date, context.now)
 		: entry->chatListTimestampText(date, context.now);
@@ -647,7 +653,9 @@ void PaintRow(
 		const auto skip = rowBadge.drawVerified(p, position, st);
 		rectForName.setLeft(position.x() + skip + st::dialogsChatTypeSkip);
 	} else if (from) {
-		if (const auto chatTypeIcon = ChatTypeIcon(from, context)) {
+		if (const auto chatTypeIcon = MtsLink::isTaskPeer(from->id)
+				? nullptr
+				: ChatTypeIcon(from, context)) {
 			if (threadRow && !context.active) {
 				// MTS Link: in the color of the thread name.
 				chatTypeIcon->paint(

@@ -30,6 +30,7 @@ constexpr auto kAllTypes = {
 	Flag::Channels,
 	Flag::Bots,
 	Flag::Threads,
+	Flag::Tasks,
 	Flag::NoMuted,
 	Flag::NoRead,
 	Flag::NoArchived,

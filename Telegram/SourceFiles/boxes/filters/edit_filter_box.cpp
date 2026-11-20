@@ -735,7 +735,8 @@ void EditFilterBox(
 		| Flag::Groups
 		| Flag::Channels
 		| Flag::Bots
-		| Flag::Threads;
+		| Flag::Threads
+		| Flag::Tasks;
 	constexpr auto kExcludeTypes = Flag::NoMuted
 		| Flag::NoArchived
 		| Flag::NoRead;

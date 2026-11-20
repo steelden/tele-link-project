@@ -96,6 +96,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/random.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/tasks_peers.h"
 
 namespace Data {
 namespace {
@@ -5707,8 +5708,11 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 	const auto entry = key.entry();
 	const auto history = entry->asHistory();
 	const auto topic = entry->asTopic();
+	// MTS Link: the threads and the sections of the tasks are only in the
+	// folders, not in the main list.
 	const auto isThread = history
-		&& MtsLink::isThreadPeer(history->peer->id);
+		&& (MtsLink::isThreadPeer(history->peer->id)
+			|| MtsLink::isTaskPeer(history->peer->id));
 	auto creating = false;
 	if (!isThread) {
 		const auto mainList = chatsListFor(entry);

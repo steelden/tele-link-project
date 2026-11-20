@@ -2824,6 +2824,14 @@ void ListWidget::revealItemsCallback() {
 		}
 	}
 	if (_itemsRevealHeight != revealHeight) {
+		// Temporary: an empty space at the bottom of a thread.
+		if (_context == Context::Replies && (!revealHeight || !_itemsRevealHeight)) {
+			LOG(("MtsLink ThreadGap: reveal %1 -> %2 anims=%3 items=%4"
+				).arg(_itemsRevealHeight
+				).arg(revealHeight
+				).arg(_itemRevealAnimations.size()
+				).arg(_itemsHeight));
+		}
 		updateVisibleTopItem();
 		if (_visibleTopItem) {
 			// We're not at the bottom.
@@ -2900,6 +2908,39 @@ int ListWidget::resizeGetHeight(int newWidth) {
 	}
 	if (_emptyInfo) {
 		_emptyInfo->setVisible(isEmpty());
+	}
+	// Temporary: an empty space at the bottom of a thread.
+	if (_context == Context::Replies) {
+		static auto Last = QString();
+		auto tail = QStringList();
+		const auto count = int(_items.size());
+		for (auto i = std::max(0, count - 3); i != count; ++i) {
+			const auto view = _items[i].get();
+			const auto item = view->data();
+			tail.push_back(u"%1:y%2:h%3%4%5%6"_q
+				.arg(item->id.bare)
+				.arg(view->y())
+				.arg(view->height())
+				.arg(view->isHidden() ? ":hidden" : "")
+				.arg(item->isSending() ? ":sending" : "")
+				.arg(item->groupId() ? ":group" : ""));
+		}
+		const auto text = u"items=%1 sum=%2 reveal=%3 revealAnims=%4 "
+			"gaps=%5 bottom=%6 top=%7 min=%8 height=%9 tail=[%10]"_q
+			.arg(count)
+			.arg(newHeight)
+			.arg(_itemsRevealHeight)
+			.arg(_itemRevealAnimations.size())
+			.arg(collapseGapTotal)
+			.arg(countBottomPadding())
+			.arg(_itemsTop)
+			.arg(_minHeight)
+			.arg(_itemsTop + _itemsHeight + collapseGapTotal + countBottomPadding())
+			.arg(tail.join(' '));
+		if (text != Last) {
+			Last = text;
+			LOG(("MtsLink ThreadGap: %1").arg(text));
+		}
 	}
 	return _itemsTop
 		+ _itemsHeight

@@ -486,10 +486,11 @@ void FiltersMenu::setupList() {
 
 void FiltersMenu::updateMeeting() {
 	_meeting = nullptr;
+	const auto mode = tabsMode();
+
 	if (!FoldersMeetingButton.value()) {
 		return;
 	}
-	const auto mode = tabsMode();
 	auto prepared = object_ptr<Ui::SideBarButton>(
 		_container,
 		TextWithEntities{ tr::lng_mtslink_open_meeting(tr::now) },
