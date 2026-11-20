@@ -1982,6 +1982,23 @@ void FillContextMenuItems(
 		const auto added = (result->actions().size() > wasAmount);
 		AddSelectRestrictionAction(result, item, !added);
 	}
+	// TeleLink: the thread of the message is refreshed (without the
+	// subscription to it too), above the info on the views and the
+	// reactions.
+	if (item
+		&& item->isRegular()
+		&& (item->repliesCount() > 0)
+		&& MtsLink::hasChatId(item->history()->peer->id)
+		&& !(item->history()->isForum() && item->topicRootId())
+		&& (list->elementContext() == Context::History
+			|| list->elementContext() == Context::Pinned)) {
+		const auto session = &item->history()->session();
+		const auto peerId = item->history()->peer->id;
+		const auto rootId = item->id;
+		result->addAction(tr::lng_mtslink_refresh_chat(tr::now), [=] {
+			MtsLink::refreshThread(session, peerId, rootId);
+		}, &st::menuIconRestore);
+	}
 	if (!skipWhoReacted) {
 		if (hasWhoReactedItem) {
 			AddWhoReactedAction(result, list, item, list->controller());
@@ -2027,22 +2044,6 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 			(list->elementContext() == Context::Replies));
 	}
 
-	// TeleLink: the thread of the message is refreshed (without the
-	// subscription to it too), the last item as in the other menus.
-	if (item
-		&& item->isRegular()
-		&& (item->repliesCount() > 0)
-		&& MtsLink::hasChatId(item->history()->peer->id)
-		&& !(item->history()->isForum() && item->topicRootId())
-		&& (list->elementContext() == Context::History
-			|| list->elementContext() == Context::Pinned)) {
-		const auto session = &item->history()->session();
-		const auto peerId = item->history()->peer->id;
-		const auto rootId = item->id;
-		result->addAction(tr::lng_mtslink_refresh_chat(tr::now), [=] {
-			MtsLink::refreshThread(session, peerId, rootId);
-		}, &st::menuIconRestore);
-	}
 
 	if (item) {
 		const auto media = item->media();

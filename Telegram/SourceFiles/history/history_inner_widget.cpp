@@ -3920,6 +3920,14 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			textItem ? textItem : _dragStateItem,
 			!added);
 	}
+	// TeleLink: "Refresh" above the info on the views and the reactions.
+	if (refreshThread && !_menu->empty()) {
+		_menu->addAction(
+			tr::lng_mtslink_refresh_chat(tr::now),
+			refreshThread,
+			&st::menuIconRestore);
+	}
+
 	if (hasWhoReactedItem) {
 		HistoryView::AddWhoReactedAction(
 			_menu,
@@ -3943,13 +3951,6 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			_controller,
 			leaderOrSelf,
 			false);
-	}
-
-	if (refreshThread && !_menu->empty()) {
-		_menu->addAction(
-			tr::lng_mtslink_refresh_chat(tr::now),
-			refreshThread,
-			&st::menuIconRestore);
 	}
 
 	if (!_menu->empty() && rateTranscriptionItem) {
