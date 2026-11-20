@@ -2554,6 +2554,24 @@ rpl::producer<not_null<History*>> Session::historyAccessLost() const {
 void Session::notifyHistoryChangeDelayed(not_null<History*> history) {
 	history->setHasPendingResizedItems();
 	_historiesChanged.insert(history);
+
+	// TeleLink: the events of MTS Link are not the updates of MTP, nothing
+	// calls sendHistoryChangeNotifications() after them. The new message
+	// waited for a repaint (a mouse move) to be laid out and shown.
+	static auto Scheduled = base::flat_set<not_null<Session*>>();
+	if (!Scheduled.emplace(this).second) {
+		return;
+	}
+	const auto raw = not_null<Session*>(this);
+	const auto weak = base::make_weak(_session);
+	crl::on_main([=] {
+		Scheduled.remove(raw);
+		const auto strong = weak.get();
+		if (!strong) {
+			return;
+		}
+		strong->data().sendHistoryChangeNotifications();
+	});
 }
 
 rpl::producer<not_null<History*>> Session::historyChanged() const {
