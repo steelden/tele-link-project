@@ -6266,6 +6266,17 @@ void handleChatEvent(
 				clientId)) {
 			newItem = addMessage(session, msg, isThread);
 		}
+		// The own sent message replaced the pending one (newItem is null):
+		// the same item, under the id of the sending.
+		auto shownItem = (HistoryItem*)newItem;
+		if (!shownItem) {
+			const auto it = MtsLinkIdToMsgMap.constFind(msg.id);
+			if (it != MtsLinkIdToMsgMap.constEnd()) {
+				shownItem = session->data().message(
+					it.value().first,
+					it.value().second);
+			}
+		}
 		{
 			auto profiles = QList<Api::MemberProfile>();
 			for (const auto &profile
@@ -6394,9 +6405,9 @@ void handleChatEvent(
 			const auto threadIt = ThreadReverseMap.constFind(
 				{ chatPeerId, parentMsgId });
 			if (threadIt != ThreadReverseMap.constEnd()) {
-				// The last comment in the thread row.
-				if (newItem) {
-					ThreadLastComments.insert(threadIt.value(), newItem->id);
+				// The last comment in the thread row (the own ones too).
+				if (shownItem) {
+					ThreadLastComments.insert(threadIt.value(), shownItem->id);
 					saveThreadLastComment(session, msg.chatId, msg.parentId, msg);
 				}
 				// The counter itself comes in ChatUnreadMessageCountUpdated

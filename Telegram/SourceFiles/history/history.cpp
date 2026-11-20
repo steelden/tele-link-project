@@ -3367,6 +3367,10 @@ void History::setChatListMessage(HistoryItem *item) {
 		if (!MtsLink::hasChatId(peer->id)
 			|| item->date() > chatListTimeId()) {
 			setChatListTimeId(item->date());
+		} else {
+			// The time is not changed: the row is repainted anyway (the
+			// new preview was not shown till something else repainted).
+			updateChatListEntry();
 		}
 		resolveChatListMessageGroup();
 	} else if (!_chatListMessage || *_chatListMessage) {
