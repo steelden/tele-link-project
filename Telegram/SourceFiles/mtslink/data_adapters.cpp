@@ -9416,7 +9416,24 @@ void navigateToChat(
 	}
 
 	const auto way = Window::SectionShow::Way::ClearStack;
-	if (!messageId.isEmpty()) {
+	if (!threadId.isEmpty()) {
+		// A message of a thread: the thread with the message highlighted
+		// (the message is not in the history of the chat).
+		const auto rootId = localMsgId(threadId);
+		registerMessageId(peerId, rootId, threadId);
+		auto commentId = MsgId();
+		if (!messageId.isEmpty()) {
+			commentId = localMsgId(messageId);
+			registerMessageId(peerId, commentId, messageId);
+			registerThreadRoot(peerId, commentId, rootId);
+		}
+		const auto history = controller->session().data().history(peerId);
+		controller->showRepliesForMessage(
+			history,
+			rootId,
+			commentId,
+			Window::SectionShow(way));
+	} else if (!messageId.isEmpty()) {
 		const auto bareId = uuidToBareId(messageId);
 		const auto msgId = MsgId(bareId & 0x7FFFFFFFLL);
 		// Not loaded: the history widget loads around it (the slice replaces
@@ -9596,10 +9613,14 @@ bool tryNavigateDirectUrl(
 		const QVariant &context) {
 	const auto path = parsed.path();
 	LOG(("MtsLink Navigate: tryNavigateDirectUrl path='%1'").arg(path));
+	// Any type of the chat ("me" for the saved messages too):
+	// .../thread/<message> is a message of the chat,
+	// .../thread/<root>/message/<message> is a message of the thread,
+	// .../message/<message> is a message of the chat as well.
 	static const auto re = QRegularExpression(
-		u"^/chats/(?:channel|group|direct|dialog)/([0-9a-f-]+)"
+		u"^/chats/[a-z]+/([0-9a-f-]+)"
 		"(?:/thread/([0-9a-f-]+))?"
-		"(?:/message/([0-9a-f-]+))?$"_q);
+		"(?:/message/([0-9a-f-]+))?/?$"_q);
 	const auto match = re.match(path);
 	if (!match.hasMatch()) {
 		LOG(("MtsLink Navigate: regex no match"));
@@ -9607,10 +9628,12 @@ bool tryNavigateDirectUrl(
 	}
 	const auto chatId = match.captured(1);
 	const auto threadOrMsg = match.captured(2);
-	const auto msgInThread = match.captured(3);
-	const auto targetMsg = !msgInThread.isEmpty()
-		? msgInThread
-		: threadOrMsg;
+	const auto message = match.captured(3);
+	if (!threadOrMsg.isEmpty() && !message.isEmpty()) {
+		navigateToChat(chatId, threadOrMsg, message, context);
+		return true;
+	}
+	const auto targetMsg = !message.isEmpty() ? message : threadOrMsg;
 	LOG(("MtsLink Navigate: chatId='%1' targetMsg='%2'")
 		.arg(chatId).arg(targetMsg));
 	navigateToChat(chatId, QString(), targetMsg, context);
