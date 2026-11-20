@@ -92,6 +92,23 @@ void MessageBar::setup() {
 }
 
 int MessageBar::textLines() const {
+	return _collapsed ? 1 : naturalTextLines();
+}
+
+void MessageBar::setCollapsed(bool collapsed) {
+	if (_collapsed == collapsed) {
+		return;
+	}
+	_collapsed = collapsed;
+	refreshHeight();
+	_widget.update();
+}
+
+rpl::producer<bool> MessageBar::canCollapseValue() const {
+	return _canCollapse.value();
+}
+
+int MessageBar::naturalTextLines() const {
 	if (_content.maxLines <= 1 || _title.isEmpty()) {
 		return 1;
 	}
@@ -105,6 +122,7 @@ int MessageBar::textLines() const {
 }
 
 void MessageBar::refreshHeight() {
+	_canCollapse = (naturalTextLines() > 1);
 	const auto extra = (textLines() - 1) * _st.text.font->height;
 	if (_extraHeight != extra) {
 		_extraHeight = extra;

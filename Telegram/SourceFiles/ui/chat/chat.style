@@ -365,6 +365,17 @@ historyCallTop: 9px;
 historyCallStatusTop: 29px;
 historyCallStatusSkip: 4px;
 historyCallArrowPosition: point(-1px, 1px);
+// The thread message bar collapsed / expanded (the arrow of the collapsed
+// quotes of Telegram).
+mtsLinkPinnedCollapse: IconButton(defaultIconButton) {
+	width: 32px;
+	height: 22px;
+	icon: icon {{ "intro_country_dropdown-flip_vertical", windowActiveTextFg }};
+	iconOver: icon {{ "intro_country_dropdown-flip_vertical", windowActiveTextFg }};
+	rippleAreaSize: 0px;
+}
+mtsLinkPinnedExpand: icon {{ "intro_country_dropdown", windowActiveTextFg }};
+
 mtsLinkCallWidth: 300px;
 mtsLinkCallHeight: 64px;
 mtsLinkCallJoinSize: 44px;

@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/wrap/fade_wrap.h"
 #include "styles/style_chat_helpers.h"
+#include "styles/style_chat.h"
 #include "styles/palette.h"
 
 #include <QtGui/QtEvents>
@@ -75,7 +76,9 @@ void PinnedBar::setContent(rpl::producer<Ui::MessageBarContent> content) {
 
 		// In most cases the new right button should arrive
 		// before we want to get its width.
-		const auto right = _right.button ? _right.button->width() : 0;
+		const auto right = std::max(
+			_right.button ? _right.button->width() : 0,
+			_collapsible ? st::mtsLinkPinnedCollapse.width : 0);
 		content.margins = { 0, 0, right, 0 };
 
 		_bar->set(std::move(content));
@@ -137,6 +140,66 @@ void PinnedBar::updateControlsGeometry(QRect wrapGeometry) {
 	if (_right.button) {
 		_right.button->moveToRight(0, 0);
 	}
+	updateCollapseButton();
+}
+
+void PinnedBar::setCollapsible(
+		bool collapsible,
+		bool collapsed,
+		Fn<void(bool)> collapsedChanged) {
+	_collapsible = collapsible;
+	_collapsed = collapsed;
+	_collapsedChanged = std::move(collapsedChanged);
+	if (_bar) {
+		_bar->setCollapsed(_collapsed);
+	}
+	if (_bar && _collapsible && !_collapse) {
+		createCollapseButton();
+	}
+}
+
+void PinnedBar::createCollapseButton() {
+	Expects(_bar != nullptr);
+
+	_collapse = Ui::CreateChild<Ui::IconButton>(
+		_wrap.entity(),
+		st::mtsLinkPinnedCollapse);
+	_bar->setCollapsed(_collapsed);
+	_collapse->setClickedCallback([=] {
+		_collapsed = !_collapsed;
+		if (_bar) {
+			_bar->setCollapsed(_collapsed);
+		}
+		updateCollapseButton();
+		if (_collapsedChanged) {
+			_collapsedChanged(_collapsed);
+		}
+	});
+	// Only for the text of a few lines.
+	_bar->canCollapseValue(
+	) | rpl::on_next([=](bool can) {
+		_collapse->setVisible(can);
+		updateCollapseButton();
+	}, _collapse->lifetime());
+	_bar->widget()->heightValue(
+	) | rpl::on_next([=] {
+		updateCollapseButton();
+	}, _collapse->lifetime());
+	updateCollapseButton();
+}
+
+void PinnedBar::updateCollapseButton() {
+	if (!_collapse || !_bar) {
+		return;
+	}
+	const auto &icon = _collapsed
+		? st::mtsLinkPinnedExpand
+		: st::mtsLinkPinnedCollapse.icon;
+	_collapse->setIconOverride(&icon, &icon);
+	_collapse->moveToRight(
+		0,
+		_bar->widget()->height() - _collapse->height());
+	_collapse->raise();
 }
 
 void PinnedBar::setShadowGeometryPostprocess(Fn<QRect(QRect)> postprocess) {
@@ -164,6 +227,11 @@ void PinnedBar::createControls() {
 		_customEmojiPaused);
 	if (_right.button) {
 		_right.button->raise();
+	}
+	if (_collapsible) {
+		// The bar is created again after hiding: the button too.
+		delete base::take(_collapse);
+		createCollapseButton();
 	}
 
 	// Clicks.

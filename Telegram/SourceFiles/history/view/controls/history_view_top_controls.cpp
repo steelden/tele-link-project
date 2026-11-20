@@ -378,6 +378,20 @@ void TopControls::setupRootView() {
 	_repliesRootView = std::make_unique<Ui::PinnedBar>(_topBars.get(), [=] {
 		return _controller->isGifPausedAtLeastFor(Window::GifPauseReason::Any);
 	}, _controller->gifPauseLevelChanged());
+	// MTS Link: the thread message of a few lines is collapsed to one,
+	// remembered for the thread while running (not saved).
+	static auto Collapsed = base::flat_set<std::pair<PeerId, MsgId>>();
+	const auto key = std::make_pair(_history->peer->id, _repliesRootId);
+	_repliesRootView->setCollapsible(
+		true,
+		Collapsed.contains(key),
+		[=](bool collapsed) {
+			if (collapsed) {
+				Collapsed.emplace(key);
+			} else {
+				Collapsed.remove(key);
+			}
+		});
 	_repliesRootView->setContent(rpl::combine(
 		RootViewContent(
 			_history,

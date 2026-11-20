@@ -18,6 +18,7 @@ class FadeWrapScaled;
 class MessageBar;
 class IconButton;
 class PlainShadow;
+class IconButton;
 class RpWidget;
 
 class PinnedBar final {
@@ -38,6 +39,12 @@ public:
 
 	void setContent(rpl::producer<Ui::MessageBarContent> content);
 	void setRightButton(object_ptr<Ui::RpWidget> button);
+	// MTS Link: the arrow in the bottom right corner collapses the text
+	// of a few lines to one line (the thread message).
+	void setCollapsible(
+		bool collapsible,
+		bool collapsed = false,
+		Fn<void(bool)> collapsedChanged = nullptr);
 
 	void move(int x, int y);
 	void resizeToWidth(int width);
@@ -56,6 +63,8 @@ private:
 	void createControls();
 	void updateShadowGeometry(QRect wrapGeometry);
 	void updateControlsGeometry(QRect wrapGeometry);
+	void createCollapseButton();
+	void updateCollapseButton();
 
 	Ui::SlideWrap<> _wrap;
 	std::unique_ptr<Ui::MessageBar> _bar;
@@ -73,6 +82,10 @@ private:
 	Fn<QRect(QRect)> _shadowGeometryPostprocess;
 	bool _shouldBeShown = false;
 	bool _forceHidden = false;
+	bool _collapsible = false;
+	bool _collapsed = false;
+	Ui::IconButton *_collapse = nullptr;
+	Fn<void(bool)> _collapsedChanged;
 
 	rpl::lifetime _contentLifetime;
 

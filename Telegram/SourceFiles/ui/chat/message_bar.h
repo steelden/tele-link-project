@@ -50,6 +50,10 @@ public:
 	void customEmojiRepaint();
 	void finishAnimating();
 
+	// MTS Link: the text in one line (the thread message collapsed).
+	void setCollapsed(bool collapsed);
+	[[nodiscard]] rpl::producer<bool> canCollapseValue() const;
+
 private:
 	enum class BodyAnimation : char {
 		Full,
@@ -81,6 +85,7 @@ private:
 	void refreshImage();
 	void refreshHeight();
 	[[nodiscard]] int textLines() const;
+	[[nodiscard]] int naturalTextLines() const;
 	void paint(Painter &p);
 	void paintLeftBar(Painter &p);
 	void tweenTo(MessageBarContent &&content);
@@ -119,6 +124,8 @@ private:
 	QPixmap _image, _topBarGradient, _bottomBarGradient;
 	std::unique_ptr<Animation> _animation;
 	int _extraHeight = 0;
+	bool _collapsed = false;
+	rpl::variable<bool> _canCollapse = false;
 	bool _customEmojiRepaintScheduled = false;
 	bool _imageRefreshScheduled = false;
 
