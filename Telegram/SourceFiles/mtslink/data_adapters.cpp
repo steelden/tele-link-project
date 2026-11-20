@@ -6801,6 +6801,7 @@ void handleChatEvent(
 		} else {
 			item->updateReactions(nullptr);
 		}
+		cacheItemReactions(item);
 	} else if (type == "MessageReactionAddedEvent"
 		|| type == "MessageReactionDeletedEvent") {
 		const auto emoji = ValidEmoji(value.value("emoji").toString());
@@ -6891,6 +6892,7 @@ void handleChatEvent(
 					}
 					const auto mtp = buildMtpReactions(reactions);
 					item->updateReactions(mtp ? &*mtp : nullptr);
+					cacheItemReactions(item);
 					return;
 				}
 				const auto &existing = item->reactions();
@@ -6941,6 +6943,7 @@ void handleChatEvent(
 				} else {
 					item->updateReactions(nullptr);
 				}
+				cacheItemReactions(item);
 			}
 		}
 	} else if (type == "MessageUpdatedEvent") {
@@ -8130,6 +8133,114 @@ void applyEditToCachedMessages(
 			}
 		});
 	});
+}
+
+// The reactions changed after the message was cached (the events, the own
+// ones): written to the cached pages of the chat and of the thread, the
+// thread opened from the cache showed the old reactions till the refresh.
+namespace {
+
+struct PendingCachedReactions {
+	QString chatId;
+	QString parentId; // Empty for the chat page.
+	QHash<QString, QList<Api::ReactionData>> messages;
+};
+
+QHash<QString, PendingCachedReactions> PendingReactionWrites;
+bool ReactionWritesScheduled = false;
+
+[[nodiscard]] QList<Api::ReactionData> CacheReactionsOf(
+		not_null<HistoryItem*> item) {
+	auto result = QList<Api::ReactionData>();
+	for (const auto &r : item->reactions()) {
+		const auto emoji = r.id.emoji();
+		if (emoji.isEmpty() || r.count <= 0) {
+			continue;
+		}
+		result.push_back({
+			.emojiId = emojiToId(emoji),
+			.emoji = emoji,
+			.count = r.count,
+			.selected = r.my,
+		});
+	}
+	return result;
+}
+
+void FlushReactionWrites(not_null<Main::Session*> session) {
+	ReactionWritesScheduled = false;
+	const auto weak = base::make_weak(session);
+	for (const auto &pending : base::take(PendingReactionWrites)) {
+		const auto key = pending.parentId.isEmpty()
+			? messageCacheKey(pending.chatId)
+			: threadCacheKey(pending.chatId, pending.parentId);
+		const auto messages = pending.messages;
+		session->data().cache().get(key, [=](QByteArray &&data) {
+			crl::on_main(weak, [=, data = std::move(data)] {
+				auto cached = deserializeMessages(data);
+				if (!cached) {
+					return;
+				}
+				auto found = false;
+				for (auto &m : cached->messages) {
+					const auto i = messages.constFind(m.id);
+					if (i != messages.constEnd()) {
+						m.reactions = i.value();
+						found = true;
+					}
+				}
+				if (found) {
+					weak->data().cache().put(
+						key,
+						serializeMessages(cached->messages, cached->profiles));
+				}
+			});
+		});
+	}
+}
+
+void QueueReactionWrite(
+		not_null<Main::Session*> session,
+		const QString &chatId,
+		const QString &parentId,
+		const QString &messageId,
+		const QList<Api::ReactionData> &reactions) {
+	auto &pending = PendingReactionWrites[chatId + '/' + parentId];
+	pending.chatId = chatId;
+	pending.parentId = parentId;
+	pending.messages.insert(messageId, reactions);
+	if (!ReactionWritesScheduled) {
+		ReactionWritesScheduled = true;
+		const auto weak = base::make_weak(session);
+		base::call_delayed(1000, [=] {
+			if (const auto strong = weak.get()) {
+				FlushReactionWrites(strong);
+			} else {
+				ReactionWritesScheduled = false;
+				PendingReactionWrites.clear();
+			}
+		});
+	}
+}
+
+} // namespace
+
+void cacheItemReactions(not_null<HistoryItem*> item) {
+	const auto session = &item->history()->session();
+	const auto peerId = item->history()->peer->id;
+	const auto messageId = msgIdToMtsLinkId(peerId, item->id);
+	const auto chatId = peerIdToChatId(peerId);
+	if (messageId.isEmpty() || chatId.isEmpty()) {
+		return;
+	}
+	const auto reactions = CacheReactionsOf(item);
+	QueueReactionWrite(session, chatId, QString(), messageId, reactions);
+	if (const auto top = item->replyToTop()) {
+		const auto parentId = msgIdToMtsLinkId(peerId, top);
+		if (!parentId.isEmpty() && parentId != messageId) {
+			QueueReactionWrite(session, chatId, parentId, messageId, reactions);
+		}
+	}
 }
 
 // An edited thread root in the cached list of the threads.

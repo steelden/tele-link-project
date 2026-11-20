@@ -580,6 +580,9 @@ void saveMessagesToCache(
 void loadMessagesFromCache(
 	not_null<Main::Session*> session,
 	const QString &chatId);
+// The reactions of the message as they are now: to the cached pages of
+// its chat and of its thread (written in a second, batched).
+void cacheItemReactions(not_null<HistoryItem*> item);
 
 void saveChatListToCache(
 	not_null<Main::Session*> session,

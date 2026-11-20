@@ -1611,6 +1611,8 @@ void Reactions::send(
 				item->history()->peer->id, item->id);
 			if (!chatId.isEmpty() && !mtsId.isEmpty()) {
 				_mtsLinkSending.emplace(item->fullId());
+				// Not to show the old reactions from the cache.
+				MtsLink::cacheItemReactions(item);
 				if (!removedReaction.empty()
 					&& !removedReaction.emoji().isEmpty()) {
 					const auto eid = MtsLink::emojiToId(
