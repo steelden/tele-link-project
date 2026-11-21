@@ -992,8 +992,9 @@ void ParseMarkdownInline(
 			&& MarkdownEscapable(text[i + 1])) {
 			flush(i);
 			AppendMarkdownRun(state, text.mid(i + 1, 1), tag);
-			state.marked = true;
-			state.beyondComposeField = true;
+			// TeleLink: an escape alone is not the markdown (a pasted JSON
+			// with "\\" was offered to be formatted, the backslashes were
+			// halved then): only the real markers offer the formatting.
 			i += 2;
 			literalFrom = i;
 			continue;

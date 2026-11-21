@@ -1272,24 +1272,48 @@ TextWithEntities parseMentionedText(
 	int quoteStart = -1;
 	bool atLineStart = true;
 
+	// The escaped characters (as the web client sends "\_" for "_") are
+	// replaced by the private use characters, restored after the parsing:
+	// they are not the markers. In the code nothing is escaped (as the web
+	// client sends it). "\\" is two backslashes everywhere (the web
+	// client does not escape them).
+	static const auto kEscapable = u"*~`_|"_q;
+	constexpr auto kEscapedBase = ushort(0xE000);
 	QString unescaped;
 	unescaped.reserve(source.size());
+	auto inCodeBlock = false;
+	auto inInlineCode = false;
 	for (int i = 0, sz = source.size(); i < sz; ++i) {
-		if (source[i] == '\\' && i + 1 < sz) {
-			const auto next = source[i + 1];
-			if (next == '*'
-				|| next == '~'
-				|| next == '`'
-				|| next == '\\'
-				|| next == '_'
-				|| next == '|') {
-				unescaped += next;
+		const auto ch = source[i];
+		const auto inCode = inCodeBlock || inInlineCode;
+		if (!inCode && ch == '\\' && i + 1 < sz) {
+			const auto index = kEscapable.indexOf(source[i + 1]);
+			if (index >= 0) {
+				unescaped += QChar(ushort(kEscapedBase + index));
 				++i;
 				continue;
 			}
 		}
-		unescaped += source[i];
+		if (!inInlineCode && source.mid(i, 3) == u"```"_q) {
+			inCodeBlock = !inCodeBlock;
+			unescaped += u"```"_q;
+			i += 2;
+			continue;
+		} else if (!inCodeBlock && ch == '`') {
+			inInlineCode = !inInlineCode;
+		}
+		unescaped += ch;
 	}
+	const auto restoreEscaped = [&](QString text) {
+		for (auto &ch : text) {
+			const auto code = ch.unicode();
+			if (code >= kEscapedBase
+				&& code < kEscapedBase + kEscapable.size()) {
+				ch = kEscapable[code - kEscapedBase];
+			}
+		}
+		return text;
+	};
 
 	int pos = 0;
 	const int len = unescaped.size();
@@ -1646,6 +1670,18 @@ TextWithEntities parseMentionedText(
 					e.length(),
 					e.data());
 			}
+		}
+	}
+
+	// The escaped characters back (the same length: the entities stay).
+	result = restoreEscaped(result);
+	for (auto &e : entities) {
+		if (!e.data().isEmpty()) {
+			e = EntityInText(
+				e.type(),
+				e.offset(),
+				e.length(),
+				restoreEscaped(e.data()));
 		}
 	}
 
@@ -8967,6 +9003,29 @@ QString userBareIdToUuid(uint64 bareId) {
 	return UserBareIdToUuidMap.value(bareId);
 }
 
+namespace {
+
+// The text out of the code is escaped (as the web client does): the
+// characters of the markers are not the markers. The backslash is not
+// escaped: the web client shows "\\" as is.
+[[nodiscard]] QString EscapeMarkdownText(const QString &part) {
+	auto result = QString();
+	result.reserve(part.size());
+	for (const auto ch : part) {
+		if (ch == '*'
+			|| ch == '~'
+			|| ch == '`'
+			|| ch == '_'
+			|| ch == '|') {
+			result += QChar('\\');
+		}
+		result += ch;
+	}
+	return result;
+}
+
+} // namespace
+
 MtsLinkMessageContent convertMentionsForSending(
 		const TextWithTags &textWithTags,
 		not_null<Main::Session*> session) {
@@ -9131,14 +9190,21 @@ MtsLinkMessageContent convertMentionsForSending(
 
 	if (hits.isEmpty() && styleRanges.isEmpty()
 		&& allMdMarkers.isEmpty() && blockquoteRanges.isEmpty()) {
+		// The markdown of the plain text: escaped.
 		MtsLinkMessageContent plain;
-		plain.text = text;
+		plain.text = EscapeMarkdownText(text);
 		return plain;
 	}
 
 	std::sort(hits.begin(), hits.end(),
 		[](const auto &a, const auto &b) { return a.offset < b.offset; });
 
+	const auto plain = [&](int from, int length) {
+		auto part = text.mid(from, length);
+		return inAnyCode(from, length)
+			? part
+			: EscapeMarkdownText(part);
+	};
 	const auto insertMarkers = [&](
 			const QMap<int, QString> &map,
 			int from, int to) -> QString {
@@ -9147,13 +9213,13 @@ MtsLinkMessageContent convertMentionsForSending(
 		for (auto it = map.lowerBound(from);
 			it != map.end() && it.key() <= to; ++it) {
 			if (it.key() > p) {
-				segment += text.mid(p, it.key() - p);
+				segment += plain(p, it.key() - p);
 			}
 			segment += it.value();
 			p = it.key();
 		}
 		if (to > p) {
-			segment += text.mid(p, to - p);
+			segment += plain(p, to - p);
 		}
 		return segment;
 	};
