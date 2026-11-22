@@ -24,6 +24,13 @@ public:
 	void loadMember(const UserId &userId, const QString &organizationId);
 	void loadOrganizationMembers(int offset = 0, int limit = 100);
 	void loadChatMembers(const ChatId &chatId);
+	// The members of a chat by the name, done(profiles): the big chats
+	// have more members than the first page of loadChatMembers.
+	void searchChatMembers(
+		const ChatId &chatId,
+		const QString &query,
+		int limit,
+		std::function<void(QList<MemberProfile>)> done);
 	// Organization members by name / email, done(profiles).
 	void searchMembers(
 		const QString &query,

@@ -640,6 +640,15 @@ void setEmojiIdMapping(const QString &emojiId, const QString &emoji);
 	not_null<Main::Session*> session,
 	PeerId chatPeerId);
 
+// The members of a chat by the query typed after "@": the found ones are
+// added to the members of the chat, updated() is called then (once for a
+// query: the same one is not requested again).
+void searchChatMembersForMention(
+	not_null<Main::Session*> session,
+	PeerId chatPeerId,
+	const QString &query,
+	Fn<void()> updated);
+
 [[nodiscard]] bool isMtsLinkUrl(const QString &url);
 void handleMtsLinkUrl(
 	const QString &url,

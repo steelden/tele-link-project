@@ -172,15 +172,26 @@ void Users::searchMembers(
 }
 
 void Users::loadChatMembers(const ChatId &chatId) {
+	searchChatMembers(chatId, QString(), 200, [=](
+			QList<MemberProfile> members) {
+		Q_EMIT chatMembersLoaded(chatId, members);
+	});
+}
+
+void Users::searchChatMembers(
+		const ChatId &chatId,
+		const QString &query,
+		int limit,
+		std::function<void(QList<MemberProfile>)> done) {
 	_rpc->call(
 		"Chat.SearchChatMembersV2",
 		QJsonObject{
 			{"chatId", chatId},
-			{"query", QString()},
+			{"query", query},
 			{"offset", 0},
-			{"limit", 200},
+			{"limit", limit},
 		},
-		[this, chatId](const QJsonObject &result) {
+		[this, chatId, done](const QJsonObject &result) {
 			const auto value = result.value("value").toObject();
 			const auto membersList = value.value("members").toArray();
 			const auto adminsList = value.value("admins").toArray();
@@ -245,7 +256,7 @@ void Users::loadChatMembers(const ChatId &chatId) {
 				_cache.insert(profile.userId, profile);
 				members.push_back(std::move(profile));
 			}
-			Q_EMIT chatMembersLoaded(chatId, members);
+			done(members);
 		});
 }
 

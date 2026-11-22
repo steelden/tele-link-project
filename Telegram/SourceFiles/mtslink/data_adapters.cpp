@@ -129,6 +129,9 @@ constexpr auto kMtsLinkThreadLastCommentTag
 	= uint64(0xBC0F'0000'0000'0000ULL);
 QHash<uint64, QString> UserBareIdToUuidMap;
 QHash<PeerId, std::vector<uint64>> ChatMembersMap;
+// The queries of the members typed after "@", by the chat: forgotten when
+// the members are loaded again (the found ones are not in the list then).
+base::flat_set<std::pair<PeerId, QString>> MentionSearchRequested;
 QHash<PeerId, QVector<MsgId>> PendingTempMessages;
 QHash<QString, QPair<PeerId, MsgId>> MtsLinkIdToMsgMap;
 
@@ -3513,6 +3516,14 @@ void connectToSession(
 				== ChatType::Dialog);
 			auto &stored = ChatMembersMap[peerId];
 			stored.clear();
+			for (auto i = MentionSearchRequested.begin()
+				; i != MentionSearchRequested.end();) {
+				if (i->first == peerId) {
+					i = MentionSearchRequested.erase(i);
+				} else {
+					++i;
+				}
+			}
 			stored.reserve(members.size());
 			for (const auto &m : members) {
 				applyUserData(mainSession, m);
@@ -9452,6 +9463,45 @@ std::vector<not_null<UserData*>> chatMtsLinkUsers(
 			return a->name().compare(b->name(), Qt::CaseInsensitive) < 0;
 		});
 	return result;
+}
+
+void searchChatMembersForMention(
+		not_null<Main::Session*> session,
+		PeerId chatPeerId,
+		const QString &query,
+		Fn<void()> updated) {
+	constexpr auto kLimit = 50;
+	const auto chatId = peerIdToChatId(chatPeerId);
+	const auto trimmed = query.trimmed();
+	const auto mts = session->account().mtsLinkSession();
+	if (chatId.isEmpty() || trimmed.isEmpty() || !mts) {
+		return;
+	}
+	const auto key = std::make_pair(chatPeerId, trimmed.toLower());
+	if (!MentionSearchRequested.emplace(key).second) {
+		return;
+	}
+	const auto weak = base::make_weak(session);
+	mts->users()->searchChatMembers(chatId, trimmed, kLimit, [=](
+			QList<Api::MemberProfile> members) {
+		const auto strong = weak.get();
+		if (!strong) {
+			return;
+		}
+		auto &stored = ChatMembersMap[chatPeerId];
+		auto added = 0;
+		for (const auto &m : members) {
+			applyUserData(strong, m);
+			const auto bareId = uuidToBareId(m.userId);
+			if (!ranges::contains(stored, bareId)) {
+				stored.push_back(bareId);
+				++added;
+			}
+		}
+		if (added && updated) {
+			updated();
+		}
+	});
 }
 
 bool isMtsLinkUrl(const QString &url) {

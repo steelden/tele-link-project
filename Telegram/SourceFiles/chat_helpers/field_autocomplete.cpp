@@ -616,6 +616,20 @@ void FieldAutocomplete::updateFiltered(bool resetScroll) {
 				|| (!listAllSuggestions && filterNotPassedByName(user));
 		};
 		if (mtsLinkPeerId && MtsLink::hasChatId(mtsLinkPeerId)) {
+			// The big chats: the members not loaded yet are found by the
+			// server, the list is updated with them.
+			if (!listAllSuggestions) {
+				const auto filter = _filter;
+				MtsLink::searchChatMembersForMention(
+					&_session->data().session(),
+					mtsLinkPeerId,
+					filter,
+					crl::guard(this, [=] {
+						if (_type == Type::Mentions && _filter == filter) {
+							updateFiltered();
+						}
+					}));
+			}
 			const auto users = MtsLink::chatMtsLinkUsers(
 				&_session->data().session(), mtsLinkPeerId);
 			mrows.reserve(mrows.size() + users.size());
