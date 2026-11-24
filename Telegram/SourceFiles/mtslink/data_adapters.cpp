@@ -120,6 +120,8 @@ QHash<PeerId, QString> PeerToChatMap;
 QHash<QString, PeerId> ChatToPeerMap;
 QHash<PeerId, ChatType> PeerToChatTypeMap;
 QHash<quint64, QString> MsgIdToMtsLinkIdMap;
+// The places of the second and next files in the albums (by makeMsgKey).
+QHash<quint64, int> AlbumPartOrders;
 QHash<PeerId, QString> OldestLoadedMsgMap;
 // The last comments of the threads (by the thread peer), for the rows.
 QHash<PeerId, MsgId> ThreadLastComments;
@@ -3883,7 +3885,8 @@ void connectToSession(
 void registerExtraFileMessageId(
 	PeerId peerId,
 	MsgId extraId,
-	const QString &mtsLinkId);
+	const QString &mtsLinkId,
+	int order);
 
 BareId uuidToBareId(const QString &uuid) {
 	const auto hash = QCryptographicHash::hash(
@@ -5639,7 +5642,7 @@ HistoryItem *addMessage(
 		for (auto pi = 1; pi != int(parts.size()); ++pi) {
 			const auto &part = parts[pi];
 			auto extraFields = ExtraFileFields(mainFields, src, part);
-			registerExtraFileMessageId(chatPeerId, extraFields.id, src.id);
+			registerExtraFileMessageId(chatPeerId, extraFields.id, src.id, pi);
 			const auto extra = (threadOnly || batchItems)
 				? history->makeMessage(
 					std::move(extraFields),
@@ -5812,7 +5815,8 @@ bool addOlderMessages(
 				registerExtraFileMessageId(
 					chatPeerId,
 					extraFields.id,
-					src.id);
+					src.id,
+					pi);
 				const auto extra = history->makeMessage(
 					std::move(extraFields),
 					TextWithEntities(),
@@ -6099,15 +6103,6 @@ void handleChatEvent(
 	}();
 	LOG(("MtsLink Event: type=%1 chatId=%2 dst=%3")
 		.arg(type).arg(chatId).arg(dst));
-	// Temporary: the album unread.
-	if (type == u"ChatFirstUnreadMessageUpdatedEvent"_q
-		|| type == u"ChatUnreadMessageCountUpdatedEvent"_q
-		|| type == u"MessageReadEvent"_q) {
-		LOG(("MtsLink AlbumUnread: %1 %2").arg(
-			type,
-			QString::fromUtf8(QJsonDocument(value).toJson(
-				QJsonDocument::Compact))));
-	}
 
 	if (chatId.isEmpty()) {
 		return;
@@ -7380,8 +7375,14 @@ void registerMessageId(PeerId peerId, MsgId msgId, const QString &mtsLinkId) {
 void registerExtraFileMessageId(
 		PeerId peerId,
 		MsgId extraId,
-		const QString &mtsLinkId) {
+		const QString &mtsLinkId,
+		int order) {
 	MsgIdToMtsLinkIdMap.insert(makeMsgKey(peerId, extraId), mtsLinkId);
+	AlbumPartOrders.insert(makeMsgKey(peerId, extraId), order);
+}
+
+int albumPartOrder(PeerId peerId, MsgId msgId) {
+	return AlbumPartOrders.value(makeMsgKey(peerId, msgId), 0);
 }
 
 void setPendingTempMessage(PeerId peerId, MsgId msgId) {

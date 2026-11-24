@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
+#include "mtslink/data_adapters.h"
 
 namespace Data {
 namespace {
@@ -125,6 +126,19 @@ HistoryItemsList::const_iterator Groups::findPositionForItem(
 		not_null<HistoryItem*> item) {
 	const auto last = end(group);
 	const auto itemId = item->id;
+	const auto peerId = item->history()->peer->id;
+	if (MtsLink::hasChatId(peerId)) {
+		// The ids are hashes: by the order of the files in the message,
+		// the main item (the text, the reactions, the thread) is the first,
+		// its view shows the album.
+		const auto order = MtsLink::albumPartOrder(peerId, itemId);
+		for (auto result = begin(group); result != last; ++result) {
+			if (MtsLink::albumPartOrder(peerId, (*result)->id) > order) {
+				return result;
+			}
+		}
+		return last;
+	}
 	for (auto result = begin(group); result != last; ++result) {
 		if ((*result)->id > itemId) {
 			return result;

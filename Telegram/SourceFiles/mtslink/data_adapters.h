@@ -496,6 +496,10 @@ void updateMessage(
 	const Api::MessageData &src);
 
 [[nodiscard]] QString msgIdToMtsLinkId(PeerId peerId, MsgId msgId);
+// The place of an item in the album of a message with files: 0 for the
+// main item (the text, the reactions, the thread), 1, 2... for the next
+// files. The ids are hashes, the album is ordered by this.
+[[nodiscard]] int albumPartOrder(PeerId peerId, MsgId msgId);
 void registerMessageId(PeerId peerId, MsgId msgId, const QString &mtsLinkId);
 
 // The items of a loaded slice (created detached or already known), from
