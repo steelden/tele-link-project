@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_forum_topic.h"
 #include "data/data_saved_messages.h"
 #include "data/data_session.h"
+#include "data/stickers/data_custom_emoji.h"
 #include "data/data_file_origin.h"
 #include "data/data_histories.h"
 #include "data/data_cloud_themes.h"
@@ -470,33 +471,6 @@ void PeerData::paintUserpic(
 		size * ratio,
 		context.shape);
 	p.drawImage(QRect(context.position, QSize(size, size)), view.cached);
-
-	paintStatusEmoji(p, QRect(context.position, QSize(size, size)));
-}
-
-void PeerData::paintStatusEmoji(QPainter &p, QRect userpic) const {
-	constexpr auto kMinStatusUserpic = 28;
-	const auto size = userpic.width();
-	if (!isUser() || size < kMinStatusUserpic) {
-		return;
-	}
-	const auto text = MtsLink::userStatusEmoji(id);
-	const auto emoji = text.isEmpty() ? nullptr : Ui::Emoji::Find(text);
-	if (!emoji) {
-		return;
-	}
-	const auto ratio = style::DevicePixelRatio();
-	const auto large = Ui::Emoji::GetSizeLarge() / float64(ratio);
-	const auto side = std::max(size * 0.4, 12.);
-	const auto scale = side / large;
-	p.save();
-	p.setRenderHint(QPainter::SmoothPixmapTransform);
-	p.translate(
-		userpic.x() + size - side * 0.85,
-		userpic.y() - side * 0.15);
-	p.scale(scale, scale);
-	Ui::Emoji::Draw(p, emoji, Ui::Emoji::GetSizeLarge(), 0, 0);
-	p.restore();
 }
 
 void PeerData::loadUserpic() {
@@ -1534,6 +1508,15 @@ void PeerData::setEmojiStatus(EmojiStatusId emojiStatusId, TimeId until) {
 }
 
 EmojiStatusId PeerData::emojiStatusId() const {
+	// The status set in MTS Link: shown after the name (as in Telegram).
+	if (isUser()) {
+		const auto text = MtsLink::userStatusEmoji(id);
+		if (const auto emoji = text.isEmpty()
+				? nullptr
+				: Ui::Emoji::Find(text)) {
+			return { .documentId = Data::UnicodeEmojiStatusDocumentId(emoji) };
+		}
+	}
 	return _emojiStatusId;
 }
 

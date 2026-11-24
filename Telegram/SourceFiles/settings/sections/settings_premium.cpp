@@ -1844,7 +1844,10 @@ void ShowGiftPremium(
 void ShowEmojiStatusPremium(
 		not_null<Window::SessionController*> controller,
 		not_null<PeerData*> peer) {
-	if (const auto unique = peer->emojiStatusId().collectible.get()) {
+	if (Data::IsUnicodeEmojiStatus(peer->emojiStatusId())) {
+		// The MTS Link status is not a Premium emoji status.
+		return;
+	} else if (const auto unique = peer->emojiStatusId().collectible.get()) {
 		Core::ResolveAndShowUniqueGift(controller->uiShow(), unique->slug);
 	} else {
 		ShowPremium(controller, Ref::EmojiStatus::Serialize({ peer->id }));

@@ -27,6 +27,9 @@ namespace Info::Profile {
 namespace {
 
 [[nodiscard]] bool HasPremiumClick(const Badge::Content &content) {
+	if (Data::IsUnicodeEmojiStatus(content.emojiStatusId)) {
+		return false;
+	}
 	return content.badge == BadgeType::Premium
 		|| (content.badge == BadgeType::Verified && content.emojiStatusId);
 }
@@ -63,9 +66,13 @@ Ui::RpWidget *Badge::widget() const {
 }
 
 void Badge::setContent(Content content) {
+	// The MTS Link status is not a Premium mark: shown without Premium.
+	const auto unicodeStatus = Data::IsUnicodeEmojiStatus(
+		content.emojiStatusId);
 	if (!(_allowed & content.badge)
 		|| (!_session->premiumBadgesShown()
-			&& content.badge == BadgeType::Premium)) {
+			&& content.badge == BadgeType::Premium
+			&& !unicodeStatus)) {
 		content.badge = BadgeType::None;
 	}
 	if (!(_allowed & content.badge)) {
@@ -285,6 +292,10 @@ rpl::producer<Badge::Content> BadgeContentForPeer(not_null<PeerData*> peer) {
 		}
 		if (badge == BadgeType::Verified) {
 			badge = BadgeType::None;
+		}
+		if (Data::IsUnicodeEmojiStatus(emojiStatusId)
+			&& (badge == BadgeType::None || badge == BadgeType::Premium)) {
+			return Badge::Content{ BadgeType::Premium, emojiStatusId };
 		}
 		if (statusOnlyForPremium && badge != BadgeType::Premium) {
 			emojiStatusId = EmojiStatusId();

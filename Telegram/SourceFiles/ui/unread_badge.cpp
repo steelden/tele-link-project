@@ -249,9 +249,12 @@ int PeerBadge::drawGetWidth(Painter &p, Descriptor &&descriptor) {
 	const auto verifyCheck = descriptor.verified && peer->isVerified();
 	const auto premiumMark = descriptor.premium
 		&& peer->session().premiumBadgesShown();
-	const auto emojiStatus = premiumMark
-		&& peer->emojiStatusId()
-		&& (peer->isPremium() || peer->isChannel());
+	const auto unicodeStatus = descriptor.premium
+		&& Data::IsUnicodeEmojiStatus(peer->emojiStatusId());
+	const auto emojiStatus = unicodeStatus
+		|| (premiumMark
+			&& peer->emojiStatusId()
+			&& (peer->isPremium() || peer->isChannel()));
 	const auto premiumStar = premiumMark
 		&& !emojiStatus
 		&& peer->isPremium();

@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_instance.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
+#include "data/stickers/data_custom_emoji.h"
 #include "data/data_changes.h"
 #include "data/data_document_media.h"
 #include "data/data_folder.h"
@@ -339,7 +340,15 @@ MainMenu::MainMenu(
 	this,
 	st::settingsInfoPeerBadge,
 	&controller->session(),
-	Info::Profile::BadgeContentForPeer(controller->session().user()),
+	// The own MTS Link status is the large emoji by the status text.
+	Info::Profile::BadgeContentForPeer(
+		controller->session().user()
+	) | rpl::map([](Info::Profile::Badge::Content content) {
+		if (Data::IsUnicodeEmojiStatus(content.emojiStatusId)) {
+			return Info::Profile::Badge::Content();
+		}
+		return content;
+	}),
 	_emojiStatusPanel.get(),
 	[=] { return controller->isGifPausedAtLeastFor(GifPauseReason::Layer); },
 	kPlayStatusLimit,

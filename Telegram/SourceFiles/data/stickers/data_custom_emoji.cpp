@@ -147,6 +147,77 @@ private:
 	return u"scaled-simple:"_q;
 }
 
+[[nodiscard]] QString UnicodeStatusPrefix() {
+	return u"unicode-status:"_q;
+}
+
+constexpr auto kUnicodeStatusMark = DocumentId(0xFE00000000000000ULL);
+constexpr auto kUnicodeStatusMask = DocumentId(0xFF00000000000000ULL);
+
+// The simple emoji of a status, of the custom emoji frame size.
+class UnicodeStatusEmoji final : public Ui::Text::CustomEmoji {
+public:
+	UnicodeStatusEmoji(QString entityData, EmojiPtr emoji, int size)
+	: _entityData(std::move(entityData))
+	, _emoji(emoji)
+	, _size(size) {
+	}
+
+	int width() override {
+		return _size;
+	}
+	QString entityData() override {
+		return _entityData;
+	}
+	void paint(QPainter &p, const Context &context) override {
+		if (_frame.isNull()) {
+			const auto ratio = style::DevicePixelRatio();
+			const auto large = Ui::Emoji::GetSizeLarge();
+			auto frame = QImage(
+				QSize(large, large),
+				QImage::Format_ARGB32_Premultiplied);
+			frame.setDevicePixelRatio(ratio);
+			frame.fill(Qt::transparent);
+			{
+				auto q = QPainter(&frame);
+				Ui::Emoji::Draw(q, _emoji, large, 0, 0);
+			}
+			// The emoji statuses (the stickers) have the transparent
+			// margins: the simple emoji is smaller in the same frame.
+			constexpr auto kScale = 0.75;
+			const auto inner = std::max(
+				int(base::SafeRound(_size * kScale * ratio)),
+				1);
+			_frame = frame.scaled(
+				QSize(inner, inner),
+				Qt::IgnoreAspectRatio,
+				Qt::SmoothTransformation);
+			_frame.setDevicePixelRatio(ratio);
+			const auto shift = (_size * ratio - inner) / (2. * ratio);
+			_shift = QPointF(shift, shift);
+		}
+		context.internal.colorized = false;
+		p.drawImage(QPointF(context.position) + _shift, _frame);
+	}
+	void unload() override {
+		_frame = QImage();
+	}
+	bool ready() override {
+		return true;
+	}
+	bool readyInDefaultState() override {
+		return true;
+	}
+
+private:
+	const QString _entityData;
+	const EmojiPtr _emoji;
+	const int _size = 0;
+	QImage _frame;
+	QPointF _shift;
+
+};
+
 [[nodiscard]] QString ScaledCustomPrefix() {
 	return u"scaled-custom:"_q;
 }
@@ -598,7 +669,21 @@ std::unique_ptr<Ui::Text::CustomEmoji> CustomEmojiManager::create(
 		Fn<void()> update,
 		SizeTag tag,
 		int sizeOverride) {
-	if (data.startsWith(ScaledSimplePrefix())) {
+	if (data.startsWith(UnicodeStatusPrefix())) {
+		const auto index = data.mid(UnicodeStatusPrefix().size()).toInt();
+		const auto emoji = Ui::Emoji::FromUrl(
+			u"emoji://e."_q + QString::number(index));
+		if (!emoji) {
+			return nullptr;
+		}
+		const auto size = sizeOverride
+			? sizeOverride
+			: (FrameSizeFromTag(tag) / style::DevicePixelRatio());
+		return std::make_unique<UnicodeStatusEmoji>(
+			data.toString(),
+			emoji,
+			size);
+	} else if (data.startsWith(ScaledSimplePrefix())) {
 		const auto text = data.mid(ScaledSimplePrefix().size());
 		const auto emoji = Ui::Emoji::Find(text);
 		Assert(emoji != nullptr);
@@ -1164,9 +1249,28 @@ QString CollectibleCustomEmojiId(Data::EmojiStatusCollectible &data) {
 }
 
 QString EmojiStatusCustomId(const EmojiStatusId &id) {
+	if (const auto emoji = UnicodeEmojiStatusEmoji(id.documentId)) {
+		return UnicodeStatusPrefix() + QString::number(emoji->index());
+	}
 	return id.collectible
 		? CollectibleCustomEmojiId(*id.collectible)
 		: SerializeCustomEmojiId(id.documentId);
+}
+
+DocumentId UnicodeEmojiStatusDocumentId(EmojiPtr emoji) {
+	return emoji ? (kUnicodeStatusMark | DocumentId(emoji->index())) : 0;
+}
+
+EmojiPtr UnicodeEmojiStatusEmoji(DocumentId documentId) {
+	if ((documentId & kUnicodeStatusMask) != kUnicodeStatusMark) {
+		return nullptr;
+	}
+	return Ui::Emoji::FromUrl(u"emoji://e."_q
+		+ QString::number(int(documentId & ~kUnicodeStatusMask)));
+}
+
+bool IsUnicodeEmojiStatus(const EmojiStatusId &id) {
+	return !id.collectible && UnicodeEmojiStatusEmoji(id.documentId);
 }
 
 } // namespace Data

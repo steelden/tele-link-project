@@ -4481,17 +4481,6 @@ void refreshThreadsMark(
 			if (views
 				&& views->commentsMaxId > views->commentsInboxReadTillId
 				&& !subscribed(item->id)) {
-				// Temporary: the stuck threads mark.
-				LOG(("MtsLink ThreadsMark: %1 by item %2 max=%3 read=%4 "
-					"replies=%5 hasThread=%6 view=%7"
-					).arg(chatPeerId.value
-					).arg(item->id.bare
-					).arg(views->commentsMaxId.bare
-					).arg(views->commentsInboxReadTillId.bare
-					).arg(views->replies.count
-					).arg(Logs::b(ThreadReverseMap.contains(
-						{ chatPeerId, item->id }))
-					).arg(Logs::b(item->mainView() != nullptr)));
 				unread = true;
 				break;
 			}
@@ -4507,16 +4496,6 @@ void refreshThreadsMark(
 			if (i.key().first == chatPeerId
 				&& i.value().count > 0
 				&& !subscribed(i.key().second)) {
-				// Temporary: the stuck threads mark.
-				LOG(("MtsLink ThreadsMark: %1 by pending %2 count=%3 "
-					"uuid=%4 loaded=%5"
-					).arg(chatPeerId.value
-					).arg(i.key().second.bare
-					).arg(i.value().count
-					).arg(i.value().parentUuid
-					).arg(Logs::b(session->data().message(
-						chatPeerId,
-						i.key().second) != nullptr)));
 				unread = true;
 				break;
 			}

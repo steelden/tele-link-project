@@ -5564,6 +5564,7 @@ void Message::validateFromNameText(PeerData *from) const {
 			Ui::NameTextOptions());
 	}
 	if (from->isPremium()
+		|| Data::IsUnicodeEmojiStatus(from->emojiStatusId())
 		|| (from->isChannel()
 			&& from->emojiStatusId()
 			&& from != history()->peer)) {

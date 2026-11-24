@@ -211,4 +211,10 @@ void InsertCustomEmoji(
 	Data::EmojiStatusCollectible &data);
 [[nodiscard]] QString EmojiStatusCustomId(const EmojiStatusId &id);
 
+// The MTS Link status of a user is a simple emoji, not a document: kept in
+// the emoji status id as a marked fake document id (its emoji index).
+[[nodiscard]] DocumentId UnicodeEmojiStatusDocumentId(EmojiPtr emoji);
+[[nodiscard]] EmojiPtr UnicodeEmojiStatusEmoji(DocumentId documentId);
+[[nodiscard]] bool IsUnicodeEmojiStatus(const EmojiStatusId &id);
+
 } // namespace Data
