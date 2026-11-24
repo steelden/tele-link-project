@@ -4253,7 +4253,13 @@ void requestMessageData(
 			.arg(rootUuid)
 			.arg(msgId.bare));
 		if (done) {
-			done();
+			// Not right away (as the answer of the server): the caller
+			// (HistoryWidget::applyDraft with an edit draft at the start)
+			// was entered again, the edit cancelled under it and the draft
+			// it used destroyed (a crash).
+			crl::on_main(session, [=] {
+				done();
+			});
 		}
 		return;
 	}

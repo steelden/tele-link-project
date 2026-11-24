@@ -3129,10 +3129,20 @@ bool HistoryWidget::applyDraft(FieldHistoryAction fieldHistoryAction) {
 		return true;
 	}
 
+	// The draft may be replaced (destroyed) by the field changes and by
+	// processReply() below (a reply chosen while editing): its data is
+	// taken now, the pointer is not used after the field is changed.
+	const auto draftText = draft->textWithTags;
+	auto draftCursor = draft->cursor;
+	const auto draftWebpage = draft->webpage;
+	const auto editSuggest = editDraft
+		? editDraft->suggest
+		: SuggestOptions();
+
 	_textUpdateEvents = 0;
-	setFieldText(draft->textWithTags, 0, fieldHistoryAction);
+	setFieldText(draftText, 0, fieldHistoryAction);
 	setInnerFocus();
-	draft->cursor.applyTo(_field);
+	draftCursor.applyTo(_field);
 	_textUpdateEvents = TextUpdateEvent::SaveDraft
 		| TextUpdateEvent::SendTyping;
 
@@ -3149,9 +3159,9 @@ bool HistoryWidget::applyDraft(FieldHistoryAction fieldHistoryAction) {
 			requestMessageData(_editMsgId);
 		}
 		updateExpandButtonVisibility();
-		if (editDraft && editDraft->suggest) {
+		if (editDraft && editSuggest) {
 			using namespace HistoryView;
-			applySuggestOptions(editDraft->suggest, SuggestMode::Change);
+			applySuggestOptions(editSuggest, SuggestMode::Change);
 		} else {
 			cancelSuggestPost();
 		}
@@ -3174,11 +3184,11 @@ bool HistoryWidget::applyDraft(FieldHistoryAction fieldHistoryAction) {
 			&& _replyEditMsg->media()
 			&& !_replyEditMsg->media()->webpage());
 		if (!_editMsgId) {
-			_preview->apply(draft->webpage, true);
+			_preview->apply(draftWebpage, true);
 		} else if (!_replyEditMsg
 			|| !_replyEditMsg->media()
 			|| _replyEditMsg->media()->webpage()) {
-			_preview->apply(draft->webpage, false);
+			_preview->apply(draftWebpage, false);
 		}
 	}
 	return true;
