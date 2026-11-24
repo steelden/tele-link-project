@@ -1522,7 +1522,8 @@ void Instance::showRichMessage(
 
 bool Instance::showMarkdown(
 		const QString &path,
-		QVariant context) {
+		QVariant context,
+		QWidget *ownerWindow) {
 	const auto target = ParseLocalMarkdownTarget(path);
 	const auto messageContext = ExtractMarkdownMessageContext(context);
 	const auto session = messageContext
@@ -1537,6 +1538,7 @@ bool Instance::showMarkdown(
 		options.sourcePath = target.key;
 	}
 	options.initialFragment = target.fragment;
+	options.ownerWindow = ownerWindow;
 	auto i = _markdowns.find(target.key);
 	if (i == end(_markdowns)) {
 		if (auto controller = Markdown::TryOpenLocalFile(

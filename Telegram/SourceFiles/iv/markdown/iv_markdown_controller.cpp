@@ -25,6 +25,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/rp_window.h"
 #include "ui/wrap/fade_wrap.h"
+
+#include <QtGui/QWindow>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif // Q_OS_WIN
 #include "ui/ui_utility.h"
 #include "logs.h"
 
@@ -319,7 +325,38 @@ rpl::lifetime &Controller::lifetime() {
 	return _lifetime;
 }
 
+void Controller::applyOwnerWindow() {
+	const auto owner = _options.ownerWindow.data();
+	if (!owner || !_window) {
+		return;
+	}
+	const auto top = owner->window();
+	top->createWinId();
+	_window->createWinId();
+	const auto handle = _window->windowHandle();
+	const auto parent = top->windowHandle();
+	if (!handle || !parent) {
+		return;
+	}
+	// Owned by the main window: never below it. Qt applies the transient
+	// parent on the creation only, the native owner is set right away
+	// (as MainWindow::workmodeUpdated does).
+#ifdef Q_OS_WIN
+	const auto hwnd = reinterpret_cast<HWND>(_window->winId());
+	const auto ownerHwnd = reinterpret_cast<HWND>(top->winId());
+	const auto was = reinterpret_cast<HWND>(
+		GetWindowLongPtr(hwnd, GWLP_HWNDPARENT));
+	if (was != ownerHwnd) {
+		SetWindowLongPtr(hwnd, GWLP_HWNDPARENT, LONG_PTR(ownerHwnd));
+	}
+#endif // Q_OS_WIN
+	if (handle->transientParent() != parent) {
+		handle->setTransientParent(parent);
+	}
+}
+
 void Controller::activate() {
+	applyOwnerWindow();
 	if (_window->isMinimized()) {
 		_window->showNormal();
 	} else if (_window->isHidden()) {

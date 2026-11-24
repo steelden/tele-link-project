@@ -8,6 +8,8 @@ a desktop application based on Telegram Desktop.
 #include "core/application.h"
 #include "core/version.h"
 #include "iv/iv_instance.h"
+#include "window/window_controller.h"
+#include "mainwindow.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
@@ -59,7 +61,12 @@ bool ShowFile(const QByteArray &bytes) {
 		return false;
 	}
 	file.close();
-	if (!Core::App().iv().showMarkdown(path)) {
+	// Above the main window (was hidden under it after a click there).
+	const auto primary = Core::App().activePrimaryWindow();
+	const auto owner = primary
+		? static_cast<QWidget*>(primary->widget().get())
+		: nullptr;
+	if (!Core::App().iv().showMarkdown(path, QVariant(), owner)) {
 		LOG(("MtsLink WhatsNew: the viewer failed for '%1'").arg(path));
 		return false;
 	}

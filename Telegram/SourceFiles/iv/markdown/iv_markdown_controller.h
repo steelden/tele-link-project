@@ -79,6 +79,7 @@ private:
 
 	void close();
 	void createWindow();
+	void applyOwnerWindow();
 	void createLayerManager();
 	void createPreview();
 	[[nodiscard]] bool updateExistingPreview(

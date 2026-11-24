@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include <QtCore/QByteArray>
+#include <QtCore/QPointer>
 #include <QtCore/QSize>
 #include <QtCore/QString>
 #include <QtCore/QVariant>
@@ -274,6 +275,8 @@ struct OpenOptions {
 		Qt::MouseButton)> activateMedia;
 	std::function<void()> zoomActivated;
 	rpl::producer<> downloadTaskFinished;
+	// TeleLink: the viewer is kept above this window (owned by it).
+	QPointer<QWidget> ownerWindow;
 };
 
 struct ParseOptions {

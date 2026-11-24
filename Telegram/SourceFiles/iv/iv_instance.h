@@ -84,7 +84,8 @@ public:
 
 	bool showMarkdown(
 		const QString &path,
-		QVariant context = {});
+		QVariant context = {},
+		QWidget *ownerWindow = nullptr);
 
 	[[nodiscard]] bool hasActiveWindow(
 		not_null<Main::Session*> session) const;
