@@ -444,7 +444,7 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_iv_editor_save_draft_failed_error" = "Не удалось сохранить черновик.\n\nОшибка: {error}";
 "lng_iv_editor_close_now" = "Закрыть сейчас";
 "lng_edit_photo_editor_hint" = "Для редактирования нажмите на изображение.";
-"lng_edit_caption_attach" = "Вы не можете добавить новое фото или видео при редактировании сообщения.";
+"lng_edit_caption_attach" = "Протокол MTS Link не поддерживает добавление файлов при редактировании сообщений";
 "lng_edit_caption_voice" = "Нельзя отредактировать сообщение, пока записанное голосовое сообщение ожидает отправки.";
 "lng_intro_about" = "Добро пожаловать в Telegram для ПК.\nБыстрый и безопасный официальный клиент.";
 "lng_start_msgs" = "Начать общение";

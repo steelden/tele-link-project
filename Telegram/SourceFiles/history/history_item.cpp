@@ -3419,6 +3419,10 @@ bool HistoryItem::allowsEdit(TimeId now) const {
 }
 
 bool HistoryItem::allowsEditMedia() const {
+	if (MtsLink::hasChatId(_history->peer->id)) {
+		// Chat.UpdateMessage changes the text only, the files are ignored.
+		return false;
+	}
 	return !awaitingVideoProcessing()
 		&& !richPage()
 		&& (!_media || _media->allowsEditMedia() || _media->webpage())

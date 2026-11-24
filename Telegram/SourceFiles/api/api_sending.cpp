@@ -1397,6 +1397,12 @@ void SendConfirmedFile(
 		}
 
 		const auto caption = file->caption.text.trimmed();
+		if (file->to.replaceMediaOf) {
+			// No files in the edit of MTS Link (Chat.UpdateMessage ignores
+			// them): not sent as a new message (it went to the chat, out of
+			// the thread). The attach in the edit is not allowed anyway.
+			return;
+		}
 		if (const auto scheduled = file->to.options.scheduled) {
 			// Uploaded now, the message is sent by the scheduler.
 			const auto done = [=](const MtsLink::Api::UploadResult &result) {

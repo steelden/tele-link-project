@@ -388,7 +388,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_iv_editor_save_draft_failed_error" = "Could not save the draft.\n\nError: {error}";
 "lng_iv_editor_close_now" = "Close now";
 "lng_edit_photo_editor_hint" = "Left-click on the photo to edit.";
-"lng_edit_caption_attach" = "Sorry, you can't attach new media while editing a message.";
+"lng_edit_caption_attach" = "The MTS Link protocol doesn't support adding files when editing messages";
 "lng_edit_caption_voice" = "Sorry, you can't edit messages when you have an unsent voice message.";
 
 "lng_intro_about" = "Welcome to the official Telegram Desktop app.\nIt's fast and secure.";
