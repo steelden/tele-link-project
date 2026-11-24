@@ -2808,6 +2808,25 @@ void FillHistoryGap(
 	});
 }
 
+// The read date by the unread counter of the server: the messages are the
+// newest first, the read one is right after the unread ones. Unknown, the
+// chat was opened at the bottom and read up to the end.
+void ApplyReadDateFromMessages(
+		not_null<History*> history,
+		const QList<Api::MessageData> &messages) {
+	if (messages.isEmpty()) {
+		return;
+	}
+	const auto unread = history->unreadCount();
+	if (unread > 0 && unread < int(messages.size())) {
+		const auto &lastRead = messages[unread];
+		history->setMtsLinkInboxReadDate(TimeId(lastRead.createdAt / 1000));
+	} else if (unread == 0 && !history->mtsLinkInboxReadDate()) {
+		const auto &newest = messages[0];
+		history->setMtsLinkInboxReadDate(TimeId(newest.createdAt / 1000));
+	}
+}
+
 } // namespace
 
 void connectToSession(
@@ -3219,21 +3238,8 @@ void connectToSession(
 			{
 				const auto history =
 					mainSession->data().historyLoaded(peerId);
-				if (history && !messages.isEmpty()) {
-					const auto unread = history->unreadCount();
-					if (unread > 0
-						&& unread < int(messages.size())) {
-						const auto &lastRead = messages[unread];
-						const auto readDate = TimeId(
-							lastRead.createdAt / 1000);
-						history->setMtsLinkInboxReadDate(readDate);
-					} else if (unread == 0
-						&& !history->mtsLinkInboxReadDate()) {
-						const auto &newest = messages[0];
-						const auto readDate = TimeId(
-							newest.createdAt / 1000);
-						history->setMtsLinkInboxReadDate(readDate);
-					}
+				if (history) {
+					ApplyReadDateFromMessages(history, messages);
 				}
 			}
 			if (const auto history = mainSession->data().historyLoaded(peerId)
@@ -8668,6 +8674,21 @@ void loadMessagesFromCache(
 				cached->profiles,
 				oldestId,
 				cached->messages.size());
+			// The read date right away (the chat may be opened before the
+			// server messages come): if the cache has the newest message,
+			// else the date by it is wrong (waits for the server).
+			const auto history = strong->data().historyLoaded(
+				chatIdToPeerId(chatId));
+			if (history
+				&& history->unreadCountKnown()
+				&& !history->mtsLinkInboxReadDate()) {
+				const auto last = history->lastMessage();
+				const auto newest = TimeId(
+					cached->messages.front().createdAt / 1000);
+				if (!last || (last->date() <= newest)) {
+					ApplyReadDateFromMessages(history, cached->messages);
+				}
+			}
 		});
 	});
 }
