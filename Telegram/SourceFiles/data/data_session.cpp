@@ -97,6 +97,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "spellcheck/spellcheck_highlight_syntax.h"
 #include "mtslink/data_adapters.h"
 #include "mtslink/tasks_peers.h"
+#include "mtslink/meetings_peers.h"
 
 namespace Data {
 namespace {
@@ -5712,7 +5713,8 @@ void Session::refreshChatListEntry(Dialogs::Key key) {
 	// folders, not in the main list.
 	const auto isThread = history
 		&& (MtsLink::isThreadPeer(history->peer->id)
-			|| MtsLink::isTaskPeer(history->peer->id));
+			|| MtsLink::isTaskPeer(history->peer->id)
+			|| MtsLink::isMeetingPeer(history->peer->id));
 	auto creating = false;
 	if (!isThread) {
 		const auto mainList = chatsListFor(entry);

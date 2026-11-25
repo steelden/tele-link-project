@@ -59,6 +59,8 @@ public:
 		Threads       = (1 << 13),
 		// MTS Link: the sections of the tasks as the chats.
 		Tasks         = (1 << 14),
+		// TeleLink: the weeks of the Outlook calendar as the chats.
+		Meetings      = (1 << 15),
 	};
 	friend constexpr inline bool is_flag_type(Flag) { return true; };
 	using Flags = base::flags<Flag>;

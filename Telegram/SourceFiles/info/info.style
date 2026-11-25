@@ -963,6 +963,19 @@ topBarCall: IconButton(topBarSearch) {
 	icon: icon {{ "top_bar_call", menuIconFg }};
 	iconOver: icon {{ "top_bar_call", menuIconFgOver }};
 }
+// MTS Link: the call button of an Outlook meeting, on a filled circle.
+mtslinkMeetingCall: IconButton(topBarSearch) {
+	width: 40px;
+	height: 40px;
+	icon: icon {{ "top_bar_call", activeButtonFg }};
+	iconOver: icon {{ "top_bar_call", activeButtonFg }};
+	iconPosition: point(4px, 4px);
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: 40px;
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: activeButtonBgRipple;
+	}
+}
 topBarGroupCall: IconButton(topBarSearch) {
 	icon: icon {{ "top_bar_group_call", menuIconFg }};
 	iconOver: icon {{ "top_bar_group_call", menuIconFgOver }};

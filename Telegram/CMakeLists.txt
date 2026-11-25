@@ -1572,6 +1572,11 @@ PRIVATE
     mtslink/task_edit_box.cpp
     mtslink/task_edit_box.h
     mtslink/tasks_peers.h
+    mtslink/meetings_peers.h
+    mtslink/meetings_section.cpp
+    mtslink/meetings_section.h
+    mtslink/outlook_calendar.cpp
+    mtslink/outlook_calendar.h
     mtslink/api/api_tasks.cpp
     mtslink/api/api_tasks.h
     mtslink/rpc.cpp

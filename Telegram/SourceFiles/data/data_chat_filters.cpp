@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_app_config.h"
 #include "mtslink/data_adapters.h"
 #include "mtslink/tasks_peers.h"
+#include "mtslink/meetings_peers.h"
 #include "lang/lang_keys.h"
 #include "apiwrap.h"
 #include "core/application.h"
@@ -349,6 +350,14 @@ bool ChatFilter::contains(
 	if (MtsLink::isTaskPeer(history->peer->id)) {
 		return !_never.contains(history)
 			&& ((_flags & Flag::Tasks) || _always.contains(history));
+	}
+	// The periods of the Outlook calendar, only by the "Meetings" type
+	// (the ones of the current length of the periods).
+	if (MtsLink::isMeetingPeer(history->peer->id)) {
+		return MtsLink::meetingsEnabled()
+			&& MtsLink::meetingIndexForPeer(history->peer->id).has_value()
+			&& !_never.contains(history)
+			&& ((_flags & Flag::Meetings) || _always.contains(history));
 	}
 	const auto flag = [&] {
 		const auto peer = history->peer;
@@ -809,7 +818,8 @@ bool ChatFilters::applyChange(ChatFilter &filter, ChatFilter &&updated) {
 	const auto rulesMask = Flag()
 		| Flag::RulesMask
 		| Flag::Threads
-		| Flag::Tasks;
+		| Flag::Tasks
+		| Flag::Meetings;
 	const auto rulesChanged = exceptionsChanged
 		|| ((filter.flags() & rulesMask) != (updated.flags() & rulesMask))
 		|| (filter.never() != updated.never());
@@ -872,6 +882,11 @@ bool ChatFilters::applyChange(ChatFilter &filter, ChatFilter &&updated) {
 		}
 		// The sections of the tasks are not in the main list either.
 		for (const auto peerId : MtsLink::taskPeerIds()) {
+			if (const auto h = _owner->historyLoaded(peerId)) {
+				feedHistory(h);
+			}
+		}
+		for (const auto peerId : MtsLink::meetingPeerIds()) {
 			if (const auto h = _owner->historyLoaded(peerId)) {
 				feedHistory(h);
 			}

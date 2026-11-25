@@ -138,6 +138,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_premium.h"
 #include "mtslink/data_adapters.h"
 #include "mtslink/tasks_peers.h"
+#include "mtslink/meetings_peers.h"
 #include "mtslink/session.h"
 #include "mtslink/api/api_channels.h"
 #include "main/main_account.h"
@@ -2062,6 +2063,14 @@ void Filler::fillContextMenuActions() {
 		const auto session = &_peer->session();
 		_addAction(tr::lng_mtslink_refresh_chat(tr::now), [=] {
 			MtsLink::refreshTaskPeers(session);
+		}, &st::menuIconRestore);
+		return;
+	}
+	// A week of the Outlook meetings: only the refresh.
+	if (_peer && MtsLink::isMeetingPeer(_peer->id)) {
+		const auto session = &_peer->session();
+		_addAction(tr::lng_mtslink_refresh_chat(tr::now), [=] {
+			MtsLink::refreshMeetingPeers(session);
 		}, &st::menuIconRestore);
 		return;
 	}

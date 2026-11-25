@@ -41,6 +41,7 @@ constexpr auto kAllTypes = {
 	Flag::Bots,
 	Flag::Threads,
 	Flag::Tasks,
+	Flag::Meetings,
 	Flag::NoMuted,
 	Flag::NoRead,
 	Flag::NoArchived,
@@ -311,6 +312,7 @@ auto TypeController::rowSelectionChanges() const
 	case Flag::Bots: return tr::lng_filters_type_bots(tr::now);
 	case Flag::Threads: return tr::lng_filters_type_threads(tr::now);
 	case Flag::Tasks: return tr::lng_mtslink_tasks(tr::now);
+	case Flag::Meetings: return tr::lng_mtslink_meetings(tr::now);
 	case Flag::NoMuted: return tr::lng_filters_type_no_muted(tr::now);
 	case Flag::NoArchived: return tr::lng_filters_type_no_archived(tr::now);
 	case Flag::NoRead: return tr::lng_filters_type_no_read(tr::now);
@@ -336,6 +338,7 @@ void PaintFilterChatsTypeIcon(
 		case Flag::Bots: return st::historyPeer6UserpicBg;
 		case Flag::Threads: return st::historyPeer5UserpicBg;
 		case Flag::Tasks: return st::historyPeer3UserpicBg;
+		case Flag::Meetings: return st::historyPeer8UserpicBg;
 		case Flag::NoMuted: return st::historyPeer6UserpicBg;
 		case Flag::NoArchived: return st::historyPeer4UserpicBg;
 		case Flag::NoRead: return st::historyPeer7UserpicBg;
@@ -353,6 +356,7 @@ void PaintFilterChatsTypeIcon(
 		case Flag::Bots: return st::historyPeer6UserpicBg2;
 		case Flag::Threads: return st::historyPeer5UserpicBg2;
 		case Flag::Tasks: return st::historyPeer3UserpicBg2;
+		case Flag::Meetings: return st::historyPeer8UserpicBg2;
 		case Flag::NoMuted: return st::historyPeer6UserpicBg2;
 		case Flag::NoArchived: return st::historyPeer4UserpicBg2;
 		case Flag::NoRead: return st::historyPeer7UserpicBg2;
@@ -370,6 +374,7 @@ void PaintFilterChatsTypeIcon(
 		case Flag::Bots: return st::windowFilterTypeBots;
 		case Flag::Threads: return st::windowFilterTypeGroups;
 		case Flag::Tasks: return st::windowFilterTypeNoRead;
+		case Flag::Meetings: return st::windowFilterTypeExistingChats;
 		case Flag::NoMuted: return st::windowFilterTypeNoMuted;
 		case Flag::NoArchived: return st::windowFilterTypeNoArchived;
 		case Flag::NoRead: return st::windowFilterTypeNoRead;

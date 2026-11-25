@@ -26,11 +26,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_account.h"
 #include "mtslink/data_adapters.h"
+#include "mtslink/meetings_peers.h"
+#include "mtslink/outlook_calendar.h"
 #include "settings/sections/settings_main.h"
 #include "settings/sections/settings_premium.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_common_session.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/boxes/single_choice_box.h"
 #include "ui/empty_userpic.h"
 #include "ui/filter_icons.h"
 #include "ui/layers/generic_box.h"
@@ -1157,19 +1160,37 @@ void BuildViewSection(SectionBuilder &builder) {
 			Core::App().saveSettingsDelayed();
 		});
 
-		// MTS Link: "Open meeting" under the folders setup.
 		Ui::AddSkip(content);
+		Ui::AddSkip(content);
+
+		return SectionBuilder::WidgetToAdd{};
+	});
+}
+
+// MTS Link: the "New meeting" button on the folders panel, the last one in
+// the "Meetings" subsection (after the Outlook meetings on Windows).
+void BuildMeetingButtonSection(SectionBuilder &builder) {
+	builder.add([](const WidgetContext &ctx) {
+		const auto content = ctx.container;
+
+		// On Windows right under the Outlook meetings switch.
+		if (!MtsLink::outlookSupported()) {
+			Ui::AddDivider(content);
+			Ui::AddSkip(content);
+			Ui::AddSubsectionTitle(
+				content,
+				tr::lng_mtslink_settings_meetings());
+		}
 		auto &meetingOption = base::options::lookup<bool>(
 			"mtslink-folders-meeting-button");
 		const auto meeting = content->add(
-			object_ptr<Ui::Checkbox>(
+			object_ptr<Ui::SettingsButton>(
 				content,
-				tr::lng_mtslink_folders_meeting_button(tr::now),
-				meetingOption.value(),
-				st::settingsCheckbox),
-			st::settingsCheckboxPadding);
-		meeting->checkedChanges(
-		) | rpl::on_next([=](bool checked) {
+				tr::lng_mtslink_folders_meeting_button(),
+				st::settingsButtonNoIcon));
+		meeting->toggleOn(rpl::single(meetingOption.value()));
+		meeting->toggledValue(
+		) | rpl::skip(1) | rpl::on_next([=](bool checked) {
 			base::options::lookup<bool>(
 				"mtslink-folders-meeting-button").set(checked);
 		}, meeting->lifetime());
@@ -1177,6 +1198,140 @@ void BuildViewSection(SectionBuilder &builder) {
 		Ui::AddSkip(content);
 
 		return SectionBuilder::WidgetToAdd{};
+	});
+}
+
+// The meetings of Outlook (Windows) as a folder: off by default, turned on
+// only after a successful test connection.
+void BuildOutlookSection(SectionBuilder &builder) {
+	if (!MtsLink::outlookSupported()) {
+		return;
+	}
+	builder.add([](const WidgetContext &ctx) {
+		const auto controller = ctx.controller;
+		const auto content = ctx.container;
+
+		Ui::AddDivider(content);
+		Ui::AddSkip(content);
+		Ui::AddSubsectionTitle(content, tr::lng_mtslink_settings_meetings());
+		const auto button = content->add(
+			object_ptr<Ui::SettingsButton>(
+				content,
+				tr::lng_mtslink_settings_outlook_meetings(),
+				st::settingsButtonNoIcon));
+		if (ctx.highlights) {
+			ctx.highlights->push_back({ u"folders/outlook"_q, { button } });
+		}
+		const auto testing = button->lifetime().make_state<bool>(false);
+		// Turned back off after a failed test connection.
+		const auto toggles = button->lifetime().make_state<
+			rpl::event_stream<bool>>();
+		button->toggleOn(
+			rpl::single(
+				MtsLink::outlookMeetingsEnabled()
+			) | rpl::then(toggles->events())
+		)->toggledValue(
+		) | rpl::on_next([=](bool toggled) {
+			const auto session = &controller->session();
+			if (!toggled) {
+				if (!*testing && MtsLink::outlookMeetingsEnabled()) {
+					MtsLink::setMeetingsEnabled(session, false);
+				}
+				return;
+			} else if (*testing || MtsLink::outlookMeetingsEnabled()) {
+				return;
+			}
+			*testing = true;
+			controller->showToast(
+				tr::lng_mtslink_outlook_checking(tr::now));
+			MtsLink::testOutlookConnection(crl::guard(button, [=](bool ok) {
+				*testing = false;
+				if (!button->toggled()) {
+					// Turned off while the test was going.
+					return;
+				} else if (ok) {
+					MtsLink::setMeetingsEnabled(session, true);
+					controller->showToast(
+						tr::lng_mtslink_outlook_enabled(tr::now));
+				} else {
+					toggles->fire(false);
+					controller->showToast(
+						tr::lng_mtslink_outlook_failed(tr::now));
+				}
+			}));
+		}, button->lifetime());
+
+		// The length of the periods in the chats list, while turned on.
+		const auto periodWrap = content->add(
+			object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+				content,
+				object_ptr<Ui::VerticalLayout>(content)));
+		const auto inner = periodWrap->entity();
+		const auto period = inner->lifetime().make_state<
+			rpl::variable<MtsLink::MeetingsPeriod>>(MtsLink::meetingsPeriod());
+		const auto periodButton = AddButtonWithLabel(
+			inner,
+			tr::lng_mtslink_meetings_period(),
+			period->value() | rpl::map(MtsLink::meetingsPeriodName),
+			st::settingsButtonNoIcon);
+		periodButton->addClickHandler([=] {
+			const auto periods = MtsLink::meetingsPeriods();
+			auto options = std::vector<QString>();
+			for (const auto value : periods) {
+				options.push_back(MtsLink::meetingsPeriodName(value));
+			}
+			const auto selected = int(ranges::find(periods, period->current())
+				- begin(periods));
+			controller->show(Box(SingleChoiceBox, SingleChoiceBoxArgs{
+				.title = tr::lng_mtslink_meetings_period(),
+				.options = options,
+				.initialSelection = selected,
+				.callback = [=](int index) {
+					*period = periods[index];
+					MtsLink::setMeetingsPeriod(
+						&controller->session(),
+						periods[index]);
+				},
+			}));
+		});
+
+		// The background refresh of the meetings.
+		const auto refresh = inner->lifetime().make_state<
+			rpl::variable<int>>(MtsLink::meetingsRefreshMinutes());
+		const auto refreshButton = AddButtonWithLabel(
+			inner,
+			tr::lng_mtslink_meetings_refresh(),
+			refresh->value() | rpl::map(MtsLink::meetingsRefreshName),
+			st::settingsButtonNoIcon);
+		refreshButton->addClickHandler([=] {
+			const auto values = MtsLink::meetingsRefreshOptions();
+			auto options = std::vector<QString>();
+			for (const auto value : values) {
+				options.push_back(MtsLink::meetingsRefreshName(value));
+			}
+			const auto found = ranges::find(values, refresh->current());
+			controller->show(Box(SingleChoiceBox, SingleChoiceBoxArgs{
+				.title = tr::lng_mtslink_meetings_refresh(),
+				.options = options,
+				.initialSelection = (found != end(values))
+					? int(found - begin(values))
+					: 1,
+				.callback = [=](int index) {
+					*refresh = values[index];
+					MtsLink::setMeetingsRefreshMinutes(values[index]);
+				},
+			}));
+		});
+		periodWrap->toggleOn(button->toggledValue());
+		periodWrap->finishAnimating();
+
+		return SectionBuilder::WidgetToAdd{};
+	}, [] {
+		return SearchEntry{
+			.id = u"folders/outlook"_q,
+			.title = tr::lng_mtslink_settings_outlook_meetings(tr::now),
+			.keywords = { u"outlook"_q, u"calendar"_q, u"meetings"_q },
+		};
 	});
 }
 
@@ -1245,6 +1400,8 @@ void Folders::setupContent() {
 		// No folder tags: a Telegram Premium feature.
 		BuildHideAllSection(builder);
 		BuildViewSection(builder);
+		BuildOutlookSection(builder);
+		BuildMeetingButtonSection(builder);
 
 		std::move(showFinished) | rpl::on_next([=] {
 			for (const auto &[id, entry] : *highlights) {
@@ -1307,6 +1464,16 @@ const auto kMeta = BuildHelper({
 			.keywords = { u"view"_q, u"layout"_q, u"tabs"_q },
 		};
 	});
+
+	if (MtsLink::outlookSupported()) {
+		builder.add(nullptr, [] {
+			return SearchEntry{
+				.id = u"folders/outlook"_q,
+				.title = tr::lng_mtslink_settings_outlook_meetings(tr::now),
+				.keywords = { u"outlook"_q, u"calendar"_q, u"meetings"_q },
+			};
+		});
+	}
 });
 
 } // namespace

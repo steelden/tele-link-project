@@ -5,6 +5,7 @@ based on Telegram Desktop.
 #include "mtslink/data_adapters.h"
 #include "mtslink/whats_new.h"
 #include "mtslink/tasks_peers.h"
+#include "mtslink/meetings_peers.h"
 #include "mtslink/session.h"
 #include "mtslink/env_config.h"
 #include "mtslink/my_profile.h"
@@ -2886,6 +2887,8 @@ void connectToSession(
 			showWhatsNewIfPending();
 			// The sections of the tasks as the chats.
 			initTaskPeers(mainSession);
+			// The weeks of the Outlook calendar (Windows only).
+			initMeetingPeers(mainSession);
 			// The chat shown before the connection (restored at the start)
 			// was not refreshed on opening: refreshed now.
 			const auto window = Core::App().activePrimaryWindow();

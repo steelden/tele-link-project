@@ -12,6 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtslink/data_adapters.h"
 #include "mtslink/tasks_peers.h"
 #include "mtslink/tasks_section.h"
+#include "mtslink/meetings_peers.h"
+#include "mtslink/meetings_section.h"
 #include "api/api_cloud_password.h"
 #include "api/api_text_entities.h"
 #include "boxes/peers/add_bot_to_chat_box.h"
@@ -3280,6 +3282,13 @@ void SessionController::showPeerHistory(
 		auto copy = params;
 		copy.way = SectionShow::Way::ClearStack;
 		showSection(std::make_shared<MtsLink::TasksMemento>(*section), copy);
+		return;
+	}
+	// A period of the Outlook calendar shows its meetings.
+	if (const auto index = MtsLink::meetingIndexForPeer(peerId)) {
+		auto copy = params;
+		copy.way = SectionShow::Way::ClearStack;
+		showSection(std::make_shared<MtsLink::MeetingsMemento>(*index), copy);
 		return;
 	}
 	// The chat with self (a "Message" in the own profile and alike) is

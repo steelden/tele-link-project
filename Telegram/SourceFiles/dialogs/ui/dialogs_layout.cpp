@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "mtslink/data_adapters.h"
 #include "mtslink/tasks_peers.h"
+#include "mtslink/meetings_peers.h"
 #include "storage/localstorage.h"
 #include "support/support_helper.h"
 #include "ui/empty_userpic.h"
@@ -448,9 +449,11 @@ void PaintDialogDate(
 		TimeId date,
 		QRect &rectForName,
 		const PaintContext &context) {
-	// MTS Link: a section of the tasks has no date.
+	// MTS Link: a section of the tasks, a week of the meetings: no date.
 	if (const auto history = entry->asHistory()
-		; history && MtsLink::isTaskPeer(history->peer->id)) {
+		; history
+			&& (MtsLink::isTaskPeer(history->peer->id)
+				|| MtsLink::isMeetingPeer(history->peer->id))) {
 		return;
 	}
 	const auto resolved = fakeRow
@@ -653,7 +656,8 @@ void PaintRow(
 		const auto skip = rowBadge.drawVerified(p, position, st);
 		rectForName.setLeft(position.x() + skip + st::dialogsChatTypeSkip);
 	} else if (from) {
-		if (const auto chatTypeIcon = MtsLink::isTaskPeer(from->id)
+		if (const auto chatTypeIcon = (MtsLink::isTaskPeer(from->id)
+					|| MtsLink::isMeetingPeer(from->id))
 				? nullptr
 				: ChatTypeIcon(from, context)) {
 			if (threadRow && !context.active) {
