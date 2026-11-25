@@ -1753,6 +1753,37 @@ namespace {
 	return false;
 }
 
+// The markers in the text of the blocks are the text: escaped as the web
+// client does ("\_"), restored by the parsing.
+[[nodiscard]] QString escapeBlockText(QString text) {
+	static const auto kEscapable = u"*~`_|"_q;
+	for (auto i = int(text.size()) - 1; i >= 0; --i) {
+		if (kEscapable.contains(text[i])) {
+			text.insert(i, QChar('\\'));
+		}
+	}
+	return text;
+}
+
+// The links with a text of their own ("Register" -> https://...) are
+// only in the blocks: the markdown of the server has the text only.
+[[nodiscard]] bool linksLostInMarkdown(
+		const QJsonArray &blocks,
+		const QString &markdown) {
+	for (const auto &b : blocks) {
+		const auto obj = b.toObject();
+		if (obj.value(u"type"_q).toString() != u"LinkElement"_q) {
+			continue;
+		}
+		const auto url = obj.value(u"value"_q).toObject().value(
+			u"url"_q).toString();
+		if (!url.isEmpty() && !markdown.contains(url)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 QString markdownFromBlocks(const QJsonArray &blocks) {
 	QString md;
 	for (const auto &b : blocks) {
@@ -1781,7 +1812,7 @@ QString markdownFromBlocks(const QJsonArray &blocks) {
 			const auto bold = style.value(u"bold"_q).toBool();
 			const auto italic = style.value(u"italic"_q).toBool();
 			const auto strike = style.value(u"strike"_q).toBool();
-			QString wrapped = text;
+			QString wrapped = escapeBlockText(text);
 			if (bold) wrapped = u"**"_q + wrapped + u"**"_q;
 			if (italic) wrapped = u"*"_q + wrapped + u"*"_q;
 			if (strike) wrapped = u"~~"_q + wrapped + u"~~"_q;
@@ -1793,17 +1824,33 @@ QString markdownFromBlocks(const QJsonArray &blocks) {
 			const auto url = value.value(u"url"_q).toString();
 			const auto elements = value.value(u"elements"_q).toArray();
 			QString linkText;
+			auto bold = !elements.isEmpty();
 			for (const auto &el : elements) {
 				const auto eo = el.toObject();
-				if (eo.value(u"type"_q).toString() == u"TextElement"_q) {
+				const auto elementType = eo.value(u"type"_q).toString();
+				// The emoji in the text of the link ("👉 Join") too.
+				if (elementType == u"EmojiElement"_q) {
 					linkText += eo.value(u"value"_q).toObject()
-						.value(u"text"_q).toString();
+						.value(u"symbol"_q).toString();
+				} else if (elementType == u"TextElement"_q) {
+					const auto ev = eo.value(u"value"_q).toObject();
+					linkText += ev.value(u"text"_q).toString();
+					if (!ev.value(u"style"_q).toObject().value(
+							u"bold"_q).toBool()) {
+						bold = false;
+					}
 				}
 			}
 			if (linkText == url || linkText.isEmpty()) {
-				md += url;
+				md += escapeBlockText(url);
 			} else {
-				md += u"["_q + linkText + u"]("_q + url + u")"_q;
+				// A bold link (all its text is bold) stays bold.
+				const auto link = u"["_q
+					+ escapeBlockText(linkText)
+					+ u"]("_q
+					+ escapeBlockText(url)
+					+ u")"_q;
+				md += bold ? (u"**"_q + link + u"**"_q) : link;
 			}
 		}
 	}
@@ -1821,6 +1868,15 @@ QString messageMarkdown(
 	// TeleLink and the older clients), "CodeBlock" has no language.
 	const auto fenced = markdown.contains(u"```"_q);
 	if (hasCodeBlock(blocks) && !fenced) {
+		auto result = markdownFromBlocks(blocks);
+		while (result.endsWith('\n')) {
+			result.chop(1);
+		}
+		return result;
+	}
+	if (!markdown.isEmpty()
+		&& !hasUnknownBlocks(blocks)
+		&& linksLostInMarkdown(blocks, markdown)) {
 		auto result = markdownFromBlocks(blocks);
 		while (result.endsWith('\n')) {
 			result.chop(1);
