@@ -1575,6 +1575,7 @@ PRIVATE
     mtslink/meetings_peers.h
     mtslink/meetings_section.cpp
     mtslink/meetings_section.h
+    mtslink/inline_video_sync.h
     mtslink/outlook_calendar.cpp
     mtslink/outlook_calendar.h
     mtslink/api/api_tasks.cpp

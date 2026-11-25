@@ -27,6 +27,30 @@ QRect VideoCornerDownloadRect(QPoint position) {
 		Size(st::historyVideoDownloadSize));
 }
 
+QRect VideoCornerStatusRect(const VideoCornerStatus &status) {
+	const auto &font = st::normalFont;
+	const auto padding = st::msgDateImgPadding;
+	const auto addLeft = status.download
+		? (st::historyVideoDownloadSize + 2 * padding.y())
+		: 0;
+	const auto addRight = status.mute ? st::historyVideoMuteSize : 0;
+	const auto downloadWidth = status.download
+		? font->width(status.downloadSize)
+		: 0;
+	const auto statusWidth = std::max(downloadWidth, font->width(status.text))
+		+ 2 * padding.x()
+		+ addLeft
+		+ addRight;
+	const auto statusHeight = 2 * padding.y()
+		+ (status.download ? st::historyVideoDownloadSize : font->height);
+	return style::rtlrect(
+		status.position.x() + st::msgDateImgDelta,
+		status.position.y() + st::msgDateImgDelta,
+		statusWidth,
+		statusHeight,
+		status.outerWidth);
+}
+
 void PaintVideoCornerStatus(
 		Painter &p,
 		const Ui::ChatPaintContext &context,
@@ -97,12 +121,25 @@ void PaintVideoCornerStatus(
 				sti->historyFileThumbRadialFg);
 		}
 	} else if (status.mute) {
-		const auto &icon = sti->historyVideoMessageMute;
-		icon.paint(
-			p,
+		// MTS Link: the speakers of the player (on / off), one size.
+		const auto &icon = status.soundOn
+			? st::historyVideoSoundOn
+			: st::historyVideoSoundOff;
+		const auto slot = style::rtlrect(
 			statusX - padding.x() - padding.y() + statusWidth - addRight,
-			statusY - padding.y() + (statusHeight - icon.height()) / 2,
+			statusY - padding.y(),
+			addRight,
+			statusHeight,
 			outerWidth);
+		const auto scale = st::historyVideoSoundIconSize
+			/ float64(std::max(icon.width(), 1));
+		p.save();
+		p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+		p.setRenderHint(QPainter::Antialiasing, true);
+		p.translate(QRectF(slot).center());
+		p.scale(scale, scale);
+		icon.paint(p, -icon.width() / 2, -icon.height() / 2, icon.width());
+		p.restore();
 	}
 }
 

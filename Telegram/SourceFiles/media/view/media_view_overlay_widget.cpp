@@ -128,8 +128,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #ifdef Q_OS_WIN
 #include <dwmapi.h>
+#include <shobjidl.h>
+#include <qpa/qplatformwindow_p.h>
 #endif // Q_OS_WIN
 #include "base/call_delayed.h"
+#include "mtslink/inline_video_sync.h"
 
 namespace {
 
@@ -805,6 +808,14 @@ OverlayWidget::OverlayWidget()
 	};
 	base::install_event_filter(_window, [=](not_null<QEvent*> e) {
 		const auto type = e->type();
+		if (type == QEvent::WindowActivate
+			|| type == QEvent::WindowDeactivate
+			|| type == QEvent::WindowStateChange) {
+			// After the state of the full screen is applied.
+			InvokeQueued(_window, [=] {
+				refreshTopMost();
+			});
+		}
 		if (type == QEvent::Move) {
 			const auto position = static_cast<QMoveEvent*>(e.get())->pos();
 			DEBUG_LOG(("Viewer Pos: Moved to %1, %2")
@@ -1981,7 +1992,9 @@ void OverlayWidget::resizeCenteredControls() {
 		+ st::mediaviewCaptionPadding.right());
 	_groupThumbsLeft = (width() - _groupThumbsAvailableWidth) / 2;
 	refreshGroupThumbs();
-	_groupThumbsTop = _groupThumbs ? (height() - _groupThumbs->height()) : 0;
+	_groupThumbsTop = _groupThumbs
+		? (usableBottom() - _groupThumbs->height())
+		: 0;
 
 	refreshClipControllerGeometry();
 	refreshSponsoredButtonGeometry();
@@ -2043,7 +2056,7 @@ void OverlayWidget::refreshCaptionGeometry() {
 		? (_streamed->controls->y() - st::mediaviewCaptionMargin.height())
 		: _groupThumbs
 		? _groupThumbsTop
-		: height() - st::mediaviewCaptionMargin.height();
+		: usableBottom() - st::mediaviewCaptionMargin.height();
 	const auto captionWidth = _stories
 		? storiesCaptionWidth
 		: std::min(
@@ -2089,7 +2102,7 @@ void OverlayWidget::refreshSponsoredButtonGeometry() {
 	}
 	const auto controllerBottom = (_groupThumbs && !_fullScreenVideo)
 		? _groupThumbsTop
-		: height();
+		: usableBottom();
 	const auto captionRect = captionGeometry();
 	_sponsoredButton->resize(
 		captionRect.width(),
@@ -2190,7 +2203,7 @@ void OverlayWidget::refreshVoteButtonGeometry() {
 	}
 	const auto controllerBottom = (_groupThumbs && !_fullScreenVideo)
 		? _groupThumbsTop
-		: height();
+		: usableBottom();
 	_voteButton->moveToLeft(
 		(width() - _voteButton->width()) / 2,
 		controllerBottom
@@ -2281,7 +2294,7 @@ void OverlayWidget::refreshPollVotersWidgetGeometry() {
 	}
 	const auto controllerBottom = (_groupThumbs && !_fullScreenVideo)
 		? _groupThumbsTop
-		: height();
+		: usableBottom();
 	_pollVotersWidget->moveToLeft(
 		(width() - _pollVotersWidget->width()) / 2,
 		controllerBottom
@@ -2816,7 +2829,7 @@ void OverlayWidget::contentSizeChanged() {
 void OverlayWidget::recountSkipTop() {
 	const auto controllerBottomNoFullScreenVideo = _groupThumbs
 		? _groupThumbsTop
-		: height();
+		: usableBottom();
 	// We need the bottom in case of non-full-screen-video mode
 	// to count correct _availableHeight in non-full-screen-video mode.
 	//
@@ -3216,6 +3229,35 @@ void OverlayWidget::showSaveMsgFile() {
 	File::ShowInFolder(_saveMsgFilename);
 }
 
+// MTS Link: the full screen viewer may stay below the taskbar (Windows does
+// not always take it as a full screen one, since the second show): above
+// all the windows while active, the usual one when not active or closed.
+void OverlayWidget::refreshTopMost(bool closing) {
+#ifdef Q_OS_WIN
+	const auto hwnd = (HWND)_window->internalWinId();
+	if (!hwnd) {
+		return;
+	}
+	const auto topMost = !closing
+		&& _fullscreen
+		&& !_windowed
+		&& !isHidden()
+		&& _window->isActiveWindow();
+	const auto now = (GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST);
+	if ((now != 0) == topMost) {
+		return;
+	}
+	SetWindowPos(
+		hwnd,
+		topMost ? HWND_TOPMOST : HWND_NOTOPMOST,
+		0,
+		0,
+		0,
+		0,
+		SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+#endif // Q_OS_WIN
+}
+
 void OverlayWidget::close() {
 	// Temporary: the viewer is not closed by a click.
 	LOG(("MtsLink Viewer: close, hidden=%1 visible=%2 minimized=%3"
@@ -3235,7 +3277,26 @@ void OverlayWidget::close() {
 			QPoint(rect.right - 1, rect.bottom - 1));
 	}
 #endif // Q_OS_WIN
+	refreshTopMost(true);
+	// MTS Link: the inline video of the chat continues from here, after
+	// the player (shared with the inline one) is released by the viewer.
+	auto closedAt = std::optional<MtsLink::ViewerClosedPosition>();
+	if (_streamed && _document && _document->isVideoFile()) {
+		const auto state = _streamed->instance.player().prepareLegacyState();
+		if (state.length > 0 && state.frequency > 0 && state.position >= 0) {
+			closedAt = MtsLink::ViewerClosedPosition{
+				.documentId = _document->id,
+				.position = (crl::time(state.position % state.length)
+					* 1000
+					/ state.frequency),
+			};
+		}
+	}
 	hide();
+	// Not to the inline one when moved to the separate window.
+	if (closedAt && !_showAsPip) {
+		MtsLink::ViewerClosed().fire_copy(*closedAt);
+	}
 	_helper->clearState();
 	LOG(("MtsLink Viewer: closed, hidden=%1 visible=%2 handle=%3"
 		).arg(Logs::b(isHidden())
@@ -4771,6 +4832,18 @@ void OverlayWidget::show(OpenRequest request) {
 					? *request.cloudTheme()
 					: Data::CloudTheme()),
 				{ request.continueStreaming(), request.startTime() });
+			// MTS Link: the inline video to a separate window at once.
+			if (document && MtsLink::PipRequested() == document->id) {
+				MtsLink::PipRequested() = 0;
+				InvokeQueued(_body, [=] {
+					if (_streamed && _document == document) {
+						switchToPip();
+						// The next videos are opened in the full screen
+						// (not in the separate window, as after its button).
+						_showAsPip = false;
+					}
+				});
+			}
 		}
 		if (!isHidden()) {
 			preloadData(0);
@@ -5139,6 +5212,18 @@ void OverlayWidget::showAndActivate() {
 	updateGeometry();
 #ifdef Q_OS_WIN
 	const auto hwnd = (HWND)_window->winId();
+	// MTS Link: exactly the screen, no 1px "border" of Qt in the full
+	// screen (the whole application has it by default): the content is
+	// to the edges and Windows takes it as a full screen one, the taskbar
+	// is below it.
+	if (const auto handle = _window->windowHandle()) {
+		using namespace QNativeInterface::Private;
+		if (const auto native = handle->nativeInterface<QWindowsWindow>()) {
+			if (native->hasBorderInFullScreen()) {
+				native->setHasBorderInFullScreen(false);
+			}
+		}
+	}
 	BOOL cloakOn = TRUE;
 	DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, &cloakOn, sizeof(cloakOn));
 #endif // Q_OS_WIN
@@ -5166,6 +5251,7 @@ void OverlayWidget::showAndActivate() {
 						DWMWA_CLOAK,
 						&cloakOff,
 						sizeof(cloakOff));
+					refreshTopMost();
 				});
 			});
 			delete base::take(*filter);
@@ -5626,6 +5712,21 @@ void OverlayWidget::initThemePreview() {
 	location.accessDisable();
 }
 
+// MTS Link: the bottom not covered by the taskbar (it may stay above the
+// full screen viewer): the controls, the captions, the thumbnails above it.
+int OverlayWidget::usableBottom() const {
+	const auto screen = _fullscreen ? _window->screen() : nullptr;
+	if (!screen) {
+		return height();
+	}
+	const auto full = screen->geometry();
+	const auto available = screen->availableGeometry();
+	const auto skip = std::max(
+		(full.y() + full.height()) - (available.y() + available.height()),
+		0);
+	return height() - skip;
+}
+
 void OverlayWidget::refreshClipControllerGeometry() {
 	if (!_streamed || !_streamed->controls) {
 		return;
@@ -5637,7 +5738,7 @@ void OverlayWidget::refreshClipControllerGeometry() {
 	}
 	const auto controllerBottom = (_groupThumbs && !_fullScreenVideo)
 		? _groupThumbsTop
-		: height();
+		: usableBottom();
 	const auto skip = st::mediaviewCaptionPadding.bottom();
 	const auto controllerWidth = std::min(
 		st::mediaviewControllerSize.width(),
@@ -6023,7 +6124,31 @@ void OverlayWidget::switchToPip() {
 		_quality,
 		_streamed->instance.shared(),
 		closeAndContinue,
-		[=] { _pip = nullptr; });
+		[=] {
+			// MTS Link: the inline video of the chat continues from here.
+			auto closedAt = std::optional<MtsLink::ViewerClosedPosition>();
+			if (const auto shared = _pip ? _pip->wrapped.shared() : nullptr) {
+				const auto state = shared->player().prepareLegacyState();
+				if (state.length > 0
+					&& state.frequency > 0
+					&& state.position >= 0) {
+					closedAt = MtsLink::ViewerClosedPosition{
+						.documentId = document->id,
+						.position = (crl::time(state.position % state.length)
+							* 1000
+							/ state.frequency),
+					};
+				}
+			}
+			// This lambda is destroyed with the window: only the locals
+			// after that.
+			const auto that = this;
+			that->_showAsPip = false; // The next videos in the full screen.
+			that->_pip = nullptr;
+			if (closedAt) {
+				MtsLink::ViewerClosed().fire_copy(*closedAt);
+			}
+		});
 
 	if (const auto raw = _message) {
 		raw->history()->owner().itemRemoved(

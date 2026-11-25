@@ -44,6 +44,8 @@ enum class Error;
 
 namespace HistoryView {
 
+class ElementDelegate;
+struct VideoCornerStatus;
 class Photo;
 class Reply;
 class TranscribeButton;
@@ -62,6 +64,13 @@ public:
 		not_null<DocumentData*> document,
 		bool spoiler);
 	~Gif();
+
+	// MTS Link: the playing inline video of this list is stopped when it
+	// is out of the visible area (the place is remembered).
+	static void StopInlineVideoOutside(
+		not_null<ElementDelegate*> delegate,
+		int from,
+		int till);
 
 	bool hideMessageText() const override;
 
@@ -185,6 +194,27 @@ private:
 	void startRoundSeeking();
 	void updateRoundSeeking(QRect rthumb, QPoint point);
 
+	// MTS Link: one inline video plays at a time, a paused one stays
+	// paused (till the "Play" button), the button on the loaded ones.
+	[[nodiscard]] bool isInlineVideo() const;
+	[[nodiscard]] bool inlineVideoAllowed() const;
+	[[nodiscard]] bool inlineVideoPlaying() const;
+	[[nodiscard]] bool videoToggleShown() const;
+	[[nodiscard]] QRect videoToggleRect(QRect thumb) const;
+	[[nodiscard]] QRect videoPipRect(QRect thumb) const;
+	void openInlineVideoPip();
+	void paintVideoToggle(
+		Painter &p,
+		const PaintContext &context,
+		QRect thumb) const;
+	void toggleInlineVideo();
+	void releaseInlineVideo();
+	[[nodiscard]] bool inlineVideoSoundOn() const;
+	void toggleInlineVideoSound();
+	void restartInlineVideoAt(crl::time position);
+	[[nodiscard]] crl::time inlineVideoPosition() const;
+	[[nodiscard]] VideoCornerStatus cornerStatus(QPoint position) const;
+
 	void createStreamedPlayer();
 	void checkStreamedIsStarted() const;
 	void startStreamedPlayer() const;
@@ -271,6 +301,14 @@ private:
 	mutable std::shared_ptr<Data::DocumentMedia> _dataMedia;
 	mutable std::shared_ptr<Data::PhotoMedia> _videoCoverMedia;
 	mutable std::unique_ptr<Image> _videoThumbnailFrame;
+	mutable ClickHandlerPtr _videoTogglel;
+	mutable ClickHandlerPtr _soundTogglel;
+	mutable ClickHandlerPtr _videoPipl;
+	mutable QString _restartStatusText;
+	rpl::lifetime _viewerClosedLifetime;
+	// MTS Link: the size the layout was counted by (no dimensions of the
+	// videos from the server: the loaded thumbnail gives the real one).
+	mutable QSize _layoutVideoSize;
 	QString _downloadSize;
 	struct {
 		Ui::Text::String text = { 1 };

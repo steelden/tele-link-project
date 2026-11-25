@@ -462,6 +462,8 @@ private:
 	void restartAtSeekPosition(crl::time position);
 	void flushPendingFrameStep();
 
+	[[nodiscard]] int usableBottom() const;
+	void refreshTopMost(bool closing = false);
 	void refreshClipControllerGeometry();
 	void refreshCaptionGeometry();
 

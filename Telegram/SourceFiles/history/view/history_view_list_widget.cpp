@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_list_widget.h"
 
+#include "history/view/media/history_view_gif.h"
+
 #include "history/view/history_view_about_view.h"
 #include "base/unixtime.h"
 #include "base/qt/qt_key_modifiers.h"
@@ -1555,6 +1557,8 @@ void ListWidget::visibleTopBottomUpdated(
 	}
 	_delegate->listVisibleAreaUpdated();
 	session().data().itemVisibilitiesUpdated();
+	// MTS Link: the inline video out of the visible area is stopped.
+	Gif::StopInlineVideoOutside(this, _visibleTop, _visibleBottom);
 	_applyUpdatedScrollState.call();
 
 	_emojiInteractions->visibleAreaUpdated(_visibleTop, _visibleBottom);

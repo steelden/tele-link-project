@@ -590,6 +590,14 @@ historyGroupAboutSkip: 8px;
 
 historyVideoDownloadSize: 44px;
 historyVideoMuteSize: 22px;
+// MTS Link: the sound of an inline video is on.
+historyVideoSoundOn: icon {{ "player/player_volume_on", historyFileThumbIconFg }};
+historyVideoSoundOff: icon {{ "player/player_volume_off", historyFileThumbIconFg }};
+historyVideoSoundIconSize: 16px;
+// MTS Link: the separate window of an inline video.
+historyVideoPip: icon {{ "player/player_pip", historyFileThumbIconFg }};
+historyVideoPipSize: 36px;
+historyVideoPipSkip: 12px;
 historyVideoRadialLine: msgFileRadialLine;
 historyVideoTimestampProgressLine: 4px;
 

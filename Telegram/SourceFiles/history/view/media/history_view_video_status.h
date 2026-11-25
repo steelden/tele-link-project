@@ -27,6 +27,7 @@ struct VideoCornerStatus {
 	bool download = false;
 	bool loading = false;
 	bool mute = false;
+	bool soundOn = false; // MTS Link: the "sound" icon instead of "mute".
 };
 
 void PaintVideoCornerStatus(
@@ -35,6 +36,8 @@ void PaintVideoCornerStatus(
 	const VideoCornerStatus &status);
 
 [[nodiscard]] QRect VideoCornerDownloadRect(QPoint position);
+// MTS Link: the plate of the status (the clicks toggle the sound).
+[[nodiscard]] QRect VideoCornerStatusRect(const VideoCornerStatus &status);
 
 void PaintVideoTimestampMark(
 	Painter &p,

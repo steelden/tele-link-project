@@ -63,6 +63,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document_media.h"
 #include "data/data_web_page.h"
 #include "storage/storage_account.h"
+#include "mtslink/inline_video_sync.h"
+#include "history/view/media/history_view_video_status.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_style.h"
 
@@ -157,6 +159,25 @@ using ::Media::ValidFrameSize;
 
 } // namespace
 
+namespace {
+
+// MTS Link: the inline videos of the chats.
+struct InlineVideos {
+	base::flat_set<FullMsgId> paused; // By the user, till "Play".
+	base::flat_set<FullMsgId> sound; // The sound is on (off by default).
+	// The sound is off while the viewer is shown, on again after it.
+	base::flat_set<FullMsgId> soundAfterViewer;
+	const Gif *playing = nullptr;
+	base::flat_set<const Gif*> waiting; // For the playing one to stop.
+};
+
+[[nodiscard]] InlineVideos &Videos() {
+	static auto result = InlineVideos();
+	return result;
+}
+
+} // namespace
+
 struct Gif::Streamed {
 	Streamed(
 		not_null<DocumentData*> chosen,
@@ -167,6 +188,9 @@ struct Gif::Streamed {
 	::Media::Streaming::FrameRequest frozenRequest;
 	QImage frozenFrame;
 	QString frozenStatusText;
+	// MTS Link: the frame shown while the player is made again.
+	::Media::Streaming::FrameRequest lastRequest;
+	bool withSound = false; // The player was started with the sound.
 };
 
 Gif::Streamed::Streamed(
@@ -231,6 +255,19 @@ Gif::Gif(
 		});
 	} else {
 		setDocumentLinks(_data, realParent, [=] {
+			// MTS Link: the viewer starts at the frame shown inline.
+			if (isInlineVideo() && activeOwnStreamed()) {
+				const auto position = inlineVideoPosition();
+				// The sound is of the viewer only (the player made again
+				// resets the remembered position, so it is set after).
+				if (inlineVideoSoundOn()) {
+					Videos().soundAfterViewer.emplace(_realParent->fullId());
+					toggleInlineVideoSound();
+				}
+				_data->session().local().setMediaLastPlaybackPosition(
+					_data->id,
+					position);
+			}
 			if (!_data->createMediaView()->canBePlayed()
 				|| !_data->isAnimation()
 				|| _data->isVideoMessage()
@@ -243,6 +280,45 @@ Gif::Gif(
 	}
 
 	setStatusSize(Ui::FileStatusSizeReady);
+
+	// MTS Link: the viewer is closed, the inline one continues from there.
+	if (isInlineVideo()) {
+		MtsLink::ViewerClosed().events(
+		) | rpl::filter([=](const MtsLink::ViewerClosedPosition &data) {
+			return (data.documentId == _data->id);
+		}) | rpl::on_next([=](const MtsLink::ViewerClosedPosition &data) {
+			// The sound of the inline one again (if it was on).
+			const auto id = _realParent->fullId();
+			if (Videos().soundAfterViewer.remove(id)) {
+				Videos().sound.emplace(id);
+			}
+			if (inlineVideoPlaying()) {
+				restartInlineVideoAt(data.position);
+			} else {
+				_data->session().local().setMediaLastPlaybackPosition(
+					_data->id,
+					data.position);
+				// The player is shared with the viewer (it played there):
+				// paused again at the place of the viewer.
+				if (_streamed && Videos().paused.contains(id)) {
+					restartInlineVideoAt(data.position);
+				} else if (!_streamed
+					&& Videos().paused.contains(id)
+					&& !_seekLastFrame.isNull()) {
+					// Back from the separate window: paused at its place.
+					createStreamedPlayer();
+					if (_streamed) {
+						_streamed->instance.pause();
+						_data->session().local().setMediaLastPlaybackPosition(
+							_data->id,
+							data.position);
+						releaseInlineVideo();
+						repaint();
+					}
+				}
+			}
+		}, _viewerClosedLifetime);
+	}
 
 	if (_data->isVideoMessage()) {
 		_roundSeek = std::make_unique<VideoMessageSeek>([=] { repaint(); });
@@ -277,6 +353,10 @@ Gif::Gif(
 }
 
 Gif::~Gif() {
+	Videos().waiting.remove(this);
+	if (Videos().playing == this) {
+		Videos().playing = nullptr;
+	}
 	if (_streamed || _dataMedia) {
 		if (_streamed) {
 			_data->owner().streaming().keepAlive(_data);
@@ -374,7 +454,8 @@ QSize Gif::countThumbSize(int &inOutWidthMax) const {
 		}
 		return st::maxGifSize;
 	}();
-	const auto size = style::ConvertScale(videoSize());
+	_layoutVideoSize = videoSize();
+	const auto size = style::ConvertScale(_layoutVideoSize);
 	if (hostedInstantView) {
 		inOutWidthMax = std::max(inOutWidthMax, 1);
 	} else {
@@ -554,6 +635,16 @@ QSize Gif::videoSize() const {
 		return streamed->player().videoSize();
 	} else if (!_data->dimensions.isEmpty()) {
 		return _data->dimensions;
+	} else if (const auto thumbnail = _dataMedia
+			? _dataMedia->thumbnail()
+			: nullptr) {
+		// The real frame of the video (the location has no real size),
+		// small: only the aspect ratio of it, as a usual video.
+		constexpr auto kAssumedSide = 1280;
+		return thumbnail->size().scaled(
+			kAssumedSide,
+			kAssumedSide,
+			Qt::KeepAspectRatio);
 	} else if (_data->hasThumbnail()) {
 		const auto &location = _data->thumbnailLocation();
 		return QSize(location.width(), location.height());
@@ -632,6 +723,11 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 
 	ensureDataMediaCreated();
 	_dataMedia->automaticLoad(_realParent->fullId(), _realParent);
+	// MTS Link: the real size is known (the thumbnail, the video).
+	if (!_layoutVideoSize.isEmpty() && videoSize() != _layoutVideoSize) {
+		_layoutVideoSize = videoSize();
+		history()->owner().requestViewResize(_parent);
+	}
 	const auto item = _parent->data();
 	const auto loaded = dataLoaded();
 	const auto displayLoading = (item->isSending() || _data->displayLoading());
@@ -690,7 +786,8 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 		&& !_streamed
 		&& !activeRoundPlaying
 		&& !_seeking
-		&& !fullHiddenBySpoiler;
+		&& !fullHiddenBySpoiler
+		&& inlineVideoAllowed();
 	const auto shouldBePlaying = !autoplayUnderCursor() || underCursor(true);
 	if (!shouldBePlaying && _videoTimestamp != 0) {
 		const_cast<Gif*>(this)->stopAnimation();
@@ -743,6 +840,7 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 		if (!_seekLastFrame.isNull()) {
 			_seekLastFrame = QImage();
 		}
+		_restartStatusText = QString();
 		auto paused = context.paused || !shouldBePlaying;
 		auto request = ::Media::Streaming::FrameRequest{
 			.outer = (ScaledInstantViewMediaSize(
@@ -779,6 +877,9 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 				activeOwnPlaying->frozenStatusText = QString();
 			}
 
+			if (activeOwnPlaying && !activeRoundPlaying) {
+				activeOwnPlaying->lastRequest = request;
+			}
 			const auto frame = streamed->frameWithInfo(request);
 			p.drawImage(rthumb, frame.image);
 			if (_seeking) {
@@ -920,6 +1021,9 @@ void Gif::draw(Painter &p, const PaintContext &context) const {
 		PainterHighQualityEnabler hq(p);
 		p.drawEllipse(muteRect);
 		sti->historyVideoMessageMute.paintInCenter(p, muteRect);
+	}
+	if (!fullHiddenBySpoiler && videoToggleShown()) {
+		paintVideoToggle(p, context, rthumb);
 	}
 
 	const auto skipDrawingSurrounding = context.skipDrawingParts
@@ -1356,12 +1460,22 @@ void Gif::drawCornerStatus(
 	if (!needCornerStatusDisplay()) {
 		return;
 	}
+	PaintVideoCornerStatus(p, context, cornerStatus(position));
+}
+
+VideoCornerStatus Gif::cornerStatus(QPoint position) const {
 	const auto own = activeOwnStreamed();
 	const auto download = downloadInCorner()
 		&& !dataLoaded()
 		&& !_data->loadedInMediaCache();
-	PaintVideoCornerStatus(p, context, {
-		.text = ((own && !own->frozenStatusText.isEmpty())
+	// MTS Link: the player is made again (the sound): the same text.
+	const auto restarting = !own
+		&& _streamed
+		&& !_restartStatusText.isEmpty();
+	return {
+		.text = (restarting
+			? _restartStatusText
+			: (own && !own->frozenStatusText.isEmpty())
 			? own->frozenStatusText
 			: _statusText),
 		.downloadSize = _downloadSize,
@@ -1373,7 +1487,8 @@ void Gif::drawCornerStatus(
 		.download = download,
 		.loading = _data->loading(),
 		.mute = (_streamed && _data->isVideoFile() && !download),
-	});
+		.soundOn = (_streamed && inlineVideoSoundOn()),
+	};
 }
 
 TextState Gif::cornerStatusTextState(
@@ -1381,6 +1496,25 @@ TextState Gif::cornerStatusTextState(
 		StateRequest request,
 		QPoint position) const {
 	auto result = TextState(_parent);
+	// MTS Link: the status of the playing inline video toggles the sound.
+	if (needCornerStatusDisplay()
+		&& isInlineVideo()
+		&& _streamed
+		&& VideoCornerStatusRect(cornerStatus(position)).contains(point)) {
+		if (!_soundTogglel) {
+			const auto weak = base::make_weak(_parent.get());
+			const auto self = this;
+			_soundTogglel = std::make_shared<LambdaClickHandler>([=] {
+				const auto view = weak.get();
+				const auto media = view ? view->media() : nullptr;
+				if (media == self) {
+					const_cast<Gif*>(self)->toggleInlineVideoSound();
+				}
+			});
+		}
+		result.link = _soundTogglel;
+		return result;
+	}
 	if (!needCornerStatusDisplay() || !downloadInCorner() || dataLoaded()) {
 		return result;
 	}
@@ -1551,6 +1685,37 @@ TextState Gif::textState(QPoint point, StateRequest request) const {
 		} else if (_seekl && isRoundSeekable()) {
 			_seekStatePoint = point;
 			result.link = _seekl;
+		} else if (videoToggleShown()
+			&& videoPipRect(
+				QRect(usex + paintx, painty, usew, painth)).contains(point)) {
+			if (!_videoPipl) {
+				const auto weak = base::make_weak(_parent.get());
+				const auto self = this;
+				_videoPipl = std::make_shared<LambdaClickHandler>([=] {
+					const auto view = weak.get();
+					const auto media = view ? view->media() : nullptr;
+					if (media == self) {
+						const_cast<Gif*>(self)->openInlineVideoPip();
+					}
+				});
+			}
+			result.link = _videoPipl;
+		} else if (videoToggleShown()
+			&& videoToggleRect(
+				QRect(usex + paintx, painty, usew, painth)).contains(point)) {
+			if (!_videoTogglel) {
+				// The media of the view may be made again: found by it.
+				const auto weak = base::make_weak(_parent.get());
+				const auto self = this;
+				_videoTogglel = std::make_shared<LambdaClickHandler>([=] {
+					const auto view = weak.get();
+					const auto media = view ? view->media() : nullptr;
+					if (media == self) {
+						const_cast<Gif*>(self)->toggleInlineVideo();
+					}
+				});
+			}
+			result.link = _videoTogglel;
 		} else {
 			result.link = currentVideoLink(true);
 		}
@@ -2591,14 +2756,28 @@ void Gif::startStreamedPlayer() const {
 	options.audioId = AudioMsgId(_data, _realParent->fullId());
 	options.waitForMarkAsShown = true;
 	//if (!_streamed->withSound) {
-	options.mode = ::Media::Streaming::Mode::Video;
-	options.loop = true;
+	// MTS Link: with the sound no loop (the player can't), it is started
+	// again from the beginning when finished (as a stopped one).
+	const auto withSound = inlineVideoSoundOn();
+	_streamed->withSound = withSound;
+	options.mode = withSound
+		? ::Media::Streaming::Mode::Both
+		: ::Media::Streaming::Mode::Video;
+	options.loop = !withSound;
+	// With the sound the frames go on when not painted (the application
+	// is not active, minimized): the video stays with the sound.
+	if (withSound) {
+		options.waitForMarkAsShown = false;
+	}
 	options.position = _videoTimestamp
 		? (_videoTimestamp * crl::time(1000))
 		: _parent->history()->session().local().mediaLastPlaybackPosition(
 			_data->id);
 	//}
 	_streamed->instance.play(options);
+	if (isInlineVideo()) {
+		_data->session().local().setMediaLastPlaybackPosition(_data->id, 0);
+	}
 }
 
 void Gif::checkStreamedIsStarted() const {
@@ -2606,7 +2785,10 @@ void Gif::checkStreamedIsStarted() const {
 		return;
 	}
 	if (_streamed->instance.active()) {
-		if (_streamed->instance.paused()) {
+		// MTS Link: not a paused by the user inline video.
+		const auto userPaused = isInlineVideo()
+			&& Videos().paused.contains(_realParent->fullId());
+		if (_streamed->instance.paused() && !userPaused) {
 			_streamed->instance.resume();
 		}
 	} else if (!_streamed->instance.failed()) {
@@ -2619,11 +2801,279 @@ void Gif::setStreamed(std::unique_ptr<Streamed> value) {
 	const auto set = (!_streamed && value);
 	_streamed = std::move(value);
 	if (set) {
+		if (isInlineVideo()) {
+			auto &videos = Videos();
+			videos.waiting.remove(this);
+			videos.playing = this;
+		}
 		history()->owner().registerHeavyViewPart(_parent);
 		togglePollingStory(true);
 	} else if (removed) {
 		_videoPosition = 0;
+		releaseInlineVideo();
 		_parent->checkHeavyPart();
+	}
+}
+
+bool Gif::isInlineVideo() const {
+	return _data->isVideoFile()
+		&& !_data->isVideoMessage()
+		&& (_parent->context() != Context::MediaEditor);
+}
+
+bool Gif::inlineVideoAllowed() const {
+	if (!isInlineVideo()) {
+		return true;
+	}
+	auto &videos = Videos();
+	if (videos.paused.contains(_realParent->fullId())) {
+		return false;
+	} else if (videos.playing && videos.playing != this) {
+		// Started when the playing one stops.
+		videos.waiting.emplace(this);
+		return false;
+	}
+	return true;
+}
+
+bool Gif::inlineVideoPlaying() const {
+	return _streamed && (Videos().playing == this);
+}
+
+// Only for the loaded videos playing inline (a single one, not grouped).
+bool Gif::videoToggleShown() const {
+	ensureDataMediaCreated();
+	return isInlineVideo()
+		&& dataLoaded()
+		&& !(_spoiler && !_spoiler->revealed)
+		&& autoplayEligible(true);
+}
+
+QRect Gif::videoToggleRect(QRect thumb) const {
+	const auto size = st::msgFileLayout.thumbSize;
+	return QRect(
+		thumb.x() + (thumb.width() - size) / 2,
+		thumb.y() + (thumb.height() - size) / 2,
+		size,
+		size);
+}
+
+QRect Gif::videoPipRect(QRect thumb) const {
+	const auto toggle = videoToggleRect(thumb);
+	const auto size = st::historyVideoPipSize;
+	return QRect(
+		toggle.x() + toggle.width() + st::historyVideoPipSkip,
+		toggle.y() + (toggle.height() - size) / 2,
+		size,
+		size);
+}
+
+void Gif::openInlineVideoPip() {
+	auto &videos = Videos();
+	const auto id = _realParent->fullId();
+	const auto position = activeOwnStreamed()
+		? inlineVideoPosition()
+		: _data->session().local().mediaLastPlaybackPosition(_data->id);
+	// Paused here (the shown frame stays), played there (from the same
+	// place).
+	videos.paused.emplace(id);
+	if (const auto own = activeOwnStreamed()
+		; own && !own->lastRequest.outer.isEmpty()) {
+		_seekLastFrame = own->instance.frame(own->lastRequest);
+	}
+	if (_streamed) {
+		stopAnimation();
+	}
+	_data->session().local().setMediaLastPlaybackPosition(
+		_data->id,
+		position);
+	MtsLink::PipRequested() = _data->id;
+	_parent->delegate()->elementOpenDocument(_data, id, true);
+	repaint();
+}
+
+void Gif::StopInlineVideoOutside(
+		not_null<ElementDelegate*> delegate,
+		int from,
+		int till) {
+	const auto gif = const_cast<Gif*>(Videos().playing);
+	if (!gif || !gif->_streamed) {
+		return;
+	}
+	const auto view = gif->_parent.get();
+	if (view->delegate() != delegate
+		|| delegate->elementIntersectsRange(view, from, till)) {
+		return;
+	}
+	// Played again when shown (from the remembered place).
+	gif->stopAnimation();
+}
+
+// "Play" is always shown on a stopped one, "Pause" under the cursor only.
+void Gif::paintVideoToggle(
+		Painter &p,
+		const PaintContext &context,
+		QRect thumb) const {
+	const auto playing = inlineVideoPlaying();
+	const auto over = _videoTogglel
+		&& ClickHandler::showAsActive(_videoTogglel);
+	const auto pipOver = _videoPipl
+		&& ClickHandler::showAsActive(_videoPipl);
+	if (playing
+		&& !over
+		&& !pipOver
+		&& !ClickHandler::showAsActive(_openl)) {
+		return;
+	}
+	{
+		// The separate window (picture in picture) to the right of it.
+		const auto pip = videoPipRect(thumb);
+		p.setPen(Qt::NoPen);
+		p.setBrush(context.selected()
+			? context.st->msgDateImgBgSelected()
+			: pipOver
+			? context.st->msgDateImgBgOver()
+			: context.st->msgDateImgBg());
+		{
+			PainterHighQualityEnabler hq(p);
+			p.drawEllipse(pip);
+		}
+		st::historyVideoPip.paintInCenter(p, pip);
+	}
+	const auto st = context.st;
+	const auto sti = context.imageStyle();
+	const auto inner = videoToggleRect(thumb);
+	p.setPen(Qt::NoPen);
+	p.setBrush(context.selected()
+		? st->msgDateImgBgSelected()
+		: over
+		? st->msgDateImgBgOver()
+		: st->msgDateImgBg());
+	{
+		PainterHighQualityEnabler hq(p);
+		p.drawEllipse(inner);
+	}
+	const auto &icon = playing
+		? sti->historyFileThumbPause
+		: sti->historyFileThumbPlay;
+	icon.paintInCenter(p, inner);
+}
+
+void Gif::toggleInlineVideo() {
+	auto &videos = Videos();
+	const auto id = _realParent->fullId();
+	if (inlineVideoPlaying()) {
+		// Paused at the frame (the player is kept while shown), the place
+		// is remembered (for the viewer, for the player made again).
+		videos.paused.emplace(id);
+		const auto position = inlineVideoPosition();
+		_data->session().local().setMediaLastPlaybackPosition(
+			_data->id,
+			position);
+		_streamed->instance.pause();
+		// Another one may play.
+		releaseInlineVideo();
+	} else {
+		videos.paused.remove(id);
+		// This one instead of the playing one (that one waits).
+		if (const auto other = videos.playing; other && other != this) {
+			const_cast<Gif*>(other)->stopAnimation();
+			videos.waiting.emplace(other);
+		}
+		videos.waiting.remove(this);
+		if (_streamed
+			&& _streamed->instance.active()
+			&& _streamed->withSound != inlineVideoSoundOn()) {
+			// The sound was changed while paused: from the paused place.
+			videos.playing = this;
+			const auto position = _data->session().local(
+				).mediaLastPlaybackPosition(_data->id);
+			restartInlineVideoAt(position);
+		} else if (_streamed && _streamed->instance.active()) {
+			videos.playing = this;
+			_streamed->instance.resume();
+		} else {
+			if (_streamed) {
+				stopAnimation();
+			}
+			videos.playing = nullptr;
+			playAnimation(true);
+		}
+	}
+	repaint();
+}
+
+bool Gif::inlineVideoSoundOn() const {
+	return isInlineVideo()
+		&& Videos().sound.contains(_realParent->fullId());
+}
+
+crl::time Gif::inlineVideoPosition() const {
+	if (const auto own = activeOwnStreamed()) {
+		const auto state = own->instance.player().prepareLegacyState();
+		if (state.length > 0 && state.frequency > 0 && state.position >= 0) {
+			// The looped player counts all the loops.
+			return crl::time(state.position % state.length)
+				* 1000
+				/ state.frequency;
+		}
+	}
+	return 0;
+}
+
+void Gif::toggleInlineVideoSound() {
+	auto &videos = Videos();
+	const auto id = _realParent->fullId();
+	const auto on = !videos.sound.contains(id);
+	if (on) {
+		videos.sound.emplace(id);
+	} else {
+		videos.sound.remove(id);
+	}
+	if (_streamed && !videos.paused.contains(id)) {
+		// The player again with the sound (or without), at the same place.
+		restartInlineVideoAt(inlineVideoPosition());
+	}
+	// Paused: the player is made again when resumed (at the paused place).
+	repaint();
+}
+
+void Gif::restartInlineVideoAt(crl::time position) {
+	_data->session().local().setMediaLastPlaybackPosition(
+		_data->id,
+		position);
+	if (_streamed && !_streamed->instance.playerLocked()) {
+		// The shown frame till the first new one (no thumbnail flash).
+		if (const auto own = activeOwnStreamed()
+			; own && !own->lastRequest.outer.isEmpty()) {
+			_seekLastFrame = own->instance.frame(own->lastRequest);
+			_restartStatusText = own->frozenStatusText.isEmpty()
+				? _statusText
+				: own->frozenStatusText;
+		}
+		_streamed->instance.stop();
+		startStreamedPlayer();
+		if (isInlineVideo()
+			&& Videos().paused.contains(_realParent->fullId())) {
+			// Paused by the user: stays paused (at the same place).
+			_streamed->instance.pause();
+			_data->session().local().setMediaLastPlaybackPosition(
+				_data->id,
+				position);
+		}
+	}
+	repaint();
+}
+
+void Gif::releaseInlineVideo() {
+	auto &videos = Videos();
+	if (videos.playing != this) {
+		return;
+	}
+	videos.playing = nullptr;
+	// The waiting ones try again (the first painted one starts).
+	for (const auto gif : base::take(videos.waiting)) {
+		gif->repaint();
 	}
 }
 
@@ -2652,7 +3102,9 @@ void Gif::repaintStreamedContent() {
 	if (own && !own->frozenFrame.isNull()) {
 		return;
 	} else if (_parent->delegate()->elementAnimationsPaused()
-		&& !activeRoundStreamed()) {
+		&& !activeRoundStreamed()
+		// MTS Link: the inline video with the sound is shown with it.
+		&& !(inlineVideoSoundOn() && inlineVideoPlaying())) {
 		return;
 	}
 	repaint();
@@ -2670,6 +3122,10 @@ void Gif::streamingReady(::Media::Streaming::Information &&info) {
 	const auto effective = measured.isEmpty()
 		? InlineFrameSize(chosen)
 		: measured;
+	// MTS Link: the size is kept when stopped (none from the server).
+	if (_data->dimensions.isEmpty() && !measured.isEmpty()) {
+		_data->dimensions = measured;
+	}
 	if (!ValidFrameSize(effective, maxInlineArea())) {
 		// A document with no VideoData can't remember the measurement,
 		// so the refusal is remembered on the element instead. Such a
@@ -2683,6 +3139,12 @@ void Gif::streamingReady(::Media::Streaming::Information &&info) {
 
 void Gif::stopAnimation() {
 	if (_streamed) {
+		// MTS Link: the place of the inline video is remembered.
+		if (isInlineVideo() && activeOwnStreamed()) {
+			_data->session().local().setMediaLastPlaybackPosition(
+				_data->id,
+				inlineVideoPosition());
+		}
 		setStreamed(nullptr);
 		history()->owner().requestViewResize(_parent);
 	}
