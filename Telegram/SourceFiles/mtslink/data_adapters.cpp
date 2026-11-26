@@ -10929,27 +10929,40 @@ void createGroupChat(
 		});
 }
 
-void findOrganizationMember(
-		not_null<Main::Session*> session,
-		const QString &email,
-		const QString &name,
+namespace {
+
+// The words of a name of Outlook: "Ivanov Ivan Ivanovich", "Ivanov, Ivan",
+// "Ivan Ivanov (Department)".
+[[nodiscard]] QStringList OutlookNameWords(const QString &name) {
+	static const auto brackets = QRegularExpression(u"\\([^)]*\\)"_q);
+	static const auto separators = QRegularExpression(u"[\\s,;]+"_q);
+	auto clean = name;
+	clean.remove(brackets);
+	return clean.split(separators, Qt::SkipEmptyParts);
+}
+
+void FindOrganizationMemberBy(
+		base::weak_ptr<Main::Session> weak,
+		QString email,
+		QStringList words,
+		QStringList queries,
 		Fn<void(UserData*)> done) {
-	const auto mts = session->account().mtsLinkSession();
-	if (!mts || !mts->users()) {
+	const auto session = weak.get();
+	const auto mts = session ? session->account().mtsLinkSession() : nullptr;
+	if (!mts || !mts->users() || queries.isEmpty()) {
 		done(nullptr);
 		return;
 	}
-	const auto weak = base::make_weak(session);
-	const auto query = email.isEmpty() ? name : email;
+	const auto query = queries.takeFirst();
 	mts->users()->searchMembers(
 		query,
 		0,
-		5,
+		10,
 		[=](QList<Api::MemberProfile> profiles) {
-			if (!weak) {
+			const auto strong = weak.get();
+			if (!strong) {
 				return;
 			}
-			const auto words = name.split(QChar(' '), Qt::SkipEmptyParts);
 			const auto byName = [&](const Api::MemberProfile &profile) {
 				return !profile.firstName.isEmpty()
 					&& !profile.lastName.isEmpty()
@@ -10962,17 +10975,43 @@ void findOrganizationMember(
 					? byName(profile)
 					: !profile.email.compare(email, Qt::CaseInsensitive);
 			});
-			LOG(("MtsLink Outlook: the member '%1' %2 (%3 results)"
-				).arg(query
-				).arg((i != profiles.end()) ? "found" : "not found"
-				).arg(profiles.size()));
-			if (i == profiles.end()) {
-				done(nullptr);
-				return;
+			if (i != profiles.end()) {
+				applyUserData(strong, *i);
+				done(strong->data().user(::UserId(uuidToBareId(i->userId))));
+			} else {
+				// The next query: by the other words of the name.
+				FindOrganizationMemberBy(weak, email, words, queries, done);
 			}
-			applyUserData(weak.get(), *i);
-			done(weak->data().user(::UserId(uuidToBareId(i->userId))));
 		});
+}
+
+} // namespace
+
+void findOrganizationMember(
+		not_null<Main::Session*> session,
+		const QString &email,
+		const QString &name,
+		Fn<void(UserData*)> done) {
+	const auto words = OutlookNameWords(name);
+	auto queries = QStringList();
+	if (!email.isEmpty()) {
+		queries.push_back(email);
+	} else if (!words.isEmpty()) {
+		// The whole name, then each of the first two words (the last name
+		// and the first name in any order): matched by both of them.
+		queries.push_back(words.join(QChar(' ')));
+		for (const auto &word : words.mid(0, 2)) {
+			if (word.size() > 1 && !queries.contains(word)) {
+				queries.push_back(word);
+			}
+		}
+	}
+	FindOrganizationMemberBy(
+		base::make_weak(session),
+		email,
+		words,
+		queries,
+		std::move(done));
 }
 
 void searchOrganizationMembers(

@@ -8,7 +8,7 @@ The meetings of the default calendar of Outlook (Windows, COM).
 
 namespace MtsLink {
 
-// A participant: the name as in Outlook, the email if resolved there.
+// A participant: the name as in Outlook, the email if the name is it.
 struct OutlookPerson {
 	QString name;
 	QString email;
