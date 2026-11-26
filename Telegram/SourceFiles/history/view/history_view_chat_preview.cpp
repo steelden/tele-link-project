@@ -25,6 +25,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_about_view.h"
 #include "history/view/history_view_corner_buttons.h"
 #include "history/view/history_view_list_widget.h"
+#include "history/view/history_view_element.h"
+#include "mtslink/data_adapters.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
@@ -638,10 +640,71 @@ void Item::listDeleteRequest() {
 void Item::listTryProcessKeyInput(not_null<QKeyEvent*> e) {
 }
 
+// MTS Link: the ids of the messages are hashes (not growing), the viewer
+// by the ids shows not the newest ones. The newest loaded messages are
+// taken from the history in their order (as the chat shows them).
+[[nodiscard]] rpl::producer<Data::MessagesSlice> MtsLinkNewestViewer(
+		not_null<History*> history,
+		int limit) {
+	return [=](auto consumer) {
+		auto lifetime = rpl::lifetime();
+		const auto push = [=] {
+			auto newest = std::vector<FullMsgId>();
+			auto total = 0;
+			for (auto b = history->blocks.rbegin()
+				; b != history->blocks.rend()
+				; ++b) {
+				const auto &messages = (*b)->messages;
+				for (auto m = messages.rbegin(); m != messages.rend(); ++m) {
+					if (int(newest.size()) < limit) {
+						newest.push_back((*m)->data()->fullId());
+					}
+					++total;
+				}
+			}
+			ranges::reverse(newest);
+			auto result = Data::MessagesSlice();
+			result.nearestToAround = newest.empty()
+				? FullMsgId()
+				: newest.back();
+			result.ids = std::move(newest);
+			result.skippedBefore = total - int(result.ids.size());
+			result.skippedAfter = 0;
+			result.fullCount = total;
+			consumer.put_next(std::move(result));
+		};
+		push();
+		const auto owner = &history->owner();
+		rpl::merge(
+			owner->historyChanged(
+			) | rpl::filter([=](not_null<History*> changed) {
+				return (changed == history);
+			}) | rpl::to_empty,
+			owner->newItemAdded(
+			) | rpl::filter([=](not_null<HistoryItem*> item) {
+				return (item->history() == history);
+			}) | rpl::to_empty,
+			owner->itemRemoved(
+			) | rpl::filter([=](not_null<const HistoryItem*> item) {
+				return (item->history() == history);
+			}) | rpl::to_empty
+		) | rpl::on_next([=] {
+			// After the changes of the blocks are finished.
+			crl::on_main(history, push);
+		}, lifetime);
+		return lifetime;
+	};
+}
+
 rpl::producer<Data::MessagesSlice> Item::listSource(
 		Data::MessagePosition aroundId,
 		int limitBefore,
 		int limitAfter) {
+	if (!_replies
+		&& !_sublist
+		&& MtsLink::hasChatId(_history->peer->id)) {
+		return MtsLinkNewestViewer(_history, limitBefore + limitAfter + 1);
+	}
 	return _replies
 		? _replies->source(aroundId, limitBefore, limitAfter)
 		: _sublist
