@@ -66,6 +66,9 @@ private:
 	void paintEvent(QPaintEvent *e) override;
 
 	void setIndex(int index);
+	// The meeting of a clicked reminder: expanded, scrolled to, flashed.
+	void showPendingMeeting();
+	void scrollToPendingRow();
 	void showMenu();
 	void rebuild();
 	void updateControlsGeometry();

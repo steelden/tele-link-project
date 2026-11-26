@@ -258,6 +258,44 @@ void SetDate(Variant &variant, const QDateTime &value) {
 		1);
 }
 
+// The email of a name of the address book (Exchange or SMTP), once for a
+// name while the app is running (under the mutex of Outlook).
+[[nodiscard]] QString ResolveEmail(IDispatch *space, const QString &name) {
+	static auto cache = QHash<QString, QString>();
+	const auto i = cache.constFind(name);
+	if (i != cache.constEnd()) {
+		return *i;
+	}
+	auto email = QString();
+	auto arg = Variant(name);
+	const auto recipient = GetDispatch(
+		space,
+		L"CreateRecipient",
+		DISPATCH_METHOD,
+		&arg.value,
+		1);
+	if (recipient) {
+		Invoke(recipient.Get(), L"Resolve", DISPATCH_METHOD, nullptr, 0, nullptr);
+		if (GetNumber(recipient.Get(), L"Resolved") != 0) {
+			const auto entry = GetDispatch(recipient.Get(), L"AddressEntry");
+			if (const auto exchange = GetDispatch(
+					entry.Get(),
+					L"GetExchangeUser",
+					DISPATCH_METHOD)) {
+				email = GetString(exchange.Get(), L"PrimarySmtpAddress");
+			}
+			if (email.isEmpty()) {
+				const auto address = GetString(entry.Get(), L"Address");
+				if (address.contains(QChar('@'))) {
+					email = address;
+				}
+			}
+		}
+	}
+	cache.insert(name, email.trimmed());
+	return email.trimmed();
+}
+
 [[nodiscard]] std::optional<std::vector<OutlookMeeting>> LoadMeetings(
 		const QDateTime &from,
 		const QDateTime &till) {
@@ -317,6 +355,34 @@ void SetDate(Variant &variant, const QDateTime &value) {
 			.recurring = (GetNumber(item.Get(), L"IsRecurring") != 0),
 			.allDay = (GetNumber(item.Get(), L"AllDayEvent") != 0),
 		};
+		const auto person = [&](const QString &name) {
+			return OutlookPerson{
+				.name = name,
+				.email = ResolveEmail(space.Get(), name),
+			};
+		};
+		const auto names = [&](const QString &text) {
+			auto result = std::vector<OutlookPerson>();
+			for (const auto &name : text.split(QChar(';'))) {
+				const auto trimmed = name.trimmed();
+				if (!trimmed.isEmpty()
+					&& !ranges::contains(
+						result,
+						trimmed,
+						&OutlookPerson::name)) {
+					result.push_back(person(trimmed));
+				}
+			}
+			return result;
+		};
+		if (const auto organizer = GetString(
+				item.Get(),
+				L"Organizer").trimmed(); !organizer.isEmpty()) {
+			meeting.organizer = person(organizer);
+		}
+		meeting.required = names(GetString(item.Get(), L"RequiredAttendees"));
+		meeting.optional = names(GetString(item.Get(), L"OptionalAttendees"));
+		meeting.response = int(GetNumber(item.Get(), L"ResponseStatus"));
 		const auto canceled = (status == kMeetingCanceled)
 			|| (status == kMeetingReceivedAndCanceled);
 		if (!canceled

@@ -57,6 +57,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_faq_suggestions.h"
 #include "settings/sections/settings_credits.h"
 #include "settings/sections/settings_folders.h"
+#include "settings/sections/settings_meetings.h"
 #include "settings/sections/settings_information.h"
 #include "settings/sections/settings_notifications.h"
 #include "settings/settings_power_saving.h"
@@ -362,6 +363,14 @@ void BuildSectionButtons(SectionBuilder &builder) {
 		.targetSection = ChatId(),
 		.icon = { &st::menuIconChatBubble },
 		.keywords = { u"themes"_q, u"appearance"_q, u"stickers"_q },
+	});
+
+	// MTS Link: the meetings (the button, Outlook, the reminders).
+	builder.addSectionButton({
+		.title = tr::lng_settings_section_meetings(),
+		.targetSection = MeetingsId(),
+		.icon = { &st::menuIconSchedule },
+		.keywords = { u"meetings"_q, u"outlook"_q, u"calendar"_q },
 	});
 
 	{ // Folders, they are local in TeleLink.

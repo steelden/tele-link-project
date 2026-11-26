@@ -106,6 +106,19 @@ public:
 
 	void checkDelayed();
 	void schedule(Data::ItemNotification notification);
+	// MTS Link: not of a message (a reminder of a meeting): shown at once,
+	// in the chat of the peer, a click opens it. The id is unique, not of
+	// a message.
+	void showCustom(
+		not_null<PeerData*> peer,
+		MsgId id,
+		const QString &title,
+		const QString &subtitle,
+		const QString &text,
+		const QString &soundPath,
+		std::optional<QColor> background);
+	// MTS Link: a sound file (a reminder, its preview in the settings).
+	void playSoundFile(const QString &path);
 	void clearFromTopic(not_null<Data::ForumTopic*> topic);
 	void clearFromSublist(not_null<Data::SavedSublist*> sublist);
 	void clearFromHistory(not_null<History*> history);
@@ -228,6 +241,9 @@ private:
 	base::flat_map<
 		DocumentId,
 		std::unique_ptr<Media::Audio::Track>> _customSoundTracks;
+	base::flat_map<
+		QString,
+		std::unique_ptr<Media::Audio::Track>> _fileSoundTracks;
 
 	base::flat_map<
 		not_null<Data::ForumTopic*>,
@@ -279,6 +295,18 @@ public:
 
 	void showNotification(NotificationFields fields) {
 		doShowNotification(std::move(fields));
+	}
+	// MTS Link: not of a message (a reminder of a meeting).
+	struct CustomNotification {
+		not_null<PeerData*> peer;
+		MsgId id = 0;
+		QString title;
+		QString subtitle;
+		QString text;
+		std::optional<QColor> background;
+	};
+	void showCustomNotification(CustomNotification &&fields) {
+		doShowCustomNotification(std::move(fields));
 	}
 	void updateAll() {
 		doUpdateAll();
@@ -361,6 +389,8 @@ protected:
 
 	virtual void doUpdateAll() = 0;
 	virtual void doShowNotification(NotificationFields &&fields) = 0;
+	virtual void doShowCustomNotification(
+		CustomNotification &&fields) = 0;
 	virtual void doClearAll() = 0;
 	virtual void doClearAllFast() = 0;
 	virtual void doClearFromItem(not_null<HistoryItem*> item) = 0;
@@ -427,6 +457,7 @@ protected:
 		doClearAllFast();
 	}
 	void doShowNotification(NotificationFields &&fields) override;
+	void doShowCustomNotification(CustomNotification &&fields) override;
 
 	bool forceHideDetails() const override;
 

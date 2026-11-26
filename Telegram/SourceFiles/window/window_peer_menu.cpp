@@ -135,6 +135,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_share_box.h"
 #include "styles/style_window.h" // st::windowMinWidth
 #include "styles/style_menu_icons.h"
+#include "styles/style_media_player.h"
 #include "styles/style_premium.h"
 #include "mtslink/data_adapters.h"
 #include "mtslink/tasks_peers.h"
@@ -2057,6 +2058,30 @@ void Filler::addVideoChat() {
 	});
 }
 
+void FillMeetingsMenuImpl(
+		not_null<Main::Session*> session,
+		const PeerMenuCallback &addAction) {
+	addAction(PeerMenuCallback::Args{
+		.text = tr::lng_mtslink_meetings_period(tr::now),
+		.handler = nullptr,
+		.icon = &st::menuIconSchedule,
+		.fillSubmenu = [=](not_null<Ui::PopupMenu*> menu) {
+			const auto current = MtsLink::meetingsPeriod();
+			for (const auto period : MtsLink::meetingsPeriods()) {
+				menu->addAction(
+					MtsLink::meetingsPeriodName(period),
+					[=] { MtsLink::setMeetingsPeriod(session, period); },
+					(period == current)
+						? &st::mediaPlayerMenuCheck
+						: nullptr);
+			}
+		},
+	});
+	addAction(tr::lng_mtslink_refresh_chat(tr::now), [=] {
+		MtsLink::refreshMeetingPeers(session);
+	}, &st::menuIconRestore);
+}
+
 void Filler::fillContextMenuActions() {
 	// MTS Link: a section of the tasks: only the refresh.
 	if (_peer && MtsLink::isTaskPeer(_peer->id)) {
@@ -2068,10 +2093,7 @@ void Filler::fillContextMenuActions() {
 	}
 	// A week of the Outlook meetings: only the refresh.
 	if (_peer && MtsLink::isMeetingPeer(_peer->id)) {
-		const auto session = &_peer->session();
-		_addAction(tr::lng_mtslink_refresh_chat(tr::now), [=] {
-			MtsLink::refreshMeetingPeers(session);
-		}, &st::menuIconRestore);
+		FillMeetingsMenuImpl(&_peer->session(), _addAction);
 		return;
 	}
 	if (_peer && MtsLink::isThreadPeer(_peer->id)) {
@@ -4649,6 +4671,12 @@ Fn<void()> DeleteSublistHandler(
 			}
 		}
 	};
+}
+
+void FillMeetingsMenu(
+		not_null<Main::Session*> session,
+		const PeerMenuCallback &addAction) {
+	FillMeetingsMenuImpl(session, addAction);
 }
 
 void FillDialogsEntryMenu(

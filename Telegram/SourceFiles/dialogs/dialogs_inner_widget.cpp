@@ -4047,6 +4047,22 @@ void InnerWidget::contextMenuEvent(QContextMenuEvent *e) {
 		return RowDescriptor();
 	}();
 	if (!row.key) {
+		// The empty place of the folder of the meetings: its menu.
+		if (_state == WidgetState::Default && _filterId) {
+			const auto &list = session().data().chatsFilters().list();
+			const auto i = ranges::find(list, _filterId, &Data::ChatFilter::id);
+			if (i != end(list)
+				&& (i->flags() & Data::ChatFilter::Flag::Meetings)) {
+				_menu = base::make_unique_q<Ui::PopupMenu>(
+					this,
+					st::popupMenuExpandedSeparator);
+				Window::FillMeetingsMenu(
+					&session(),
+					Ui::Menu::CreateAddActionCallback(_menu));
+				_menu->popup(e->globalPos());
+				e->accept();
+			}
+		}
 		return;
 	}
 

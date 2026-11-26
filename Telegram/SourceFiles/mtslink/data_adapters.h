@@ -724,6 +724,13 @@ void createGroupChat(
 	const std::vector<not_null<UserData*>> &users,
 	QImage cover,
 	Fn<void(ChannelData*)> done);
+// An organization member by the email (else by the name), me too:
+// done(nullptr) if not found.
+void findOrganizationMember(
+	not_null<Main::Session*> session,
+	const QString &email,
+	const QString &name,
+	Fn<void(UserData*)> done);
 // Organization members for a new group, without me.
 void searchOrganizationMembers(
 	not_null<Main::Session*> session,

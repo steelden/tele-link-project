@@ -110,6 +110,17 @@ Manager::QueuedNotification::QueuedNotification(NotificationFields &&fields)
 	&& fields.item->isFromScheduled()) {
 }
 
+Manager::QueuedNotification::QueuedNotification(CustomNotification &&fields)
+: history(fields.peer->owner().history(fields.peer))
+, peer(fields.peer)
+, customTitle(fields.title)
+, customText(fields.subtitle.isEmpty()
+	? fields.text
+	: (fields.subtitle + QChar('\n') + fields.text))
+, customId(fields.id)
+, customBg(fields.background) {
+}
+
 QPixmap Manager::hiddenUserpicPlaceholder() const {
 	if (_hiddenUserpicPlaceholder.isNull()) {
 		const auto ratio = style::DevicePixelRatio();
@@ -261,6 +272,13 @@ void Manager::showNextFromQueue() {
 			startPosition,
 			startShift,
 			shiftDirection));
+		if (!queued.customText.isEmpty()) {
+			_notifications.back()->setCustom(
+				queued.customTitle,
+				queued.customText,
+				queued.customId,
+				queued.customBg);
+		}
 		--count;
 	} while (count > 0 && !_queuedNotifications.empty());
 
@@ -370,6 +388,11 @@ void Manager::removeWidget(internal::Widget *remove) {
 }
 
 void Manager::doShowNotification(NotificationFields &&fields) {
+	_queuedNotifications.emplace_back(std::move(fields));
+	showNextFromQueue();
+}
+
+void Manager::doShowCustomNotification(CustomNotification &&fields) {
 	_queuedNotifications.emplace_back(std::move(fields));
 	showNextFromQueue();
 }
@@ -845,15 +868,15 @@ void Notification::repaintText() {
 	const auto adjusted = Ui::Text::AdjustCustomEmojiSize(st::emojiSize);
 	const auto skip = (adjusted - st::emojiSize + 1) / 2;
 	const auto margin = QMargins{ skip, skip, skip, skip };
-	p.fillRect(_titleRect.marginsAdded(margin), st::notificationBg);
-	p.fillRect(_textRect.marginsAdded(margin), st::notificationBg);
+	p.fillRect(_titleRect.marginsAdded(margin), backgroundColor());
+	p.fillRect(_textRect.marginsAdded(margin), backgroundColor());
 	paintTitle(p);
 	paintText(p);
 	update();
 }
 
 void Notification::paintTitle(Painter &p) {
-	p.setPen(st::dialogsNameFg);
+	p.setPen(_customBg ? customForeground() : st::dialogsNameFg->c);
 	p.setFont(st::semiboldFont);
 	_titleCache.draw(p, {
 		.position = _titleRect.topLeft(),
@@ -867,7 +890,7 @@ void Notification::paintTitle(Painter &p) {
 }
 
 void Notification::paintText(Painter &p) {
-	p.setPen(st::dialogsTextFg);
+	p.setPen(_customBg ? customForeground() : st::dialogsTextFg->c);
 	p.setFont(st::dialogsTextFont);
 	_textCache.draw(p, {
 		.position = _textRect.topLeft(),
@@ -880,8 +903,34 @@ void Notification::paintText(Painter &p) {
 	});
 }
 
+void Notification::setCustom(
+		const QString &title,
+		const QString &text,
+		MsgId id,
+		std::optional<QColor> background) {
+	_customTitle = title;
+	_customText = text;
+	_customId = id;
+	_customBg = background;
+	updateNotifyDisplay();
+}
+
+QColor Notification::backgroundColor() const {
+	return _customBg ? *_customBg : st::notificationBg->c;
+}
+
+// The text on the own background: black or white, the readable one.
+QColor Notification::customForeground() const {
+	const auto bg = backgroundColor();
+	const auto luminance = 0.299 * bg.red()
+		+ 0.587 * bg.green()
+		+ 0.114 * bg.blue();
+	return (luminance > 150.) ? QColor(0, 0, 0) : QColor(255, 255, 255);
+}
+
 void Notification::updateNotifyDisplay() {
-	if (!_history || (!_item && _forwardedCount < 2)) {
+	if (!_history
+		|| (!_item && _forwardedCount < 2 && _customText.isEmpty())) {
 		return;
 	}
 
@@ -897,7 +946,7 @@ void Notification::updateNotifyDisplay() {
 		size() * style::DevicePixelRatio(),
 		QImage::Format_ARGB32_Premultiplied);
 	img.setDevicePixelRatio(style::DevicePixelRatio());
-	img.fill(st::notificationBg->c);
+	img.fill(backgroundColor());
 
 	{
 		Painter p(&img);
@@ -936,7 +985,7 @@ void Notification::updateNotifyDisplay() {
 				Ui::Emoji::Draw(p, emoji, Ui::Emoji::GetSizeNormal(), rectForName.left(), top);
 				rectForName.setLeft(rectForName.left() + size + st::semiboldFont->spacew);
 			}
-			const auto chatTypeIcon = _topic
+			const auto chatTypeIcon = (_topic || !_customText.isEmpty())
 				? nullptr
 				: Dialogs::Ui::ChatTypeIcon(_history->peer);
 			if (chatTypeIcon) {
@@ -957,7 +1006,9 @@ void Notification::updateNotifyDisplay() {
 				st::notifyItemTop + st::semiboldFont->height,
 				itemWidth,
 				2 * st::dialogsTextFont->height);
-			const auto text = !_reaction.empty()
+			const auto text = !_customText.isEmpty()
+				? TextWithEntities{ _customText }
+				: !_reaction.empty()
 				? (!_author.isEmpty()
 					? Ui::Text::Colorized(_author).append(' ')
 					: TextWithEntities()
@@ -983,7 +1034,9 @@ void Notification::updateNotifyDisplay() {
 			const auto options = TextParseOptions{
 				(TextParseColorized
 					| TextParseMarkdown
-					| (_forwardedCount > 1 ? TextParseMultiline : 0)),
+					| ((_forwardedCount > 1 || !_customText.isEmpty())
+						? TextParseMultiline
+						: 0)),
 				0,
 				0,
 				Qt::LayoutDirectionAuto,
@@ -1021,6 +1074,8 @@ void Notification::updateNotifyDisplay() {
 		};
 		auto title = options.hideNameAndPhoto
 			? TextWithEntities{ u"TeleLink"_q }
+			: !_customTitle.isEmpty()
+			? TextWithEntities{ _customTitle }
 			: reminder
 			? tr::lng_notification_reminder(tr::now, tr::marked)
 			: topicWithChat();
@@ -1064,7 +1119,7 @@ void Notification::updatePeerPhoto() {
 				st::notifyPhotoPos,
 				QSize(st::notifyPhotoSize, st::notifyPhotoSize)),
 			width()),
-		st::notificationBg);
+		backgroundColor());
 	_peer->paintUserpicLeft(
 		p,
 		_userpicView,
@@ -1195,7 +1250,11 @@ Notifications::Manager::NotificationId Notification::myId() const {
 		.sessionId = _history->session().uniqueId(),
 		.peerId = _history->peer->id,
 		.topicRootId = _topicRootId,
-	}, .msgId = _item ? _item->id : ShowAtUnreadMsgId };
+	}, .msgId = _item
+		? _item->id
+		: _customId
+		? _customId
+		: ShowAtUnreadMsgId };
 }
 
 void Notification::changeHeight(int newHeight) {

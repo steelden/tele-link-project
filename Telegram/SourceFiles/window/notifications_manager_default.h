@@ -67,6 +67,7 @@ private:
 
 	void doUpdateAll() override;
 	void doShowNotification(NotificationFields &&fields) override;
+	void doShowCustomNotification(CustomNotification &&fields) override;
 	void doClearAll() override;
 	void doClearAllFast() override;
 	void doClearFromTopic(not_null<Data::ForumTopic*> topic) override;
@@ -109,6 +110,7 @@ private:
 
 	struct QueuedNotification {
 		QueuedNotification(NotificationFields &&fields);
+		QueuedNotification(CustomNotification &&fields);
 
 		not_null<History*> history;
 		MsgId topicRootId = 0;
@@ -119,6 +121,11 @@ private:
 		HistoryItem *item = nullptr;
 		int forwardedCount = 0;
 		bool fromScheduled = false;
+		// MTS Link: not of a message (a reminder of a meeting).
+		QString customTitle;
+		QString customText;
+		MsgId customId = 0;
+		std::optional<QColor> customBg;
 	};
 	std::deque<QueuedNotification> _queuedNotifications;
 
@@ -219,6 +226,13 @@ public:
 	void startHiding();
 	void stopHiding();
 
+	// MTS Link: not of a message (a reminder of a meeting).
+	void setCustom(
+		const QString &title,
+		const QString &text,
+		MsgId id,
+		std::optional<QColor> background);
+
 	void updateNotifyDisplay();
 	void updatePeerPhoto();
 
@@ -299,6 +313,12 @@ private:
 	HistoryItem *_item = nullptr;
 	int _forwardedCount = 0;
 	bool _fromScheduled = false;
+	QString _customTitle;
+	QString _customText;
+	MsgId _customId = 0;
+	std::optional<QColor> _customBg;
+	[[nodiscard]] QColor backgroundColor() const;
+	[[nodiscard]] QColor customForeground() const;
 	object_ptr<Ui::IconButton> _close;
 	object_ptr<Ui::RoundButton> _reply;
 	object_ptr<Background> _background = { nullptr };

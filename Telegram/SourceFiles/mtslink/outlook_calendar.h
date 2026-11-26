@@ -8,6 +8,16 @@ The meetings of the default calendar of Outlook (Windows, COM).
 
 namespace MtsLink {
 
+// A participant: the name as in Outlook, the email if resolved there.
+struct OutlookPerson {
+	QString name;
+	QString email;
+
+	friend inline bool operator==(
+		const OutlookPerson &,
+		const OutlookPerson &) = default;
+};
+
 struct OutlookMeeting {
 	QString subject;
 	QString location;
@@ -16,6 +26,10 @@ struct OutlookMeeting {
 	QString entryId; // Of the item (of the series for an occurrence).
 	bool recurring = false;
 	bool allDay = false;
+	OutlookPerson organizer;
+	std::vector<OutlookPerson> required;
+	std::vector<OutlookPerson> optional;
+	int response = 0; // OlResponseStatus: of the user of Outlook.
 
 	friend inline bool operator==(
 		const OutlookMeeting &,

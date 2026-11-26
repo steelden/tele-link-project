@@ -74,6 +74,11 @@ void FillDialogsEntryMenu(
 	not_null<SessionController*> controller,
 	Dialogs::EntryState request,
 	const PeerMenuCallback &addAction);
+// The folder of the Outlook meetings: the period, the refresh (a period row,
+// the empty place of the chats list).
+void FillMeetingsMenu(
+	not_null<Main::Session*> session,
+	const PeerMenuCallback &addAction);
 bool FillVideoChatMenu(
 	not_null<SessionController*> controller,
 	Dialogs::EntryState request,

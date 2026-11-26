@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio_track.h"
 #include "media/audio/media_audio.h"
 #include "mtproto/mtproto_config.h"
+#include "mtslink/meetings_peers.h"
 #include "mtslink/data_adapters.h"
 #include "data/data_chat_filters.h"
 #include "history/history.h"
@@ -1077,6 +1078,51 @@ rpl::producer<bool> System::volumeSupportedValue() const {
 	}) | rpl::distinct_until_changed();
 }
 
+void System::showCustom(
+		not_null<PeerData*> peer,
+		MsgId id,
+		const QString &title,
+		const QString &subtitle,
+		const QString &text,
+		const QString &soundPath,
+		std::optional<QColor> background) {
+	Expects(_manager != nullptr);
+
+	const auto &settings = Core::App().settings();
+	if (settings.soundNotify() && !soundPath.isEmpty()) {
+		_manager->maybePlaySound(crl::guard(&peer->session(), [=] {
+			playSoundFile(soundPath);
+		}));
+	}
+	if (settings.desktopNotify()) {
+		_manager->showCustomNotification({
+			.peer = peer,
+			.id = id,
+			.title = title,
+			.subtitle = subtitle,
+			.text = text,
+			.background = background,
+		});
+	}
+}
+
+void System::playSoundFile(const QString &path) {
+	if (path.isEmpty()) {
+		return;
+	}
+	auto i = _fileSoundTracks.find(path);
+	if (i == end(_fileSoundTracks)) {
+		i = _fileSoundTracks.emplace(
+			path,
+			Media::Audio::Current().createTrack()).first;
+		i->second->fillFromFile(path);
+	}
+	const auto track = i->second.get();
+	track->playOnce();
+	Media::Player::mixer()->suppressAll(track->getLengthMs());
+	Media::Player::mixer()->scheduleFaderCallback();
+}
+
 void System::playSound(
 		not_null<Main::Session*> session,
 		DocumentId id,
@@ -1282,6 +1328,10 @@ void Manager::notificationActivated(
 		ActivateOptions &&options) {
 	onBeforeNotificationActivated(id);
 	if (const auto session = system()->findSession(id.contextId.sessionId)) {
+		// MTS Link: a reminder of a meeting shows the meeting.
+		if (MtsLink::isMeetingPeer(id.contextId.peerId)) {
+			MtsLink::meetingReminderActivated(id.msgId);
+		}
 		const auto history = session->data().history(
 			id.contextId.peerId);
 		const auto item = history->owner().message(
@@ -1713,6 +1763,28 @@ void NativeManager::doShowNotification(NotificationFields &&fields) {
 		.sound = sound,
 		.options = options,
 		.actions = std::move(actions),
+	}, userpicView);
+}
+
+void NativeManager::doShowCustomNotification(CustomNotification &&fields) {
+	auto options = getNotificationOptions(
+		nullptr,
+		Data::ItemNotificationType::Message);
+	options.hideMarkAsRead = true;
+	options.hideReplyButton = true;
+	const auto peer = fields.peer;
+	auto userpicView = peer->createUserpicView();
+	doShowNativeNotification({
+		.peer = peer,
+		.itemId = fields.id,
+		.title = (options.hideNameAndPhoto
+			? AppName.utf16()
+			: addTargetAccountName(fields.title, &peer->session())),
+		.subtitle = options.hideMessageText ? QString() : fields.subtitle,
+		.message = (options.hideMessageText
+			? tr::lng_notification_preview(tr::now)
+			: fields.text),
+		.options = options,
 	}, userpicView);
 }
 

@@ -10912,6 +10912,52 @@ void createGroupChat(
 		});
 }
 
+void findOrganizationMember(
+		not_null<Main::Session*> session,
+		const QString &email,
+		const QString &name,
+		Fn<void(UserData*)> done) {
+	const auto mts = session->account().mtsLinkSession();
+	if (!mts || !mts->users()) {
+		done(nullptr);
+		return;
+	}
+	const auto weak = base::make_weak(session);
+	const auto query = email.isEmpty() ? name : email;
+	mts->users()->searchMembers(
+		query,
+		0,
+		5,
+		[=](QList<Api::MemberProfile> profiles) {
+			if (!weak) {
+				return;
+			}
+			const auto words = name.split(QChar(' '), Qt::SkipEmptyParts);
+			const auto byName = [&](const Api::MemberProfile &profile) {
+				return !profile.firstName.isEmpty()
+					&& !profile.lastName.isEmpty()
+					&& words.contains(profile.firstName, Qt::CaseInsensitive)
+					&& words.contains(profile.lastName, Qt::CaseInsensitive);
+			};
+			const auto i = ranges::find_if(profiles, [&](
+					const Api::MemberProfile &profile) {
+				return email.isEmpty()
+					? byName(profile)
+					: !profile.email.compare(email, Qt::CaseInsensitive);
+			});
+			LOG(("MtsLink Outlook: the member '%1' %2 (%3 results)"
+				).arg(query
+				).arg((i != profiles.end()) ? "found" : "not found"
+				).arg(profiles.size()));
+			if (i == profiles.end()) {
+				done(nullptr);
+				return;
+			}
+			applyUserData(weak.get(), *i);
+			done(weak->data().user(::UserId(uuidToBareId(i->userId))));
+		});
+}
+
 void searchOrganizationMembers(
 		not_null<Main::Session*> session,
 		const QString &query,
