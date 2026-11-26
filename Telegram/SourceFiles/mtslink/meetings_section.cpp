@@ -630,12 +630,47 @@ void LoadMeetings() {
 }
 
 // The line under the subject: the time, the place.
+// "30 minutes", "1 hour", "1 h 30 min".
+[[nodiscard]] QString DurationText(int minutes) {
+	const auto hours = minutes / 60;
+	const auto rest = minutes % 60;
+	return !hours
+		? tr::lng_mtslink_meetings_minutes(tr::now, lt_count, rest)
+		: !rest
+		? tr::lng_mtslink_meetings_hours(tr::now, lt_count, hours)
+		: tr::lng_mtslink_meetings_hours_minutes(
+			tr::now,
+			lt_hours,
+			QString::number(hours),
+			lt_minutes,
+			QString::number(rest));
+}
+
 [[nodiscard]] QString MeetingInfo(const OutlookMeeting &meeting) {
-	auto result = MeetingTime(meeting);
-	if (!meeting.location.isEmpty()) {
-		result += u" \xB7 "_q + meeting.location;
+	auto parts = QStringList();
+	if (meeting.allDay) {
+		parts.push_back(tr::lng_mtslink_meetings_all_day(tr::now));
+	} else if (meeting.end.isValid()) {
+		// The start is shown big at the left of the meeting.
+		const auto end = (meeting.end.date() == meeting.start.date())
+			? TimeText(meeting.end.time())
+			: (langDayOfMonthFull(meeting.end.date())
+				+ u", "_q
+				+ TimeText(meeting.end.time()));
+		const auto minutes = int(meeting.start.secsTo(meeting.end) / 60);
+		parts.push_back((minutes > 0 && minutes < 24 * 60)
+			? tr::lng_mtslink_meetings_duration_till(
+				tr::now,
+				lt_duration,
+				DurationText(minutes),
+				lt_time,
+				end)
+			: tr::lng_mtslink_meetings_till(tr::now, lt_time, end));
 	}
-	return result;
+	if (!meeting.location.isEmpty()) {
+		parts.push_back(meeting.location);
+	}
+	return parts.join(u" \xB7 "_q);
 }
 
 // -- The participants as the members of MTS Link. --
@@ -1223,6 +1258,7 @@ public:
 	, _info(MeetingInfo(_meeting))
 	, _people(PeopleLines(&controller->session(), _meeting))
 	, _tooltip(PeopleTooltip(_meeting)) {
+		_wrapped = _people;
 		resize(width(), rowHeight());
 		setPointerCursor(!_meeting.entryId.isEmpty());
 		setAttribute(Qt::WA_Hover);
@@ -1282,6 +1318,7 @@ public:
 
 protected:
 	int resizeGetHeight(int newWidth) override {
+		_wrapped = wrapPeople(textAvailable(newWidth));
 		if (_call) {
 			const auto bubble = bubbleRect(newWidth, rowHeight());
 			_call->moveToLeft(
@@ -1383,9 +1420,10 @@ protected:
 		}
 
 		const auto callSpace = this->callSpace();
-		const auto left = int(bubble.x())
+		const auto timeLeft = int(bubble.x())
 			+ kRowPadding
 			+ (CallLeft() ? callSpace : 0);
+		const auto left = timeLeft + timeColumnWidth() + kRowPadding;
 		const auto available = std::max(
 			int(bubble.x() + bubble.width())
 				- kRowPadding
@@ -1398,7 +1436,36 @@ protected:
 			- titleFont->height
 			- infoFont->height
 			- 2
-			- int(_people.size()) * (infoFont->height + 2)) / 2;
+			- int(_wrapped.size()) * (infoFont->height + 2)) / 2;
+		// The start: big, almost the whole height.
+		const auto timeRect = QRect(
+			timeLeft,
+			int(bubble.y()),
+			timeColumnWidth(),
+			int(bubble.height()));
+		p.setPen(over
+			? st::historyTextInFgSelected->c
+			: current
+			? st::windowActiveTextFg->c
+			: upcoming
+			? accent
+			: finished
+			? st::msgInDateFg->c
+			: st::historyTextInFg->c);
+		if (_meeting.allDay) {
+			p.setFont(titleFont);
+			p.drawText(
+				timeRect,
+				Qt::AlignCenter | Qt::TextWordWrap,
+				tr::lng_mtslink_meetings_all_day(tr::now));
+		} else {
+			p.setFont(bigTimeFont());
+			p.drawText(
+				timeRect,
+				Qt::AlignCenter,
+				TimeText(_meeting.start.time()));
+		}
+
 		p.setFont(titleFont);
 		// Under the cursor: the colors of a selected message.
 		p.setPen(over
@@ -1436,7 +1503,7 @@ protected:
 			: st::historyLinkInFg->c;
 		const auto right = left + available;
 		auto y = top + titleFont->height + 2 + infoFont->height + 2;
-		for (const auto &line : _people) {
+		for (const auto &line : _wrapped) {
 			auto x = left;
 			for (const auto &segment : line) {
 				const auto &font = (segment.user && segment.user == _overLink)
@@ -1467,6 +1534,29 @@ protected:
 	}
 
 private:
+	// The lines of the text: the subject, the time and the place, the
+	// people.
+	[[nodiscard]] int textHeight() const {
+		return st::semiboldFont->height
+			+ 2
+			+ st::normalFont->height
+			+ int(_people.size()) * (st::normalFont->height + 2);
+	}
+
+	// The start time: almost the whole height of the text.
+	[[nodiscard]] QFont bigTimeFont() const {
+		auto result = st::semiboldFont->f;
+		result.setPixelSize(std::clamp(textHeight(), 24, 56));
+		return result;
+	}
+
+	[[nodiscard]] int timeColumnWidth() const {
+		const auto metrics = QFontMetrics(bigTimeFont());
+		return std::max(
+			metrics.horizontalAdvance(TimeText(QTime(0, 0))),
+			metrics.horizontalAdvance(TimeText(QTime(23, 59))));
+	}
+
 	// The text: kCallGap from the call button (instead of kRowPadding
 	// from the border of the bubble).
 	[[nodiscard]] int callSpace() const {
@@ -1491,7 +1581,10 @@ private:
 				}
 				text = std::max(text, lineWidth);
 			}
-			const auto natural = 2 * kRowPadding + callSpace() + text;
+			const auto natural = 3 * kRowPadding
+				+ callSpace()
+				+ timeColumnWidth()
+				+ text;
 			result = std::min(full, std::max(natural, int(st::msgMaxWidth)));
 		}
 		return QRect(
@@ -1503,7 +1596,52 @@ private:
 
 	[[nodiscard]] int rowHeight() const {
 		return kRowHeight
-			+ int(_people.size()) * (st::normalFont->height + 2);
+			+ int(_wrapped.size()) * (st::normalFont->height + 2);
+	}
+
+	// The width of the lines of the text at the right of the time.
+	[[nodiscard]] int textAvailable(int width) const {
+		const auto bubble = bubbleRect(width, 0);
+		const auto left = bubble.x()
+			+ kRowPadding
+			+ (CallLeft() ? callSpace() : 0)
+			+ timeColumnWidth()
+			+ kRowPadding;
+		return std::max(
+			bubble.x()
+				+ bubble.width()
+				- kRowPadding
+				- (CallLeft() ? 0 : callSpace())
+				- left,
+			0);
+	}
+
+	// The lines of the people by the width: a line is broken between the
+	// names (a name is not broken, elided if it is too long alone).
+	[[nodiscard]] std::vector<PeopleLine> wrapPeople(int available) const {
+		auto result = std::vector<PeopleLine>();
+		for (const auto &line : _people) {
+			auto current = PeopleLine();
+			auto x = 0;
+			for (const auto &segment : line) {
+				const auto width = st::normalFont->width(segment.text);
+				const auto separator = !segment.user
+					&& (segment.text == u", "_q);
+				if (!separator
+					&& !current.empty()
+					&& (x + width > available)) {
+					result.push_back(std::move(current));
+					current = PeopleLine();
+					x = 0;
+				}
+				current.push_back(segment);
+				x += width;
+			}
+			if (!current.empty()) {
+				result.push_back(std::move(current));
+			}
+		}
+		return result;
 	}
 
 	const not_null<Window::SessionController*> _controller;
@@ -1512,6 +1650,7 @@ private:
 	const QString _info;
 	const std::vector<PeopleLine> _people;
 	const QString _tooltip;
+	std::vector<PeopleLine> _wrapped; // The people by the width.
 	mutable std::vector<std::pair<QRect, UserData*>> _links;
 	UserData *_overLink = nullptr;
 	bool _tooltipShown = false;

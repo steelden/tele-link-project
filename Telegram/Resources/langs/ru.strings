@@ -7303,6 +7303,17 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_meetings_remind_in#many" = "Через {count} минут";
 "lng_mtslink_meetings_remind_in#other" = "Через {count} минуты";
 "lng_mtslink_meetings_show_past" = "Показывать прошедшие дни";
+"lng_mtslink_meetings_till" = "до {time}";
+"lng_mtslink_meetings_duration_till" = "{duration} до {time}";
+"lng_mtslink_meetings_minutes#one" = "{count} минута";
+"lng_mtslink_meetings_minutes#few" = "{count} минуты";
+"lng_mtslink_meetings_minutes#many" = "{count} минут";
+"lng_mtslink_meetings_minutes#other" = "{count} минуты";
+"lng_mtslink_meetings_hours#one" = "{count} час";
+"lng_mtslink_meetings_hours#few" = "{count} часа";
+"lng_mtslink_meetings_hours#many" = "{count} часов";
+"lng_mtslink_meetings_hours#other" = "{count} часа";
+"lng_mtslink_meetings_hours_minutes" = "{hours} ч {minutes} мин";
 "lng_mtslink_settings_developers" = "Для разработчиков";
 "lng_mtslink_settings_copy_ids" = "Копирование ID в контекстном меню";
 "lng_mtslink_settings_copy_ids_about" = "Пункты «Скопировать ID чата» и «Скопировать ID сообщения» в контекстном меню чатов и сообщений.";
