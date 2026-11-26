@@ -6808,6 +6808,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_edit_failed_details" = "The server did not accept the changes of the message, they are shown only to you.\n\nThe error: {error}\n\nEdit the message again or refresh the chat to see its text on the server.";
 "lng_mtslink_meetings_forward_title" = "Meeting: {subject}";
 "lng_mtslink_meetings_join_link" = "Join the meeting";
+"lng_mtslink_meetings_choose_profile" = "Choose the profile";
 "lng_mtslink_meetings_forward" = "Send to a chat";
 "lng_mtslink_meetings_link_copied" = "Link copied to clipboard";
 "lng_mtslink_meetings_link_sent" = "The meeting link is sent";

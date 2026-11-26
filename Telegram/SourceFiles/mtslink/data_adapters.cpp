@@ -11013,11 +11013,11 @@ void FindOrganizationMemberBy(
 		QString email,
 		QStringList words,
 		QStringList queries,
-		Fn<void(UserData*)> done) {
+		Fn<void(std::vector<FoundMember>)> done) {
 	const auto session = weak.get();
 	const auto mts = session ? session->account().mtsLinkSession() : nullptr;
 	if (!mts || !mts->users() || queries.isEmpty()) {
-		done(nullptr);
+		done({});
 		return;
 	}
 	const auto query = queries.takeFirst();
@@ -11036,15 +11036,39 @@ void FindOrganizationMemberBy(
 					&& words.contains(profile.firstName, Qt::CaseInsensitive)
 					&& words.contains(profile.lastName, Qt::CaseInsensitive);
 			};
-			const auto i = ranges::find_if(profiles, [&](
-					const Api::MemberProfile &profile) {
-				return email.isEmpty()
+			auto found = std::vector<FoundMember>();
+			for (const auto &profile : profiles) {
+				const auto matches = email.isEmpty()
 					? byName(profile)
 					: !profile.email.compare(email, Qt::CaseInsensitive);
-			});
-			if (i != profiles.end()) {
-				applyUserData(strong, *i);
-				done(strong->data().user(::UserId(uuidToBareId(i->userId))));
+				if (!matches) {
+					continue;
+				}
+				applyUserData(strong, profile);
+				const auto user = strong->data().user(
+					::UserId(uuidToBareId(profile.userId)));
+				if (ranges::contains(found, user, &FoundMember::user)) {
+					continue;
+				}
+				auto details = QStringList();
+				for (const auto &part : {
+						profile.position,
+						profile.department,
+						profile.email }) {
+					if (!part.isEmpty()) {
+						details.push_back(part);
+					}
+				}
+				found.push_back({
+					.user = user,
+					.details = details.join(u" \xB7 "_q),
+				});
+				if (!email.isEmpty()) {
+					break;
+				}
+			}
+			if (!found.empty()) {
+				done(std::move(found));
 			} else {
 				// The next query: by the other words of the name.
 				FindOrganizationMemberBy(weak, email, words, queries, done);
@@ -11058,7 +11082,7 @@ void findOrganizationMember(
 		not_null<Main::Session*> session,
 		const QString &email,
 		const QString &name,
-		Fn<void(UserData*)> done) {
+		Fn<void(std::vector<FoundMember>)> done) {
 	const auto words = OutlookNameWords(name);
 	auto queries = QStringList();
 	if (!email.isEmpty()) {

@@ -740,13 +740,19 @@ void createGroupChat(
 	const std::vector<not_null<UserData*>> &users,
 	QImage cover,
 	Fn<void(ChannelData*)> done);
-// An organization member by the email (else by the name of Outlook: the
-// first name and the last name in it), me too: done(nullptr) if not found.
+// A found member: the position, the department, the email in details.
+struct FoundMember {
+	not_null<UserData*> user;
+	QString details;
+};
+// Organization members by the email (else by the name of Outlook: the
+// first name and the last name in it), me too: empty if not found, a few
+// of them if the name is not unique.
 void findOrganizationMember(
 	not_null<Main::Session*> session,
 	const QString &email,
 	const QString &name,
-	Fn<void(UserData*)> done);
+	Fn<void(std::vector<FoundMember>)> done);
 // Organization members for a new group, without me.
 void searchOrganizationMembers(
 	not_null<Main::Session*> session,

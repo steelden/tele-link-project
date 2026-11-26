@@ -11,6 +11,7 @@ a desktop application based on Telegram Desktop.
 #include "base/event_filter.h"
 #include "api/api_common.h"
 #include "apiwrap.h"
+#include "boxes/peer_list_box.h"
 #include "data/data_thread.h"
 #include "data/data_changes.h"
 #include "data/data_drafts.h"
@@ -46,6 +47,7 @@ a desktop application based on Telegram Desktop.
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
+#include "styles/style_boxes.h"
 #include "styles/style_chat.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_info.h"
@@ -685,7 +687,8 @@ void LoadMeetings() {
 // -- The participants as the members of MTS Link. --
 
 struct PersonEntry {
-	UserData *user = nullptr;
+	// A few of them if the name is not unique: chosen by a click.
+	std::vector<FoundMember> users;
 	bool requested = false;
 };
 
@@ -732,21 +735,22 @@ void RequestNextPerson(base::weak_ptr<Main::Session> weak) {
 	const auto person = queue.front().second;
 	queue.pop_front();
 	findOrganizationMember(session, person.email, person.name, [=](
-			UserData *user) {
-		if (user) {
-			People()[key].user = user;
+			std::vector<FoundMember> users) {
+		if (!users.empty()) {
+			People()[key].users = std::move(users);
 			PeopleFound() = true;
 		}
 		RequestNextPerson(weak);
 	});
 }
 
-// The member of a participant if found, else requested (once).
-[[nodiscard]] UserData *PersonUser(
+// The members of a participant if found, else requested (once).
+[[nodiscard]] const std::vector<FoundMember> &PersonUsers(
 		not_null<Main::Session*> session,
 		const OutlookPerson &person) {
+	static const auto kEmpty = std::vector<FoundMember>();
 	if (person.name.isEmpty() && person.email.isEmpty()) {
-		return nullptr;
+		return kEmpty;
 	}
 	const auto key = PersonKey(person);
 	auto &entry = People()[key];
@@ -761,28 +765,31 @@ void RequestNextPerson(base::weak_ptr<Main::Session> weak) {
 			});
 		}
 	}
-	return entry.user;
+	return entry.users;
 }
 
 // A part of a line under the time: a text or a member (a link to the
-// profile).
+// profile, to the choice of the profiles if the name is not unique).
 struct PeopleSegment {
 	QString text;
-	UserData *user = nullptr;
+	QString key; // PersonKey() of a link.
 };
 using PeopleLine = std::vector<PeopleSegment>;
 
 [[nodiscard]] PeopleSegment PersonSegment(
 		not_null<Main::Session*> session,
 		const OutlookPerson &person) {
-	const auto user = PersonUser(session, person);
+	const auto &users = PersonUsers(session, person);
+	const auto user = (users.size() == 1)
+		? users.front().user.get()
+		: nullptr;
 	return {
 		.text = !user
 			? person.name
 			: PeopleAsMentions()
 			? (u"@"_q + user->name())
 			: chatListUserName(user),
-		.user = user,
+		.key = users.empty() ? QString() : PersonKey(person),
 	};
 }
 
@@ -1252,6 +1259,77 @@ private:
 // A meeting in a bubble of an inbox message: the subject, the time and the
 // place under it, the people. A click shows it in Outlook, a click on a
 // member shows the profile.
+// The members with the same name as a participant of Outlook: one of them.
+class ChooseProfileController final : public PeerListController {
+public:
+	ChooseProfileController(
+		not_null<Main::Session*> session,
+		std::vector<FoundMember> users,
+		Fn<void(not_null<UserData*>)> chosen)
+	: _session(session)
+	, _users(std::move(users))
+	, _chosen(std::move(chosen)) {
+	}
+
+	Main::Session &session() const override {
+		return *_session;
+	}
+
+	void prepare() override {
+		delegate()->peerListSetTitle(
+			tr::lng_mtslink_meetings_choose_profile());
+		for (const auto &found : _users) {
+			auto row = std::make_unique<PeerListRow>(found.user);
+			if (!found.details.isEmpty()) {
+				row->setCustomStatus(found.details);
+			}
+			delegate()->peerListAppendRow(std::move(row));
+		}
+		delegate()->peerListRefreshRows();
+	}
+
+	void rowClicked(not_null<PeerListRow*> row) override {
+		if (const auto user = row->peer()->asUser()) {
+			_chosen(user);
+		}
+	}
+
+private:
+	const not_null<Main::Session*> _session;
+	const std::vector<FoundMember> _users;
+	const Fn<void(not_null<UserData*>)> _chosen;
+
+};
+
+// The height by the rows (the scroll for many of them).
+class ChooseProfileBox final : public PeerListBox {
+public:
+	ChooseProfileBox(
+		QWidget*,
+		int count,
+		std::unique_ptr<PeerListController> controller,
+		Fn<void(not_null<PeerListBox*>)> init)
+	: PeerListBox(nullptr, std::move(controller), std::move(init))
+	, _count(count) {
+	}
+
+protected:
+	void prepare() override {
+		PeerListBox::prepare();
+		const auto &list = st::peerListBox;
+		const auto height = list.padding.top()
+			+ _count * list.item.height
+			+ list.padding.bottom();
+		setDimensions(
+			st::boxWideWidth,
+			std::min(height, st::boxMaxListHeight));
+	}
+
+private:
+	const int _count = 0;
+
+};
+
 class MeetingRow final
 	: public Ui::AbstractButton
 	, public Ui::AbstractTooltipShower {
@@ -1272,9 +1350,8 @@ public:
 		setPointerCursor(!_meeting.entryId.isEmpty());
 		setAttribute(Qt::WA_Hover);
 		setClickedCallback([=] {
-			if (const auto user = _overLink) {
-				LOG(("MtsLink Outlook: the profile of a participant"));
-				_controller->showPeerInfo(user);
+			if (!_overLink.isEmpty()) {
+				showPerson(_overLink);
 			} else {
 				openOutlookMeeting(_meeting);
 			}
@@ -1316,7 +1393,7 @@ public:
 	}
 
 	QString tooltipText() const override {
-		return _overLink ? QString() : _tooltip;
+		return !_overLink.isEmpty() ? QString() : _tooltip;
 	}
 	QPoint tooltipPos() const override {
 		return QCursor::pos();
@@ -1345,16 +1422,16 @@ protected:
 
 	void mouseMoveEvent(QMouseEvent *e) override {
 		AbstractButton::mouseMoveEvent(e);
-		auto link = (UserData*)nullptr;
-		for (const auto &[rect, user] : _links) {
+		auto link = QString();
+		for (const auto &[rect, key] : _links) {
 			if (rect.contains(e->pos())) {
-				link = user;
+				link = key;
 				break;
 			}
 		}
 		if (_overLink != link) {
 			_overLink = link;
-			setCursor((link || !_meeting.entryId.isEmpty())
+			setCursor((!link.isEmpty() || !_meeting.entryId.isEmpty())
 				? style::cur_pointer
 				: style::cur_default);
 			update();
@@ -1390,8 +1467,8 @@ protected:
 	void leaveEventHook(QEvent *e) override {
 		_tooltipShown = false;
 		Ui::Tooltip::Hide();
-		if (_overLink) {
-			_overLink = nullptr;
+		if (!_overLink.isEmpty()) {
+			_overLink.clear();
 			update();
 		}
 		AbstractButton::leaveEventHook(e);
@@ -1537,22 +1614,23 @@ protected:
 		for (const auto &line : _wrapped) {
 			auto x = left;
 			for (const auto &segment : line) {
-				const auto &font = (segment.user && segment.user == _overLink)
+				const auto link = !segment.key.isEmpty();
+				const auto &font = (link && segment.key == _overLink)
 					? infoFont->underline()
 					: infoFont;
 				const auto width = font->width(segment.text);
 				const auto fits = (x + width <= right);
 				const auto shown = fits ? width : std::max(right - x, 0);
 				p.setFont(font);
-				p.setPen(segment.user ? linkFg : textFg);
+				p.setPen(link ? linkFg : textFg);
 				p.drawText(
 					x,
 					y + infoFont->ascent,
 					fits ? segment.text : font->elided(segment.text, shown));
-				if (segment.user) {
+				if (link) {
 					_links.push_back({
 						QRect(x, y, shown, infoFont->height),
-						segment.user,
+						segment.key,
 					});
 				}
 				if (!fits) {
@@ -1565,6 +1643,37 @@ protected:
 	}
 
 private:
+	// The profile of a participant, the choice of the profiles if a few
+	// members have the name.
+	void showPerson(const QString &key) {
+		const auto i = People().find(key);
+		if (i == People().end() || i->users.empty()) {
+			return;
+		}
+		const auto users = i->users;
+		if (users.size() == 1) {
+			_controller->showPeerInfo(users.front().user);
+			return;
+		}
+		const auto weak = base::make_weak(_controller);
+		_controller->show(Box<ChooseProfileBox>(
+			int(users.size()),
+			std::make_unique<ChooseProfileController>(
+				&_controller->session(),
+				users,
+				[=](not_null<UserData*> user) {
+					if (const auto strong = weak.get()) {
+						strong->hideLayer();
+						strong->showPeerInfo(user);
+					}
+				}),
+			[](not_null<PeerListBox*> box) {
+				box->addButton(tr::lng_cancel(), [=] {
+					box->closeBox();
+				});
+			}));
+	}
+
 	// A usual message: the subject, the time, the place, the link. The
 	// chat is opened with it in the field (to be edited and sent).
 	void forwardLink() {
@@ -1734,7 +1843,7 @@ private:
 			auto x = 0;
 			for (const auto &segment : line) {
 				const auto width = st::normalFont->width(segment.text);
-				const auto separator = !segment.user
+				const auto separator = segment.key.isEmpty()
 					&& (segment.text == u", "_q);
 				if (!separator
 					&& !current.empty()
@@ -1760,8 +1869,8 @@ private:
 	const std::vector<PeopleLine> _people;
 	const QString _tooltip;
 	std::vector<PeopleLine> _wrapped; // The people by the width.
-	mutable std::vector<std::pair<QRect, UserData*>> _links;
-	UserData *_overLink = nullptr;
+	mutable std::vector<std::pair<QRect, QString>> _links;
+	QString _overLink;
 	bool _tooltipShown = false;
 	Ui::IconButton *_call = nullptr;
 	Ui::Animations::Simple _flash;
