@@ -3515,6 +3515,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				HistoryView::CopyPostLink(controller, itemId, HistoryView::Context::History);
 			}, &st::menuIconLink);
 		}
+		if (isUponSelected != 2 && isUponSelected != -2) {
+			HistoryView::AddCopyMtsLinkIdAction(_menu.get(), controller, item);
+		}
 		if (isUponSelected > 1) {
 			if (selectedState.count > 0 && selectedState.canForwardCount == selectedState.count) {
 				_menu->addAction(tr::lng_context_forward_selected(tr::now), [=] {
@@ -3793,6 +3796,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			_menu->addAction(tr::lng_context_copy_message_link(tr::now), [=] {
 				HistoryView::CopyPostLink(controller, itemId, HistoryView::Context::History);
 			}, &st::menuIconLink);
+		}
+		if (isUponSelected != 2 && isUponSelected != -2) {
+			HistoryView::AddCopyMtsLinkIdAction(_menu.get(), controller, item);
 		}
 		if (sponsored) {
 			const auto hasAbout = ranges::any_of(

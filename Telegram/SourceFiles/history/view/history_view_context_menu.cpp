@@ -534,6 +534,28 @@ void AddDocumentActions(
 		[=] { return list->showCopyRestrictionForSelected(); });
 }
 
+void AddCopyMtsLinkIdActionImpl(
+		not_null<Ui::PopupMenu*> menu,
+		not_null<Window::SessionController*> controller,
+		HistoryItem *item) {
+	if (!item || !MtsLink::copyIdsEnabled()) {
+		return;
+	}
+	const auto id = MtsLink::msgIdToMtsLinkId(
+		item->history()->peer->id,
+		item->id);
+	if (id.isEmpty()) {
+		return;
+	}
+	const auto weak = base::make_weak(controller);
+	menu->addAction(tr::lng_mtslink_copy_message_id(tr::now), [=] {
+		QGuiApplication::clipboard()->setText(id);
+		if (const auto strong = weak.get()) {
+			strong->showToast(tr::lng_mtslink_id_copied(tr::now));
+		}
+	}, &st::menuIconCopy);
+}
+
 void AddPostLinkAction(
 		not_null<Ui::PopupMenu*> menu,
 		const ContextMenuRequest &request) {
@@ -1448,6 +1470,12 @@ void AddMessageActions(
 		const ContextMenuRequest &request,
 		not_null<ListWidget*> list) {
 	AddPostLinkAction(menu, request);
+	if (request.pointState != PointState::Outside) {
+		AddCopyMtsLinkIdActionImpl(
+			menu,
+			request.navigation->parentController(),
+			request.item);
+	}
 	AddForwardAction(menu, request, list);
 	AddOfferAction(menu, request, list);
 	AddSendNowAction(menu, request, list);
@@ -2076,6 +2104,13 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 		});
 	}
 	return result;
+}
+
+void AddCopyMtsLinkIdAction(
+		not_null<Ui::PopupMenu*> menu,
+		not_null<Window::SessionController*> controller,
+		HistoryItem *item) {
+	AddCopyMtsLinkIdActionImpl(menu, controller, item);
 }
 
 void CopyPostLink(

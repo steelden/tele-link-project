@@ -83,6 +83,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #endif // !TDESKTOP_DISABLE_SPELLCHECK
 
 #include "mtslink/call_window.h"
+#include "mtslink/data_adapters.h"
 #include "styles/style_boxes.h"
 
 #include <ksandbox.h>
@@ -129,6 +130,39 @@ void BuildMtsLinkConferencesSection(SectionBuilder &builder) {
 		};
 	});
 	builder.addSkip();
+}
+
+// For the developers: the ids of MTS Link in the context menus.
+void BuildMtsLinkDevelopersSection(SectionBuilder &builder) {
+	builder.addDivider();
+	builder.addSkip();
+	builder.addSubsectionTitle({
+		.id = u"advanced/mtslink_developers"_q,
+		.title = tr::lng_mtslink_settings_developers(),
+		.keywords = { u"id"_q, u"copy"_q },
+	});
+	builder.add([](const WidgetContext &ctx) {
+		const auto button = ctx.container->add(
+			object_ptr<Ui::SettingsButton>(
+				ctx.container,
+				tr::lng_mtslink_settings_copy_ids(),
+				st::settingsButtonNoIcon));
+		button->toggleOn(
+			rpl::single(MtsLink::copyIdsEnabled())
+		)->toggledValue(
+		) | rpl::on_next([](bool enabled) {
+			MtsLink::setCopyIdsEnabled(enabled);
+		}, button->lifetime());
+		return SectionBuilder::WidgetToAdd{};
+	}, [] {
+		return SearchEntry{
+			.id = u"advanced/mtslink_developers/copy_ids"_q,
+			.title = tr::lng_mtslink_settings_copy_ids(tr::now),
+			.keywords = { u"id"_q, u"copy"_q },
+		};
+	});
+	builder.addSkip();
+	builder.addDividerText(tr::lng_mtslink_settings_copy_ids_about());
 }
 
 // The connection of TeleLink: the system proxy or none. The Telegram proxy
@@ -1411,6 +1445,7 @@ const auto kMeta = BuildHelper({
 		BuildUpdateSection(builder, true);
 	}
 	BuildMtsLinkConferencesSection(builder);
+	BuildMtsLinkDevelopersSection(builder);
 	BuildDataStorageSection(builder);
 	BuildAutoDownloadSection(builder);
 	BuildWindowTitleSection(builder);

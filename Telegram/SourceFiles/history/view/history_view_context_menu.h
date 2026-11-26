@@ -65,6 +65,12 @@ void InsertPollVoteRestrictionsLabel(
 	not_null<HistoryItem*> item,
 	not_null<PollData*> poll);
 
+// MTS Link: "Copy message ID" (if on in the advanced settings).
+void AddCopyMtsLinkIdAction(
+	not_null<Ui::PopupMenu*> menu,
+	not_null<Window::SessionController*> controller,
+	HistoryItem *item);
+
 void CopyPostLink(
 	not_null<Window::SessionController*> controller,
 	FullMsgId itemId,

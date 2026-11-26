@@ -141,6 +141,11 @@ void addThreadEntryUnread(
 // The empty badge of a chat: a thread without the subscription there has
 // new messages (the dot on its loaded root, or the new replies to a root
 // not loaded yet).
+// The "Copy chat ID" / "Copy message ID" items in the context menus (an
+// advanced setting, off by default).
+[[nodiscard]] bool copyIdsEnabled();
+void setCopyIdsEnabled(bool enabled);
+
 // How the users are named in the chat list.
 enum class NameOrder {
 	FirstLast = 0,

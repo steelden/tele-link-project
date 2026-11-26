@@ -6803,6 +6803,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_meetings_remind_in#one" = "In {count} minute";
 "lng_mtslink_meetings_remind_in#other" = "In {count} minutes";
 "lng_mtslink_meetings_show_past" = "Show past days";
+"lng_mtslink_settings_developers" = "For developers";
+"lng_mtslink_settings_copy_ids" = "Copy IDs in the context menus";
+"lng_mtslink_settings_copy_ids_about" = "The \"Copy chat ID\" and \"Copy message ID\" items in the context menus of the chats and the messages.";
+"lng_mtslink_copy_chat_id" = "Copy chat ID";
+"lng_mtslink_copy_message_id" = "Copy message ID";
+"lng_mtslink_id_copied" = "ID copied to clipboard";
 "lng_mtslink_meetings_future" = "Future";
 "lng_mtslink_meetings_count_days" = "Days ahead in the chats list";
 "lng_mtslink_meetings_count_weeks" = "Weeks ahead in the chats list";

@@ -389,6 +389,7 @@ private:
 	void addCopyLink();
 	void addToggleFolder();
 	void addToggleUnreadMark();
+	void addCopyChatId();
 	void addToggleArchive();
 	void addRefreshChat();
 	void addClearHistory();
@@ -2163,7 +2164,25 @@ void Filler::fillContextMenuActions() {
 	addDeleteChat();
 	addLeaveChat();
 	addDeleteTopic();
+	addCopyChatId();
 	addRefreshChat();
+}
+
+void Filler::addCopyChatId() {
+	if (!_peer || !MtsLink::copyIdsEnabled()) {
+		return;
+	}
+	const auto chatId = MtsLink::peerIdToChatId(_peer->id);
+	if (chatId.isEmpty()) {
+		return;
+	}
+	const auto weak = base::make_weak(_controller);
+	_addAction(tr::lng_mtslink_copy_chat_id(tr::now), [=] {
+		QGuiApplication::clipboard()->setText(chatId);
+		if (const auto strong = weak.get()) {
+			strong->showToast(tr::lng_mtslink_id_copied(tr::now));
+		}
+	}, &st::menuIconCopy);
 }
 
 void Filler::fillHistoryActions() {

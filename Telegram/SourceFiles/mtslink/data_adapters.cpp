@@ -11182,6 +11182,33 @@ base::options::option<int> OptionNameOrder({
 });
 int NameOrderVersion = 0;
 
+namespace {
+
+constexpr auto kCopyIdsKey = "copyIdsEnabled";
+
+[[nodiscard]] bool &CopyIdsEnabled() {
+	static auto result = readLocalSettings().value(
+		QString::fromLatin1(kCopyIdsKey)).toBool();
+	return result;
+}
+
+} // namespace
+
+bool copyIdsEnabled() {
+	return CopyIdsEnabled();
+}
+
+void setCopyIdsEnabled(bool enabled) {
+	if (CopyIdsEnabled() == enabled) {
+		return;
+	}
+	CopyIdsEnabled() = enabled;
+	auto settings = readLocalSettings();
+	settings.insert(QString::fromLatin1(kCopyIdsKey), enabled);
+	writeLocalSettings(settings);
+	LOG(("MtsLink: the copy of the ids %1").arg(enabled ? "on" : "off"));
+}
+
 NameOrder nameOrder() {
 	return (OptionNameOrder.value() == int(NameOrder::LastFirst))
 		? NameOrder::LastFirst
