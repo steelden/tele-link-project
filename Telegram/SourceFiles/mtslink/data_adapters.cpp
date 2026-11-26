@@ -5627,8 +5627,11 @@ HistoryItem *addMessage(
 			// All the reactions removed (missed the event).
 			existing->updateReactions(nullptr);
 		}
-		if (src.type == MessageType::Text && !existing->isSending()) {
-			// Edited (missed the event): the text of the server.
+		if ((src.type == MessageType::Text
+				|| src.type == MessageType::Forward)
+			&& !existing->isSending()) {
+			// Edited (missed the event), parsed by a newer version (the
+			// cached forwarded ones too): the text of the server.
 			auto text = parseMentionedText(
 				src.text,
 				src.markdown,
