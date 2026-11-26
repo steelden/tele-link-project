@@ -44,7 +44,9 @@ public:
 		const MessageId &messageId,
 		const QString &text,
 		const QJsonArray &blocks = {},
-		const QJsonArray &mentionsMeta = {});
+		const QJsonArray &mentionsMeta = {},
+		std::function<void()> done = nullptr,
+		std::function<void(const QString &error)> fail = nullptr);
 
 	// The same message of the same chat is read once (the chat read was
 	// sent again on each scroll / redraw of an open chat).

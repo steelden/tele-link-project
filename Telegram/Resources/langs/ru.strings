@@ -7303,6 +7303,8 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_meetings_remind_in#many" = "Через {count} минут";
 "lng_mtslink_meetings_remind_in#other" = "Через {count} минуты";
 "lng_mtslink_meetings_show_past" = "Показывать прошедшие дни";
+"lng_mtslink_edit_failed" = "Сообщение не изменено: сервер не принял изменения";
+"lng_mtslink_edit_failed_details" = "Сервер не принял изменения сообщения, они видны только вам.\n\nОшибка: {error}\n\nИзмените сообщение ещё раз или обновите чат, чтобы увидеть текст на сервере.";
 "lng_mtslink_meetings_till" = "до {time}";
 "lng_mtslink_meetings_duration_till" = "{duration} до {time}";
 "lng_mtslink_meetings_minutes#one" = "{count} минута";

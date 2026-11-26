@@ -6803,6 +6803,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_meetings_remind_in#one" = "In {count} minute";
 "lng_mtslink_meetings_remind_in#other" = "In {count} minutes";
 "lng_mtslink_meetings_show_past" = "Show past days";
+"lng_mtslink_edit_failed" = "The message was not edited, the server did not accept the changes";
+"lng_mtslink_edit_failed_details" = "The server did not accept the changes of the message, they are shown only to you.\n\nThe error: {error}\n\nEdit the message again or refresh the chat to see its text on the server.";
 "lng_mtslink_meetings_till" = "till {time}";
 "lng_mtslink_meetings_duration_till" = "{duration} till {time}";
 "lng_mtslink_meetings_minutes#one" = "{count} minute";

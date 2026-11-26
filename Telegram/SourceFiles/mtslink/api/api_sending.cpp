@@ -100,7 +100,9 @@ void Sending::editMessage(
 		const MessageId &messageId,
 		const QString &text,
 		const QJsonArray &blocks,
-		const QJsonArray &mentionsMeta) {
+		const QJsonArray &mentionsMeta,
+		std::function<void()> done,
+		std::function<void(const QString &error)> fail) {
 	QJsonObject param;
 	param["chatId"] = chatId;
 	param["messageId"] = messageId;
@@ -122,11 +124,60 @@ void Sending::editMessage(
 			{"value", QJsonObject{{"mentions", mentionsMeta}}},
 		};
 	}
+	// Temporary: an edit with a quote was not applied by the server.
+	LOG(("MtsLink Edit: %1 text=[%2] blocks=%3"
+		).arg(messageId
+		).arg(text
+		).arg(QString::fromUtf8(
+			QJsonDocument(param["blocks"].toArray()).toJson(
+				QJsonDocument::Compact))));
 	_rpc->call(
 		"Chat.UpdateMessage",
 		param,
-		[this, chatId, messageId](const QJsonObject &) {
+		[this, chatId, messageId, done, fail](const QJsonObject &result) {
+			LOG(("MtsLink Edit: %1 done: %2"
+				).arg(messageId
+				).arg(QString::fromUtf8(
+					QJsonDocument(result).toJson(QJsonDocument::Compact))));
+			// A check of the server ("validationError", ...) comes as an
+			// answer, not as a failure: the edit is not applied.
+			const auto type = result.value(u"type"_q).toString();
+			if (type.endsWith(u"Error"_q)) {
+				// "validationError: ERR_INVALID_LINK_ELEMENT_URL (blocks):
+				// invalid url".
+				auto details = QStringList();
+				const auto errors = result.value(u"value"_q).toObject().value(
+					u"errors"_q).toArray();
+				for (const auto &entry : errors) {
+					const auto error = entry.toObject();
+					auto line = error.value(u"code"_q).toString();
+					const auto field = error.value(u"field"_q).toString();
+					if (!field.isEmpty()) {
+						line += u" ("_q + field + u")"_q;
+					}
+					const auto message = error.value(u"message"_q).toString();
+					if (!message.isEmpty()) {
+						line += u": "_q + message;
+					}
+					details.push_back(line);
+				}
+				if (fail) {
+					fail(details.isEmpty()
+						? type
+						: (type + u"\n"_q + details.join(u"\n"_q)));
+				}
+				return;
+			}
 			Q_EMIT messageEditDone(chatId, messageId);
+			if (done) {
+				done();
+			}
+		},
+		[messageId, fail](const QString &error) {
+			LOG(("MtsLink Edit: %1 failed: %2").arg(messageId, error));
+			if (fail) {
+				fail(error);
+			}
 		});
 }
 

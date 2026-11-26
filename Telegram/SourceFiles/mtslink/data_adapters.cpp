@@ -9186,7 +9186,16 @@ MtsLinkMessageContent convertMentionsForSending(
 	struct BlockquoteRange { int offset, length; };
 	QList<BlockquoteRange> blockquoteRanges;
 
+	// The tags of the same range are joined ("a quote and a link" is
+	// ">\\https://..."): each of them separately.
+	auto splitTags = TextWithTags::Tags();
 	for (const auto &tag : tags) {
+		for (const auto &part : TextUtilities::SplitTags(tag.id)) {
+			splitTags.push_back({ tag.offset, tag.length, part.toString() });
+		}
+	}
+
+	for (const auto &tag : splitTags) {
 		if (TextUtilities::IsMentionLink(tag.id)) {
 			const auto data = TextUtilities::MentionEntityData(tag.id);
 			if (data.isEmpty()) continue;
@@ -9588,6 +9597,46 @@ void searchChatMembersForMention(
 			updated();
 		}
 	});
+}
+
+namespace {
+
+[[nodiscard]] base::flat_set<FullMsgId> &PendingEdits() {
+	static auto result = base::flat_set<FullMsgId>();
+	return result;
+}
+
+[[nodiscard]] base::flat_map<FullMsgId, QString> &EditErrors() {
+	static auto result = base::flat_map<FullMsgId, QString>();
+	return result;
+}
+
+} // namespace
+
+QString editError(FullMsgId itemId) {
+	const auto i = EditErrors().find(itemId);
+	return (i != EditErrors().end()) ? i->second : QString();
+}
+
+void setEditError(FullMsgId itemId, const QString &error) {
+	if (error.isEmpty()) {
+		EditErrors().remove(itemId);
+	} else {
+		EditErrors()[itemId] = error;
+	}
+}
+
+bool isEditPending(FullMsgId itemId) {
+	return PendingEdits().contains(itemId);
+}
+
+void setEditPending(FullMsgId itemId, bool pending) {
+	if (pending) {
+		PendingEdits().emplace(itemId);
+		EditErrors().remove(itemId);
+	} else {
+		PendingEdits().remove(itemId);
+	}
 }
 
 bool isMtsLinkUrl(const QString &url) {

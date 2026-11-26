@@ -659,6 +659,13 @@ void searchChatMembersForMention(
 	Fn<void()> updated);
 
 [[nodiscard]] bool isMtsLinkUrl(const QString &url);
+// An edit of the message is sent, not answered yet: shown as sending.
+[[nodiscard]] bool isEditPending(FullMsgId itemId);
+void setEditPending(FullMsgId itemId, bool pending);
+// The edit was not applied by the server: the error mark in the corner of
+// the message, the details by a click (till the next edit).
+[[nodiscard]] QString editError(FullMsgId itemId);
+void setEditError(FullMsgId itemId, const QString &error);
 void handleMtsLinkUrl(
 	const QString &url,
 	const QVariant &context);

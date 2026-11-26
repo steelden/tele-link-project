@@ -21,6 +21,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_helpers.h"
 #include "history/history_item.h"
 #include "history/history.h"
+#include "mtslink/data_adapters.h"
+#include "ui/boxes/confirm_box.h"
+#include "window/window_session_controller.h"
+#include "styles/style_boxes.h"
 #include "history/view/media/history_view_media.h"
 #include "history/view/history_view_message.h"
 #include "history/view/history_view_cursor_state.h"
@@ -174,6 +178,27 @@ TextState BottomInfo::textState(
 	if (_data.flags & (Data::Flag::OutLayout | Data::Flag::Sending)) {
 		withTicksWidth += st::historySendStateSpace;
 	}
+	if ((_data.flags & Data::Flag::EditFailed)
+		&& QRect(
+			width() - st::historySendStateSpace,
+			0,
+			st::historySendStateSpace,
+			st::msgDateFont->height).contains(position)) {
+		// The details of the error of the edit.
+		const auto error = MtsLink::editError(item->fullId());
+		result.link = std::make_shared<LambdaClickHandler>([=](
+				ClickContext context) {
+			const auto my = context.other.value<ClickHandlerContext>();
+			if (const auto controller = my.sessionWindow.get()) {
+				controller->show(Ui::MakeInformBox(
+					tr::lng_mtslink_edit_failed_details(
+						tr::now,
+						lt_error,
+						error)));
+			}
+		});
+		return result;
+	}
 	if (!_views.isEmpty()) {
 		const auto viewsWidth = _views.maxWidth();
 		const auto right = width()
@@ -274,7 +299,25 @@ void BottomInfo::paint(
 
 	auto right = position.x() + width();
 	const auto firstLineBottom = position.y() + st::msgDateFont->height;
-	if (_data.flags & Data::Flag::OutLayout) {
+	if (_data.flags & Data::Flag::EditFailed) {
+		// The edit was not applied: a red circle with "!" (a click shows
+		// the error).
+		const auto size = st::msgDateFont->height - 2;
+		const auto rect = QRect(
+			right - st::historySendStateSpace
+				+ (st::historySendStateSpace - size) / 2,
+			position.y() + (st::msgDateFont->height - size) / 2,
+			size,
+			size);
+		auto hq = PainterHighQualityEnabler(p);
+		p.setPen(Qt::NoPen);
+		p.setBrush(st::attentionButtonFg);
+		p.drawEllipse(rect);
+		p.setPen(st::windowFgActive);
+		p.setFont(st::msgDateFont->bold());
+		p.drawText(rect, Qt::AlignCenter, u"!"_q);
+		right -= st::historySendStateSpace;
+	} else if (_data.flags & Data::Flag::OutLayout) {
 		const auto &icon = (_data.flags & Data::Flag::Sending)
 			? (inverted
 				? st->historySendingInvertedIcon()
@@ -712,7 +755,11 @@ BottomInfo::Data BottomInfoDataFromMessage(not_null<Message*> message) {
 			result.forwardsCount = views->forwardsCount;
 		}
 	}
-	if (item->isSending() || item->hasFailed()) {
+	if (!MtsLink::editError(item->fullId()).isEmpty()) {
+		result.flags |= Flag::EditFailed;
+	} else if (item->isSending()
+		|| item->hasFailed()
+		|| MtsLink::isEditPending(item->fullId())) {
 		result.flags |= Flag::Sending;
 	}
 	if (item->isEphemeral()

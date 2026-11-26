@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/random.h"
 #include "base/unixtime.h"
 #include "core/application.h"
+#include "window/window_controller.h"
 #include "ui/boxes/confirm_box.h"
 #include "data/business/data_shortcut_messages.h"
 #include "data/components/scheduled_messages.h"
@@ -575,12 +576,35 @@ mtpRequestId EditTextMessage(
 					}
 					return 0;
 				}
+					const auto session = &item->history()->session();
+				const auto itemId = item->fullId();
+				const auto refresh = [=] {
+					if (const auto i = session->data().message(itemId)) {
+						session->data().requestItemViewRefresh(i);
+					}
+				};
+				MtsLink::setEditPending(itemId, true);
 				mts->sending()->editMessage(
 					chatId,
 					mtsId,
 					content.text,
 					content.blocks,
-					content.mentionsMeta);
+					content.mentionsMeta,
+					crl::guard(session, [=] {
+						MtsLink::setEditPending(itemId, false);
+						refresh();
+					}),
+						crl::guard(session, [=](const QString &error) {
+						MtsLink::setEditPending(itemId, false);
+						// Not edited: the error mark, the details by a
+						// click on it (the text to be edited again).
+						MtsLink::setEditError(itemId, error);
+						refresh();
+						if (const auto window = Core::App().activeWindow()) {
+							window->showToast(
+								tr::lng_mtslink_edit_failed(tr::now));
+						}
+					}));
 				const auto localText = MtsLink::parseMentionedText(
 					content.text,
 					content.text,
