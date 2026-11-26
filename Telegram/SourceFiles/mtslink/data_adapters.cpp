@@ -1507,7 +1507,24 @@ TextWithEntities parseMentionedText(
 			if (closeB != -1
 				&& closeB + 1 < len
 				&& unescaped[closeB + 1] == '(') {
-				const auto closeP = unescaped.indexOf(')', closeB + 2);
+				// The closing parenthesis of the url: the balanced ones are
+				// in it (a Confluence anchor "#Stands(...)-...(...)").
+				auto closeP = -1;
+				auto depth = 0;
+				for (auto i = closeB + 2; i < len; ++i) {
+					const auto ch = unescaped[i];
+					if (ch == QChar('\n')) {
+						break;
+					} else if (ch == '(') {
+						++depth;
+					} else if (ch == ')') {
+						if (!depth) {
+							closeP = i;
+							break;
+						}
+						--depth;
+					}
+				}
 				if (closeP != -1) {
 					const auto linkText = unescaped.mid(pos + 1, closeB - pos - 1);
 					const auto linkUrl = unescaped.mid(closeB + 2, closeP - closeB - 2);
