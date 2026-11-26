@@ -666,6 +666,10 @@ void setEditPending(FullMsgId itemId, bool pending);
 // the message, the details by a click (till the next edit).
 [[nodiscard]] QString editError(FullMsgId itemId);
 void setEditError(FullMsgId itemId, const QString &error);
+// An address opened in TeleLink itself: a chat or a message
+// (/chats/...), a meeting (/j/...), a call record, a short link (/r/...).
+// The hidden links to it are opened without the confirmation.
+[[nodiscard]] bool isInternalMtsLinkUrl(const QUrl &url);
 void handleMtsLinkUrl(
 	const QString &url,
 	const QVariant &context);

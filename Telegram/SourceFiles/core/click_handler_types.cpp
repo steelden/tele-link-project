@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/click_handler_types.h"
+#include "mtslink/data_adapters.h"
 
 #include "base/unixtime.h"
 #include "lang/lang_keys.h"
@@ -193,6 +194,10 @@ constexpr auto kReminderSetToastDuration = 4 * crl::time(1000);
 [[nodiscard]] bool HiddenUrlRequiresConfirmation(
 		const QUrl &url,
 		const ClickHandlerContext &my) {
+	// MTS Link: the chats and the meetings are opened in TeleLink itself.
+	if (MtsLink::isInternalMtsLinkUrl(url)) {
+		return false;
+	}
 	return !HostInDomains(url.host(), WhitelistedDomains(my))
 		|| IsTelegramShortLinkHost(url);
 }

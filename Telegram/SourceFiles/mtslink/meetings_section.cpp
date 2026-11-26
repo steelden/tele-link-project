@@ -9,6 +9,13 @@ a desktop application based on Telegram Desktop.
 #include "mtslink/data_adapters.h"
 #include "mtslink/call_window.h"
 #include "base/event_filter.h"
+#include "api/api_common.h"
+#include "apiwrap.h"
+#include "data/data_thread.h"
+#include "data/data_changes.h"
+#include "data/data_drafts.h"
+#include "data/data_chat_participant_status.h"
+#include "window/window_peer_menu.h"
 #include "base/timer.h"
 #include "core/application.h"
 #include "core/core_settings.h"
@@ -48,6 +55,8 @@ a desktop application based on Telegram Desktop.
 #include "styles/style_widgets.h"
 
 #include <QtCore/QBuffer>
+#include <QtGui/QClipboard>
+#include <QtGui/QGuiApplication>
 #include <QtCore/QJsonArray>
 
 namespace MtsLink {
@@ -1356,6 +1365,28 @@ protected:
 		}
 	}
 
+	// Any meeting is sent to a chat, the link of MTS Link is copied.
+	void contextMenuEvent(QContextMenuEvent *e) override {
+		_menu = base::make_unique_q<Ui::PopupMenu>(
+			this,
+			st::popupMenuWithIcons);
+		const auto weak = base::make_weak(_controller);
+		if (const auto link = _link; !link.isEmpty()) {
+			_menu->addAction(tr::lng_mtslink_meetings_copy_link(tr::now), [=] {
+				QGuiApplication::clipboard()->setText(link);
+				if (const auto strong = weak.get()) {
+					strong->showToast(tr::lng_mtslink_meetings_link_copied(
+						tr::now));
+				}
+			}, &st::menuIconLink);
+		}
+		_menu->addAction(tr::lng_mtslink_meetings_forward(tr::now), [=] {
+			forwardLink();
+		}, &st::menuIconForward);
+		_menu->popup(e->globalPos());
+		e->accept();
+	}
+
 	void leaveEventHook(QEvent *e) override {
 		_tooltipShown = false;
 		Ui::Tooltip::Hide();
@@ -1534,6 +1565,84 @@ protected:
 	}
 
 private:
+	// A usual message: the subject, the time, the place, the link. The
+	// chat is opened with it in the field (to be edited and sent).
+	void forwardLink() {
+		// "Meeting: subject", the time, the place, the link of MTS Link as
+		// a text link "Join the meeting".
+		auto composed = TextWithEntities{
+			tr::lng_mtslink_meetings_forward_title(
+				tr::now,
+				lt_subject,
+				MeetingSubject(_meeting))
+			+ QChar('\n')
+			+ langDayOfMonthFull(_meeting.start.date())
+			+ u", "_q
+			+ MeetingTime(_meeting),
+		};
+		if (!_meeting.location.isEmpty() && _meeting.location != _link) {
+			composed.text += QChar('\n') + _meeting.location;
+		}
+		if (!_link.isEmpty()) {
+			const auto label = tr::lng_mtslink_meetings_join_link(tr::now);
+			composed.text += QChar('\n');
+			composed.entities.push_back(EntityInText(
+				EntityType::CustomUrl,
+				int(composed.text.size()),
+				int(label.size()),
+				_link));
+			composed.text += label;
+		}
+		// An empty line first (for a comment, the cursor in it), the
+		// meeting under it as a quote.
+		for (auto &entity : composed.entities) {
+			entity.shiftRight(1);
+		}
+		composed.text.insert(0, QChar('\n'));
+		composed.entities.insert(
+			composed.entities.begin(),
+			EntityInText(
+				EntityType::Blockquote,
+				1,
+				int(composed.text.size()) - 1));
+		const auto text = composed.text;
+		const auto tags = TextUtilities::ConvertEntitiesToTextTags(
+			composed.entities);
+		const auto weak = base::make_weak(_controller);
+		Window::ShowChooseRecipientBox(_controller, [=](
+				not_null<Data::Thread*> thread) {
+			const auto strong = weak.get();
+			if (!strong) {
+				return false;
+			} else if (!Data::CanSendTexts(thread)) {
+				strong->showToast(tr::lng_share_cant(tr::now));
+				return false;
+			}
+			// As the shared urls of Telegram: the local draft.
+			const auto history = thread->owningHistory();
+			const auto topicRootId = thread->topicRootId();
+			const auto monoforumPeerId = thread->monoforumPeerId();
+			history->setLocalDraft(std::make_unique<Data::Draft>(
+				TextWithTags{ text, tags },
+				FullReplyTo{
+					.topicRootId = topicRootId,
+					.monoforumPeerId = monoforumPeerId,
+				},
+				SuggestOptions(),
+				MessageCursor{ 0, 0, Ui::kQFixedMax },
+				Data::WebPageDraft()));
+			history->clearLocalEditDraft(topicRootId, monoforumPeerId);
+			history->session().changes().entryUpdated(
+				thread,
+				Data::EntryUpdate::Flag::LocalDraftSet);
+			strong->showThread(
+				thread,
+				ShowAtUnreadMsgId,
+				Window::SectionShow::Way::ClearStack);
+			return true;
+		});
+	}
+
 	// The lines of the text: the subject, the time and the place, the
 	// people.
 	[[nodiscard]] int textHeight() const {
@@ -1656,6 +1765,7 @@ private:
 	bool _tooltipShown = false;
 	Ui::IconButton *_call = nullptr;
 	Ui::Animations::Simple _flash;
+	base::unique_qptr<Ui::PopupMenu> _menu;
 
 };
 

@@ -124,21 +124,10 @@ void Sending::editMessage(
 			{"value", QJsonObject{{"mentions", mentionsMeta}}},
 		};
 	}
-	// Temporary: an edit with a quote was not applied by the server.
-	LOG(("MtsLink Edit: %1 text=[%2] blocks=%3"
-		).arg(messageId
-		).arg(text
-		).arg(QString::fromUtf8(
-			QJsonDocument(param["blocks"].toArray()).toJson(
-				QJsonDocument::Compact))));
 	_rpc->call(
 		"Chat.UpdateMessage",
 		param,
 		[this, chatId, messageId, done, fail](const QJsonObject &result) {
-			LOG(("MtsLink Edit: %1 done: %2"
-				).arg(messageId
-				).arg(QString::fromUtf8(
-					QJsonDocument(result).toJson(QJsonDocument::Compact))));
 			// A check of the server ("validationError", ...) comes as an
 			// answer, not as a failure: the edit is not applied.
 			const auto type = result.value(u"type"_q).toString();
@@ -161,10 +150,12 @@ void Sending::editMessage(
 					}
 					details.push_back(line);
 				}
+				const auto error = details.isEmpty()
+					? type
+					: (type + u"\n"_q + details.join(u"\n"_q));
+				LOG(("MtsLink Edit: %1 failed: %2").arg(messageId, error));
 				if (fail) {
-					fail(details.isEmpty()
-						? type
-						: (type + u"\n"_q + details.join(u"\n"_q)));
+					fail(error);
 				}
 				return;
 			}

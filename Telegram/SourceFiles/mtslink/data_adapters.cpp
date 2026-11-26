@@ -9639,6 +9639,21 @@ void setEditPending(FullMsgId itemId, bool pending) {
 	}
 }
 
+bool isInternalMtsLinkUrl(const QUrl &original) {
+	// A link in a text may come without the scheme.
+	const auto url = original.host().isEmpty()
+		? QUrl::fromUserInput(original.toString())
+		: original;
+	if (!url.host().endsWith(u"mts-link.ru"_q, Qt::CaseInsensitive)) {
+		return false;
+	}
+	const auto path = url.path();
+	return path.startsWith(u"/j/"_q)
+		|| path.startsWith(u"/chats/"_q)
+		|| path.startsWith(u"/r/"_q)
+		|| path.contains(u"/record-new/"_q);
+}
+
 bool isMtsLinkUrl(const QString &url) {
 	const auto lower = url.toLower();
 	return lower.contains(u"mts-link.ru/"_q)
