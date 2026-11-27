@@ -1890,6 +1890,38 @@ void SetupMessages(
 		});
 	}
 
+	// MTS Link: the thread message at the top of a thread at first.
+	{
+		const auto current = std::make_shared<rpl::variable<bool>>(
+			MtsLink::threadRootCollapsed());
+		const auto text = [](bool collapsed) {
+			return collapsed
+				? tr::lng_mtslink_thread_root_collapsed(tr::now)
+				: tr::lng_mtslink_thread_root_expanded(tr::now);
+		};
+		const auto button = AddButtonWithLabel(
+			container,
+			tr::lng_mtslink_thread_root(),
+			current->value() | rpl::map(text),
+			st::settingsButton,
+			{ &st::menuIconPin });
+		button->addClickHandler([=] {
+			const auto options = std::vector<QString>{
+				text(false),
+				text(true),
+			};
+			controller->show(Box(SingleChoiceBox, SingleChoiceBoxArgs{
+				.title = tr::lng_mtslink_thread_root(),
+				.options = options,
+				.initialSelection = current->current() ? 1 : 0,
+				.callback = [=](int index) {
+					*current = (index == 1);
+					MtsLink::setThreadRootCollapsed(index == 1);
+				},
+			}));
+		});
+	}
+
 	// MTS Link: the order of the pinned chats.
 	{
 		using Sort = MtsLink::PinnedSort;

@@ -379,18 +379,16 @@ void TopControls::setupRootView() {
 		return _controller->isGifPausedAtLeastFor(Window::GifPauseReason::Any);
 	}, _controller->gifPauseLevelChanged());
 	// MTS Link: the thread message of a few lines is collapsed to one,
-	// remembered for the thread while running (not saved).
-	static auto Collapsed = base::flat_set<std::pair<PeerId, MsgId>>();
+	// by the setting at first, a toggle remembered for the thread while
+	// running (not saved).
+	static auto Collapsed = base::flat_map<std::pair<PeerId, MsgId>, bool>();
 	const auto key = std::make_pair(_history->peer->id, _repliesRootId);
+	const auto i = Collapsed.find(key);
 	_repliesRootView->setCollapsible(
 		true,
-		Collapsed.contains(key),
+		(i != Collapsed.end()) ? i->second : MtsLink::threadRootCollapsed(),
 		[=](bool collapsed) {
-			if (collapsed) {
-				Collapsed.emplace(key);
-			} else {
-				Collapsed.remove(key);
-			}
+			Collapsed[key] = collapsed;
 		});
 	_repliesRootView->setContent(rpl::combine(
 		RootViewContent(

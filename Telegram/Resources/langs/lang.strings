@@ -6606,6 +6606,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mtslink_thread_rows" = "Threads in the chat list";
 "lng_mtslink_thread_rows_two" = "2 lines";
 "lng_mtslink_thread_rows_three" = "3 lines";
+"lng_mtslink_thread_root" = "Thread message in a thread";
+"lng_mtslink_thread_root_expanded" = "Expanded";
+"lng_mtslink_thread_root_collapsed" = "Collapsed";
 "lng_mtslink_threads_background" = "Thread wallpaper";
 "lng_mtslink_threads_background_reset" = "Reset to chat wallpaper";
 "lng_mtslink_threads_background_apply" = "Apply to threads";

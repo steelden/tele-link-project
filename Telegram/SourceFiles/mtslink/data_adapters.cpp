@@ -11393,6 +11393,19 @@ bool threadRowsThreeLines() {
 	return !OptionThreadRowsTwoLines.value();
 }
 
+base::options::option<bool> OptionThreadRootCollapsed({
+	.id = "mtslink-thread-root-collapsed",
+	.name = "The thread message collapsed in a thread",
+});
+
+bool threadRootCollapsed() {
+	return OptionThreadRootCollapsed.value();
+}
+
+void setThreadRootCollapsed(bool collapsed) {
+	OptionThreadRootCollapsed.set(collapsed);
+}
+
 void setThreadRowsThreeLines(not_null<Main::Session*> session, bool three) {
 	if (threadRowsThreeLines() == three) {
 		return;

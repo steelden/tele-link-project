@@ -438,6 +438,10 @@ HistoryItem *addMessage(
 // message, the last comment) or two (the chat, the thread message).
 [[nodiscard]] bool threadRowsThreeLines();
 void setThreadRowsThreeLines(not_null<Main::Session*> session, bool three);
+// The thread message pinned at the top of a thread: collapsed to one line
+// when the thread is opened (else expanded), till toggled in the thread.
+[[nodiscard]] bool threadRootCollapsed();
+void setThreadRootCollapsed(bool collapsed);
 
 [[nodiscard]] HistoryItem *threadLastComment(
 	not_null<Main::Session*> session,

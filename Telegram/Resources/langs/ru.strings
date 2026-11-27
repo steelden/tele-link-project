@@ -7092,6 +7092,9 @@ with the TeleLink / MTS Link specific strings on top of it.
 "lng_mtslink_thread_rows" = "Обсуждения в списке";
 "lng_mtslink_thread_rows_two" = "2 строки";
 "lng_mtslink_thread_rows_three" = "3 строки";
+"lng_mtslink_thread_root" = "Первое сообщение в обсуждении";
+"lng_mtslink_thread_root_expanded" = "Развёрнуто";
+"lng_mtslink_thread_root_collapsed" = "Свёрнуто";
 "lng_mtslink_threads_background" = "Обои для обсуждений";
 "lng_mtslink_threads_background_reset" = "Вернуть как у чатов";
 "lng_mtslink_threads_background_apply" = "Применить для обсуждений";
