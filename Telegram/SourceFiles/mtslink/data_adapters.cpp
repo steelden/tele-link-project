@@ -506,10 +506,111 @@ void restoreServerPinnedOrder(not_null<Main::Session*> session) {
 	}
 }
 
+// The own order of the pinned chats (dragged by the user): by the chat
+// ids, of the account, in the local settings.
+constexpr auto kCustomPinnedOrderKey = "customPinnedOrder";
+QString CustomPinnedOrderAccount;
+std::vector<QString> CustomPinnedOrder;
+// The order came from the server (or the setting changed): the own order
+// is applied once (not on every sync: a drag is not taken back).
+bool CustomPinnedOrderPending = true;
+
+[[nodiscard]] const std::vector<QString> &customPinnedOrder(
+		not_null<Main::Session*> session) {
+	const auto mts = session->account().mtsLinkSession();
+	const auto account = mts ? mts->userId() : QString();
+	if (CustomPinnedOrderAccount != account) {
+		CustomPinnedOrderAccount = account;
+		CustomPinnedOrder.clear();
+		const auto all = readLocalSettings().value(
+			QString::fromLatin1(kCustomPinnedOrderKey)).toObject();
+		for (const auto &id : all.value(account).toArray()) {
+			CustomPinnedOrder.push_back(id.toString());
+		}
+	}
+	return CustomPinnedOrder;
+}
+
+void writeCustomPinnedOrder() {
+	auto ids = QJsonArray();
+	for (const auto &id : CustomPinnedOrder) {
+		ids.push_back(id);
+	}
+	auto settings = readLocalSettings();
+	auto all = settings.value(
+		QString::fromLatin1(kCustomPinnedOrderKey)).toObject();
+	all.insert(CustomPinnedOrderAccount, ids);
+	settings.insert(QString::fromLatin1(kCustomPinnedOrderKey), all);
+	writeLocalSettings(settings);
+}
+
+// A chat pinned (the first one) or unpinned on the server: in the own
+// order too (if there is one, else the order of the server is used).
+void updateCustomPinnedOrder(
+		not_null<Main::Session*> session,
+		const QString &chatId,
+		bool pinned) {
+	const auto &custom = customPinnedOrder(session);
+	if (custom.empty()) {
+		return;
+	}
+	auto updated = custom;
+	updated.erase(ranges::remove(updated, chatId), end(updated));
+	if (pinned) {
+		updated.insert(begin(updated), chatId);
+	}
+	if (updated == custom) {
+		return;
+	}
+	CustomPinnedOrder = std::move(updated);
+	writeCustomPinnedOrder();
+}
+
+// The own order over the order of the server: the chats not in it (pinned
+// after the last drag) first, as pinned.
+void applyCustomPinnedOrder(not_null<Main::Session*> session) {
+	if (!base::take(CustomPinnedOrderPending)) {
+		return;
+	}
+	const auto &custom = customPinnedOrder(session);
+	if (custom.empty()) {
+		restoreServerPinnedOrder(session);
+		return;
+	}
+	const auto pinned = session->data().chatsList()->pinned();
+	auto order = pinned->order();
+	const auto from = std::stable_partition(
+		order.begin(),
+		order.end(),
+		[&](const Dialogs::Key &key) {
+			return !key.history() || IsFavoritesKey(key);
+		});
+	const auto index = [&](const Dialogs::Key &key) {
+		const auto i = ranges::find(
+			custom,
+			peerIdToChatId(key.history()->peer->id));
+		return (i == end(custom)) ? -1 : int(i - begin(custom));
+	};
+	std::stable_sort(from, order.end(), [&](
+			const Dialogs::Key &a,
+			const Dialogs::Key &b) {
+		return index(a) < index(b);
+	});
+	if (order != pinned->order()) {
+		pinned->applyOrder(std::move(order));
+	}
+}
+
 // The pinned chats of the main list sorted by the setting.
 void sortMainPinned(not_null<Main::Session*> session) {
 	const auto sort = pinnedSort();
 	if (sort == PinnedSort::Manual) {
+		applyCustomPinnedOrder(session);
+		return;
+	} else if (sort == PinnedSort::Server) {
+		if (base::take(CustomPinnedOrderPending)) {
+			restoreServerPinnedOrder(session);
+		}
 		return;
 	}
 	const auto pinned = session->data().chatsList()->pinned();
@@ -6797,6 +6898,8 @@ void handleChatEvent(
 			return;
 		}
 		// Pinned on the server: the first one.
+		CustomPinnedOrderPending = true;
+		updateCustomPinnedOrder(session, eventChatId, true);
 		ServerPinnedOrder.erase(
 			ranges::remove(ServerPinnedOrder, eventChatId),
 			end(ServerPinnedOrder));
@@ -6815,6 +6918,8 @@ void handleChatEvent(
 		if (!hasChatId(peerId)) {
 			return;
 		}
+		CustomPinnedOrderPending = true;
+		updateCustomPinnedOrder(session, eventChatId, false);
 		ServerPinnedOrder.erase(
 			ranges::remove(ServerPinnedOrder, eventChatId),
 			end(ServerPinnedOrder));
@@ -9047,6 +9152,7 @@ void applyChatList(
 			|| ch.type == ChatType::Favorites;
 	};
 	ServerPinnedOrder.clear();
+	CustomPinnedOrderPending = true;
 	for (const auto &ch : channels) {
 		if (isDialogType(ch) && (ch.isPinned || ch.type == ChatType::Favorites)) {
 			ServerPinnedOrder.push_back(ch.id);
@@ -11564,16 +11670,35 @@ QString chatListUserName(not_null<UserData*> user) {
 PinnedSort pinnedSort() {
 	const auto value = OptionPinnedSort.value();
 	return (value > int(PinnedSort::Manual)
-		&& value <= int(PinnedSort::DateAsc))
+		&& value <= int(PinnedSort::Server))
 		? PinnedSort(value)
 		: PinnedSort::Manual;
 }
 
 void setPinnedSort(not_null<Main::Session*> session, PinnedSort sort) {
 	OptionPinnedSort.set(int(sort));
-	if (sort == PinnedSort::Manual) {
-		restoreServerPinnedOrder(session);
+	CustomPinnedOrderPending = true;
+	scheduleFolderPinsSync(session);
+}
+
+void saveCustomPinnedOrder(not_null<Main::Session*> session) {
+	const auto mts = session->account().mtsLinkSession();
+	if (!mts) {
+		return;
 	}
+	customPinnedOrder(session);
+	CustomPinnedOrder.clear();
+	for (const auto &key : session->data().chatsList()->pinned()->order()) {
+		const auto history = key.history();
+		if (!history || IsFavoritesKey(key)) {
+			continue;
+		}
+		const auto id = peerIdToChatId(history->peer->id);
+		if (!id.isEmpty()) {
+			CustomPinnedOrder.push_back(id);
+		}
+	}
+	writeCustomPinnedOrder();
 	scheduleFolderPinsSync(session);
 }
 

@@ -185,8 +185,9 @@ void toggleThreadPinnedLocally(
 	PeerId threadPeerId);
 void setHideUnreadCounterFor(not_null<History*> history, bool hide);
 
-// The order of the pinned chats: as on the server (manual), by the first
-// or the last name, by the last message, the Favorites stay first.
+// The order of the pinned chats: own (dragged here, kept over the order of
+// the server), by the first or the last name, by the last message, as on
+// the server (not dragged), the Favorites stay first.
 enum class PinnedSort {
 	Manual = 0,
 	NameAsc = 1,
@@ -195,9 +196,12 @@ enum class PinnedSort {
 	LastNameDesc = 4,
 	DateDesc = 5,
 	DateAsc = 6,
+	Server = 7,
 };
 [[nodiscard]] PinnedSort pinnedSort();
 void setPinnedSort(not_null<Main::Session*> session, PinnedSort sort);
+// The pinned chats of the main list were dragged: their order is own.
+void saveCustomPinnedOrder(not_null<Main::Session*> session);
 // The last message of a pinned chat changed: sorted again by the date.
 void pinnedChatDateChanged(not_null<Main::Session*> session);
 

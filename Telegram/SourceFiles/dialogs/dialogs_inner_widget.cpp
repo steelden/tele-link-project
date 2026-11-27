@@ -2835,6 +2835,10 @@ void InnerWidget::savePinnedOrder() {
 		Api::SaveNewFilterPinned(&session(), _filterId);
 	} else {
 		session().api().savePinnedOrder(_openedFolder);
+		if (!_openedFolder) {
+			// MTS Link: the order is not on the server, kept here.
+			MtsLink::saveCustomPinnedOrder(&session());
+		}
 	}
 }
 

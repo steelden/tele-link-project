@@ -1926,6 +1926,7 @@ void SetupMessages(
 	{
 		using Sort = MtsLink::PinnedSort;
 		static const auto kSorts = std::vector<Sort>{
+			Sort::Server,
 			Sort::Manual,
 			Sort::NameAsc,
 			Sort::NameDesc,
@@ -1950,6 +1951,8 @@ void SetupMessages(
 				return tr::lng_mtslink_pinned_sort_date_desc(tr::now);
 			case Sort::DateAsc:
 				return tr::lng_mtslink_pinned_sort_date_asc(tr::now);
+			case Sort::Server:
+				return tr::lng_mtslink_pinned_sort_server(tr::now);
 			}
 			return tr::lng_mtslink_pinned_sort_manual(tr::now);
 		};

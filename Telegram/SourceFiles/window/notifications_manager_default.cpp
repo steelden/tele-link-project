@@ -1317,6 +1317,10 @@ void Notification::leaveEventHook(QEvent *e) {
 
 void Notification::startHiding() {
 	if (!_history) return;
+	if (_customId) {
+		// MTS Link: a reminder of a meeting is kept till a click on it.
+		return;
+	}
 	hideSlow();
 }
 
